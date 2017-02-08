@@ -25,10 +25,6 @@ var LispHighlightRules = function() {
             regex : "%.*$"
         },
         {
-            token: ["storage.type.function-type.lithp", "text", "entity.name.function.lithp"],
-            regex: "(?:\\b(?:(def))\\b)(\\s+)((?:\\w|\\-|\\!|\\?)*)"
-        },
-        {
             token: ["punctuation.definition.constant.character.lithp", "constant.character.lithp"],
             regex: "(#)((?:\\w|[\\\\+-=<>'\"&#])+)"
         },
