@@ -66,56 +66,26 @@
 				</script>
 			</form>
 		</div>
-<pre id="editor">%
-% This is a sample Lithp script that will calculate the Fibonacci Orial of a number.
-% It was submitted as an entry to http://codegolf.stackexchange.com/questions/86944/fibonacci-orial
+<pre id="editor">% Sample: recurse
+%
+% Purpose: Demonstrate tail recursion via the recurse/* builtin.
+%
+%          Note that the stack depth remains constant when run
+%          with the debug mode flag.
 (
-	(import "lists")   % prod, map, seq
-
-	(def fib-orial #N :: (
-		(prod (map (seq 1 N) (scope #I::((fib I))))))
-	)
-
-	% Caches already calculated values
-	(var FL (dict))
-	(def fibFL #N :: (
-		(if (dict-present FL N) (
-			(dict-get FL N)
-		) (else (
-			(var I (fib N))
-			(set FL (dict-set FL N I))
-			(I)
-		)))
+	(def fac-recursive #N :: (
+		(def fac-r-inner #N,Acc :: (
+			(if (== 0 N) (
+				(Acc)
+			) (else (
+				(recurse (- N 1) (* N Acc))
+			)))
+		))
+		(fac-r-inner N 1)
 	))
 
-	% Select your implementation:
-	(var Impl 2)
-
-	(if (== 1 Impl) (
-		% Implementation 1: no caching, extremely slow (>15sec)
-		(def fib #N :: (
-			(if (< N 2) (
-				(1)
-			) (else (
-				(+ (fib (- N 1)) (fib (- N 2))))
-			))
-		))
-		(print (fib-orial 16))
-	) (else (
-		% Implementation 2: Caches using fibFL/1. Very fast.
-		(def fib #N :: (
-			(if (< N 2) (
-				(1)
-			) (else (
-				(+ (fibFL (- N 1)) (fibFL (- N 2))))
-			))
-		))
-		(each (seq 2 20) (scope #N :: (
-			(print (fib-orial N)))
-		))
-	)))
-)
-</pre>
+	(print (fac-recursive 100))
+)</pre>
 <script type="text/javascript">
 	var codeMatch = location.search.match(/^\?code=(.*?)(?:(&|$))/);
 	if(codeMatch) {
