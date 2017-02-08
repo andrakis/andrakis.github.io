@@ -63,21 +63,48 @@
 (
 	(import "lists")   % prod, map, seq
 
-	(def fib-orial #N::((prod (map (seq 1 N) (scope #I::((fib I)))))))
+	(def fib-orial #N :: (
+		(prod (map (seq 1 N) (scope #I::((fib I))))))
+	)
 
 	% Caches already calculated values
 	(var FL (dict))
-	(def fibFL #N::((if (dict-present FL N) ((dict-get FL N)) ((var I (fib N))(set FL (dict-set FL N I))(I)))))
+	(def fibFL #N :: (
+		(if (dict-present FL N) (
+			(dict-get FL N)
+		) (else (
+			(var I (fib N))
+			(set FL (dict-set FL N I))
+			(I)
+		)))
+	))
 
 	% Select your implementation:
-	% Implementation 1: no caching, very slow
-	%(def fib #N::((if (< N 2) (1) ((+ (fib (- N 1)) (fib (- N 2)))))))
-	% Implementation 2: Caches using fibFL/1. Very fast.
-	(def fib #N::((if (< N 2) (1) ((+ (fibFL (- N 2)) (fibFL (- N 1)))))))
+	(var Impl 2)
 
-	% Print a sequence or uncomment the print statement below to print a single result.
-	(each (seq 2 20) (scope #N :: ((print (fib-orial N)))))
-	%(print (fib-orial 2))
+	(if (== 1 Impl) (
+		% Implementation 1: no caching, extremely slow (>15sec)
+		(def fib #N :: (
+			(if (< N 2) (
+				(1)
+			) (else (
+				(+ (fib (- N 1)) (fib (- N 2))))
+			))
+		))
+		(print (fib-orial 16))
+	) (else (
+		% Implementation 2: Caches using fibFL/1. Very fast.
+		(def fib #N :: (
+			(if (< N 2) (
+				(1)
+			) (else (
+				(+ (fibFL (- N 1)) (fibFL (- N 2))))
+			))
+		))
+		(each (seq 2 20) (scope #N :: (
+			(print (fib-orial N)))
+		))
+	)))
 )
 </pre>
 		<div id="output">
@@ -89,7 +116,7 @@
 		<script src="src-min-noconflict/ace.js" type="text/javascript" charset="utf-8"></script>
 		<script>
 			var editor = ace.edit("editor");
-			editor.setTheme("ace/theme/twilight");
+			editor.setTheme("ace/theme/idle_fingers");
 			editor.session.setMode("ace/mode/lithp");
 		</script>
 		<script src="lithp-pkg.js" type="text/javascript"></script>

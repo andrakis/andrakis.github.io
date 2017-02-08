@@ -41,7 +41,11 @@
 		instance.setupDefinitions(result, "webide");
 		// Required on packaged Lithp
 		instance.Define(result, "__AST__", Lithp.Types.Atom("true"))
-		var timed = timeCall("Run code", () => instance.run(result));
-		console.log("Code run in " + timed[1] + "ms, result: " + timed[0]);
+		try {
+			var timed = timeCall("Run code", () => instance.run(result));
+			console.log("Code run in " + timed[1] + "ms, result: " + timed[0]);
+		} catch (e) {
+			console.log(e.stack);
+		}
 	}
 })();
