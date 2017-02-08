@@ -116,6 +116,12 @@
 	)))
 )
 </pre>
+<script type="text/javascript">
+	var codeMatch = location.search.match(/^\?code=(.*?)(?:(&|$))/);
+	if(codeMatch) {
+		document.getElementById('editor').textContent = "";
+	}
+</script>
 		<div id="output">
 			<label>Output:
 				<pre id="target"></pre>
