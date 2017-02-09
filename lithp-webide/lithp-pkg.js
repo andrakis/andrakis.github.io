@@ -4985,19 +4985,6 @@ module.exports=[
 							[
 								"print",
 								"\"Secondary jQuery init\""
-							],
-							[
-								"var",
-								"Divs",
-								[
-									"jQuery",
-									"\"div\""
-								]
-							],
-							[
-								"print",
-								"\"Divs: \"",
-								"Divs"
 							]
 						]
 					],
