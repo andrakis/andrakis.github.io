@@ -56,7 +56,6 @@ files['modules/lists.ast'] = require('lithp/modules/lists.json');
 files['modules/stream.ast'] = require('lithp/modules/stream.json');
 files['modules/stdlib.ast'] = require('lithp/modules/stdlib.json');
 files['modules/cache.ast'] = require('lithp/modules/cache.json');
-files['modules/module.ast'] = require('lithp/modules/module.json');
 files['modules/match.ast'] = require('lithp/modules/match.json');
 files['modules/assert.ast'] = require('lithp/modules/assert.json');
 files['modules/repl.ast'] = require('lithp/modules/repl.json');
@@ -64,14 +63,14 @@ files['modules/switch.ast'] = require('lithp/modules/switch.json');
 files['modules/class.ast'] = require('lithp/modules/class.json');
 files['modules/readline.ast'] = require('lithp/modules/readline.json');
 files['modules/math.ast'] = require('lithp/modules/math.json');
-files['webide/html.ast'] = require('./webide/html.json');
-files['webide/html-toolkit.ast'] = require('./webide/html-toolkit.json');
-files['webide/jquery-toolkit.ast'] = require('./webide/jquery-toolkit.json');
+files['modules/html.ast'] = require('./modules/html.json');
+files['modules/html-toolkit.ast'] = require('./modules/html-toolkit.json');
+files['modules/jquery-toolkit.ast'] = require('./modules/jquery-toolkit.json');
 files['webide/webide.ast'] = require('./webide/webide.json');
 module.exports = files;
 
 
-},{"./webide/html-toolkit.json":82,"./webide/html.json":83,"./webide/jquery-toolkit.json":84,"./webide/webide.json":85,"lithp/macro-test.json":10,"lithp/macro.json":11,"lithp/modules/assert.json":12,"lithp/modules/bignum.json":13,"lithp/modules/buffer.json":14,"lithp/modules/cache.json":15,"lithp/modules/class.json":16,"lithp/modules/file.json":17,"lithp/modules/lists.json":18,"lithp/modules/match.json":19,"lithp/modules/math.json":20,"lithp/modules/module.json":21,"lithp/modules/pivot.json":22,"lithp/modules/random.json":23,"lithp/modules/readline.json":24,"lithp/modules/repl.json":25,"lithp/modules/stderr.json":26,"lithp/modules/stdlib.json":27,"lithp/modules/stream.json":28,"lithp/modules/strings.json":29,"lithp/modules/switch.json":30,"lithp/modules/symbols.json":31,"lithp/repl.json":36,"lithp/samples/aspect.json":37,"lithp/samples/atoms.json":38,"lithp/samples/bf.json":39,"lithp/samples/bfib.json":40,"lithp/samples/calc.json":41,"lithp/samples/cipher.json":42,"lithp/samples/complex.json":43,"lithp/samples/definitions.json":44,"lithp/samples/eval.json":45,"lithp/samples/ext.json":46,"lithp/samples/factorial.json":47,"lithp/samples/fib.json":48,"lithp/samples/fndefs.json":49,"lithp/samples/forloop.json":50,"lithp/samples/infinite.json":51,"lithp/samples/interlace-strings.json":52,"lithp/samples/inverse.json":53,"lithp/samples/magic.json":54,"lithp/samples/map.json":55,"lithp/samples/md-template.json":56,"lithp/samples/module.json":57,"lithp/samples/module_lib.json":58,"lithp/samples/n-circles.json":59,"lithp/samples/oddword.json":60,"lithp/samples/one_to_ten.json":61,"lithp/samples/pairable.json":62,"lithp/samples/parser-bugs.json":63,"lithp/samples/pillow.json":64,"lithp/samples/pow.json":65,"lithp/samples/progruzzle-colf.json":66,"lithp/samples/readfile.json":67,"lithp/samples/recurse.json":68,"lithp/samples/scope.json":69,"lithp/samples/shorthand.json":70,"lithp/samples/simple.json":71,"lithp/samples/square.json":72,"lithp/samples/subchains.json":73,"lithp/samples/var_args.json":74,"lithp/samples/wall.json":75,"lithp/samples/while.json":76}],2:[function(require,module,exports){
+},{"./modules/html-toolkit.json":3,"./modules/html.json":4,"./modules/jquery-toolkit.json":5,"./webide/webide.json":84,"lithp/macro-test.json":13,"lithp/macro.json":14,"lithp/modules/assert.json":15,"lithp/modules/bignum.json":16,"lithp/modules/buffer.json":17,"lithp/modules/cache.json":18,"lithp/modules/class.json":19,"lithp/modules/file.json":20,"lithp/modules/lists.json":21,"lithp/modules/match.json":22,"lithp/modules/math.json":23,"lithp/modules/pivot.json":24,"lithp/modules/random.json":25,"lithp/modules/readline.json":26,"lithp/modules/repl.json":27,"lithp/modules/stderr.json":28,"lithp/modules/stdlib.json":29,"lithp/modules/stream.json":30,"lithp/modules/strings.json":31,"lithp/modules/switch.json":32,"lithp/modules/symbols.json":33,"lithp/repl.json":38,"lithp/samples/aspect.json":39,"lithp/samples/atoms.json":40,"lithp/samples/bf.json":41,"lithp/samples/bfib.json":42,"lithp/samples/calc.json":43,"lithp/samples/cipher.json":44,"lithp/samples/complex.json":45,"lithp/samples/definitions.json":46,"lithp/samples/eval.json":47,"lithp/samples/ext.json":48,"lithp/samples/factorial.json":49,"lithp/samples/fib.json":50,"lithp/samples/fndefs.json":51,"lithp/samples/forloop.json":52,"lithp/samples/infinite.json":53,"lithp/samples/interlace-strings.json":54,"lithp/samples/inverse.json":55,"lithp/samples/magic.json":56,"lithp/samples/map.json":57,"lithp/samples/md-template.json":58,"lithp/samples/module.json":59,"lithp/samples/module_lib.json":60,"lithp/samples/n-circles.json":61,"lithp/samples/oddword.json":62,"lithp/samples/one_to_ten.json":63,"lithp/samples/pairable.json":64,"lithp/samples/parser-bugs.json":65,"lithp/samples/pillow.json":66,"lithp/samples/pow.json":67,"lithp/samples/progruzzle-colf.json":68,"lithp/samples/readfile.json":69,"lithp/samples/recurse.json":70,"lithp/samples/scope.json":71,"lithp/samples/shorthand.json":72,"lithp/samples/simple.json":73,"lithp/samples/square.json":74,"lithp/samples/subchains.json":75,"lithp/samples/var_args.json":76,"lithp/samples/wall.json":77,"lithp/samples/while.json":78}],2:[function(require,module,exports){
 (function (global){
 if(window.global != global) {
 	window.global = window;
@@ -100,6 +99,9 @@ global._lithp.fileCache = files;
 var instance = new lithp.Lithp();
 window.lithpInstance = instance;
 var code = files["webide/webide.ast"];
+if(code === undefined)
+	console.log("Error: webide not found");
+
 var ideParsed = lithp.Parser(code, {ast: true, finalize: true});
 instance.setupDefinitions(ideParsed, "webide.ast")
 instance.Define(ideParsed, "__AST__", lithp.Types.Atom('true'));
@@ -108,18 +110,742 @@ instance.run(ideParsed);
 
 window.onload = function() {
 	console.log("Invoking onReady behaviour");
-	instance.Invoke(ideParsed, "onReady/1", [document]);
-	if(window.jQuery) {
+	if(instance.Defined(ideParsed, "HTML_TOOLKIT") == lithp.Types.Atom('true')) {
+		try {
+			instance.Invoke(ideParsed, "onReady/1", [document]);
+		} catch (e) {
+			console.log(e.stack);
+		}
+	}
+	if(window.jQuery && instance.Defined(ideParsed, "JQUERY_TOOLKIT") == lithp.Types.Atom('true')) {
 		console.log("Invoking jQuery behaviour");
 		window.jQuery.noConflict();
-		instance.Invoke(ideParsed, "onJQuery/1", [window.jQuery])
+		try {
+			instance.Invoke(ideParsed, "onJQuery/1", [window.jQuery])
+		} catch (e) {
+			console.log(e.stack);
+		}
 	}
 };
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./files":1,"lithp":4,"util":81}],3:[function(require,module,exports){
-
+},{"./files":1,"lithp":7,"util":83}],3:[function(require,module,exports){
+module.exports=[
+	[
+		[
+			"define",
+			"'HTML_TOOLKIT'",
+			"true"
+		],
+		[
+			"var",
+			"Document",
+			[
+				"atom",
+				"nil"
+			]
+		],
+		[
+			"def",
+			"onReady",
+			[
+				"scope",
+				{
+					"code": [
+						[
+							[
+								"set",
+								"Document",
+								[
+									"get",
+									"Doc"
+								]
+							],
+							[
+								"print",
+								"\"Document ready\""
+							]
+						]
+					],
+					"_fndef": true,
+					"_fnparams": [
+						"Doc"
+					]
+				}
+			]
+		],
+		[
+			"def",
+			"getElementById",
+			[
+				"scope",
+				{
+					"code": [
+						[
+							[
+								"doc-apply",
+								"getElementById",
+								[
+									"list",
+									"Id"
+								]
+							]
+						]
+					],
+					"_fndef": true,
+					"_fnparams": [
+						"Id"
+					]
+				}
+			]
+		],
+		[
+			"def",
+			"doc-apply",
+			[
+				"scope",
+				{
+					"code": [
+						[
+							[
+								"js-apply",
+								"Document",
+								[
+									"dict-get",
+									"Document",
+									"Member"
+								],
+								"Args"
+							]
+						]
+					],
+					"_fndef": true,
+					"_fnparams": [
+						"Member",
+						"Args"
+					]
+				}
+			]
+		],
+		[
+			"def",
+			"getDoc",
+			[
+				"scope",
+				{
+					"code": [
+						[
+							[
+								"Document"
+							]
+						]
+					],
+					"_fndef": true,
+					"_fnparams": []
+				}
+			]
+		],
+		[
+			"export-global",
+			"getDoc/0"
+		],
+		[
+			"export-global",
+			"onReady/1"
+		]
+	]
+]
 },{}],4:[function(require,module,exports){
+module.exports=[
+	[
+		[
+			"atom",
+			"test"
+		]
+	]
+]
+},{}],5:[function(require,module,exports){
+module.exports=[
+	[
+		[
+			"import",
+			"lists"
+		],
+		[
+			"import",
+			"class"
+		],
+		[
+			"define",
+			"'JQUERY_TOOLKIT'",
+			"true"
+		],
+		[
+			"var",
+			"JQueryJSObj",
+			[
+				"atom",
+				"nil"
+			]
+		],
+		[
+			"var",
+			"JQueryOnLoadCallbacks",
+			[
+				"list"
+			]
+		],
+		[
+			"def",
+			"onJQuery",
+			[
+				"scope",
+				{
+					"code": [
+						[
+							[
+								"set",
+								"JQueryJSObj",
+								[
+									"get",
+									"JQ"
+								]
+							],
+							[
+								"map",
+								"JQueryOnLoadCallbacks",
+								{
+									"code": [
+										[
+											[
+												"call",
+												"CB"
+											]
+										]
+									],
+									"_fndef": true,
+									"_fnparams": [
+										"CB"
+									]
+								}
+							]
+						]
+					],
+					"_fndef": true,
+					"_fnparams": [
+						"JQ"
+					]
+				}
+			]
+		],
+		[
+			"def",
+			"jqueryOnLoad",
+			[
+				"scope",
+				{
+					"code": [
+						[
+							[
+								"set",
+								"JQueryOnLoadCallbacks",
+								[
+									"++",
+									"JQueryOnLoadCallbacks",
+									[
+										"list",
+										"Callback"
+									]
+								]
+							],
+							[
+								"atom",
+								"ok"
+							]
+						]
+					],
+					"_fndef": true,
+					"_fnparams": [
+						"Callback"
+					]
+				}
+			]
+		],
+		[
+			"export-global",
+			"onJQuery/1",
+			"jqueryOnLoad/1"
+		],
+		[
+			"def",
+			"jQuery/1",
+			{
+				"code": [
+					[
+						[
+							"jQueryClass",
+							[
+								"jquery-init",
+								"Selector"
+							]
+						]
+					]
+				],
+				"_fndef": true,
+				"_fnparams": [
+					"Selector"
+				]
+			}
+		],
+		[
+			"def",
+			"jQuery/2",
+			{
+				"code": [
+					[
+						[
+							"jQueryClass",
+							[
+								"jquery-init",
+								"Selector",
+								[
+									"unclass",
+									"Context"
+								]
+							]
+						]
+					]
+				],
+				"_fndef": true,
+				"_fnparams": [
+					"Selector",
+					"Context"
+				]
+			}
+		],
+		[
+			"def",
+			"jQuery/3",
+			{
+				"code": [
+					[
+						[
+							"jQueryClass",
+							[
+								"jquery-init",
+								"Selector",
+								[
+									"unclass",
+									"Context"
+								],
+								"Root"
+							]
+						]
+					]
+				],
+				"_fndef": true,
+				"_fnparams": [
+					"Selector",
+					"Context",
+					"Root"
+				]
+			}
+		],
+		[
+			"export-global",
+			"jQuery/1",
+			"jQuery/2",
+			"jQuery/3"
+		],
+		[
+			"def",
+			"jquery-init/*",
+			{
+				"code": [
+					[
+						[
+							"js-invoke",
+							"JQueryJSObj",
+							"Args"
+						]
+					]
+				],
+				"_fndef": true,
+				"_fnparams": [
+					"Args"
+				]
+			}
+		],
+		[
+			"def",
+			"jQueryClass",
+			{
+				"code": [
+					[
+						[
+							"new",
+							"JQueryClass",
+							"JQueryResult"
+						]
+					]
+				],
+				"_fndef": true,
+				"_fnparams": [
+					"JQueryResult"
+				]
+			}
+		],
+		[
+			"def",
+			"unclass",
+			{
+				"code": [
+					[
+						[
+							"if",
+							[
+								"==",
+								"dict",
+								[
+									"typeof",
+									"JQ"
+								]
+							],
+							[
+								[
+									"member-call",
+									"JQ",
+									"getTarget"
+								]
+							],
+							[
+								"else",
+								[
+									[
+										"JQ"
+									]
+								]
+							]
+						]
+					]
+				],
+				"_fndef": true,
+				"_fnparams": [
+					"JQ"
+				]
+			}
+		],
+		[
+			"var",
+			"JQueryClass",
+			[
+				"class",
+				"'JQueryClass'",
+				[
+					"tuple",
+					[
+						"class-init"
+					],
+					{
+						"code": [
+							[
+								[
+									"member-set",
+									"Self",
+									"target",
+									"From"
+								]
+							]
+						],
+						"_fndef": true,
+						"_fnparams": [
+							"Self",
+							"From"
+						]
+					}
+				],
+				[
+					"tuple",
+					"append",
+					{
+						"code": [
+							[
+								[
+									"member-call",
+									"Self",
+									"call",
+									"append",
+									[
+										"list",
+										[
+											"unclass",
+											"Obj"
+										]
+									]
+								]
+							]
+						],
+						"_fndef": true,
+						"_fnparams": [
+							"Self",
+							"Obj"
+						]
+					}
+				],
+				[
+					"tuple",
+					"getCss",
+					{
+						"code": [
+							[
+								[
+									"member-call",
+									"Self",
+									"call",
+									"css",
+									[
+										"list"
+									]
+								]
+							]
+						],
+						"_fndef": true,
+						"_fnparams": [
+							"Self"
+						]
+					}
+				],
+				[
+					"tuple",
+					"getValue",
+					{
+						"code": [
+							[
+								[
+									"member-call",
+									"Self",
+									"call",
+									"val",
+									[
+										"list"
+									]
+								]
+							]
+						],
+						"_fndef": true,
+						"_fnparams": [
+							"Self"
+						]
+					}
+				],
+				[
+					"tuple",
+					"remove",
+					{
+						"code": [
+							[
+								[
+									"member-call",
+									"Self",
+									"call",
+									"remove",
+									[
+										"list"
+									]
+								]
+							]
+						],
+						"_fndef": true,
+						"_fnparams": [
+							"Self"
+						]
+					}
+				],
+				[
+					"tuple",
+					"setCss",
+					{
+						"code": [
+							[
+								[
+									"member-call",
+									"Self",
+									"call",
+									"css",
+									[
+										"list",
+										"Css"
+									]
+								]
+							]
+						],
+						"_fndef": true,
+						"_fnparams": [
+							"Self",
+							"Css"
+						]
+					}
+				],
+				[
+					"tuple",
+					"setValue",
+					{
+						"code": [
+							[
+								[
+									"member-call",
+									"Self",
+									"call",
+									"val",
+									[
+										"list",
+										"Value"
+									]
+								]
+							]
+						],
+						"_fndef": true,
+						"_fnparams": [
+							"Self",
+							"Value"
+						]
+					}
+				],
+				[
+					"tuple",
+					"call",
+					{
+						"code": [
+							[
+								[
+									"new",
+									"JQueryClass",
+									[
+										"member-call",
+										"Self",
+										"invoke",
+										"Member",
+										"Args"
+									]
+								]
+							]
+						],
+						"_fndef": true,
+						"_fnparams": [
+							"Self",
+							"Member",
+							"Args"
+						]
+					}
+				],
+				[
+					"tuple",
+					"invoke",
+					{
+						"code": [
+							[
+								[
+									"js-apply",
+									[
+										"member-get",
+										"Self",
+										"target"
+									],
+									[
+										"member-call",
+										"Self",
+										"getTargetMember",
+										"Member"
+									],
+									"Args"
+								]
+							]
+						],
+						"_fndef": true,
+						"_fnparams": [
+							"Self",
+							"Member",
+							"Args"
+						]
+					}
+				],
+				[
+					"tuple",
+					"invoke-immediate",
+					{
+						"code": [
+							[
+								[
+									"invoke",
+									[
+										"member-get",
+										"Self",
+										"target"
+									],
+									[
+										"list",
+										"Search"
+									]
+								]
+							]
+						],
+						"_fndef": true,
+						"_fnparams": [
+							"Self",
+							"Search"
+						]
+					}
+				],
+				[
+					"tuple",
+					"getTarget",
+					{
+						"code": [
+							[
+								[
+									"member-get",
+									"Self",
+									"target"
+								]
+							]
+						],
+						"_fndef": true,
+						"_fnparams": [
+							"Self"
+						]
+					}
+				],
+				[
+					"tuple",
+					"getTargetMember",
+					{
+						"code": [
+							[
+								[
+									"dict-get",
+									[
+										"member-call",
+										"Self",
+										"getTarget"
+									],
+									"Member"
+								]
+							]
+						],
+						"_fndef": true,
+						"_fnparams": [
+							"Self",
+							"Member"
+						]
+					}
+				]
+			]
+		]
+	]
+]
+},{}],6:[function(require,module,exports){
+
+},{}],7:[function(require,module,exports){
 
 
 /**
@@ -134,7 +860,7 @@ exports.set_debug_flag = lithp.set_debug_flag;
 exports.Types = require('./lib/types');
 exports.Parser = require('./platform/v0/parser').BootstrapParser;
 
-},{"./lib/lithp":7,"./lib/types":8,"./platform/v0/parser":33}],5:[function(require,module,exports){
+},{"./lib/lithp":10,"./lib/types":11,"./platform/v0/parser":35}],8:[function(require,module,exports){
 (function (process,global){
 /**
  * Builtin Lithp runtime library.
@@ -176,7 +902,8 @@ var atomTrue   = Atom('true'),
     atomFunction=Atom('function'),
     atomTuple  = Atom('tuple'),
     atomAtom   = Atom('atom'),
-    atomDict   = Atom('dict');
+    atomDict   = Atom('dict'),
+    atomObject = Atom('object');
 
 function builtin (name, params, body) {
 	builtins[name] = {params: params, body: body};
@@ -480,7 +1207,7 @@ builtin('typeof', ['V'], V => {
 					return atomList;
 				else if(V[LITHP_DICT])
 					return atomDict;
-				throw new Error("Unknown type:" + inspect(V));
+				return atomObject;
 		}
 	return Atom(typeof V);
 });
@@ -1154,6 +1881,12 @@ builtin('run', ['OpChain'], function(Chain) {
 
 builtin('math-object', [], () => Math);
 
+builtin('js-invoke', ['Fn', 'Args'], (Fn, Args) => {
+	return Fn.apply(Fn, Args);
+});
+
+builtin('debugger', [], () => { debugger; });
+
 exports.setup = function(lithp) {
 	for(var k in builtins) {
 		lithp.builtin(k, builtins[k].params, builtins[k].body);
@@ -1164,7 +1897,7 @@ exports.setup = function(lithp) {
 lithp = require('./..');
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"../platform/v0/parser":33,"../platform/v1/parser-lib":35,"./..":4,"./types":8,"_process":78,"fs":3,"path":77,"util":81}],6:[function(require,module,exports){
+},{"../platform/v0/parser":35,"../platform/v1/parser-lib":37,"./..":7,"./types":11,"_process":80,"fs":6,"path":79,"util":83}],9:[function(require,module,exports){
 (function (global){
 /**
  * Lithp language interpreter.
@@ -1464,7 +2197,7 @@ Lithp.prototype.invoke_functioncall = function(chain, fndef, params) {
 };
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./types":8,"util":81}],7:[function(require,module,exports){
+},{"./types":11,"util":83}],10:[function(require,module,exports){
 (function (process,global,__dirname){
 /**
  * Lithp, a very small Lisp-like interpreter.
@@ -1646,7 +2379,7 @@ global.Lithp = Lithp;
 require('./interpreter');
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},"/node_modules/lithp/lib")
-},{"../package.json":32,"./builtins":5,"./interpreter":6,"./types":8,"./util":9,"_process":78,"path":77,"util":81}],8:[function(require,module,exports){
+},{"../package.json":34,"./builtins":8,"./interpreter":9,"./types":11,"./util":12,"_process":80,"path":79,"util":83}],11:[function(require,module,exports){
 (function (global){
 /**
  * Provide the basic Lithp structure types used by the interpreter.
@@ -1975,7 +2708,7 @@ function FunctionDefinitionNative (name, params, body) {
 exports.FunctionDefinitionNative = FunctionDefinitionNative;
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"util":81}],9:[function(require,module,exports){
+},{"util":83}],12:[function(require,module,exports){
 (function (global){
 /**
  * Provides some additional utility functions.
@@ -2109,51 +2842,49 @@ global.timeCall = function(Title, Callback) {
 } // if(!__lithp_defined('util'))
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],10:[function(require,module,exports){
-module.exports=[[["import","lists"],["import","match"],["def","fac",{"code":[[["when",["tuple","{==","0","N}","{1}"],["tuple","{true}","{*","N",["fac",["-","N","1"]],"}"]]]],"_fndef":true,"_fnparams":["N"]}],["print",["fac","10"]],["print","[1","2","3","4]"],["def","count-items-inner",{"code":[[["when",["tuple","{is-list","Ele}","{count-items","Ele}"],["tuple","{true}","{1}"]]]],"_fndef":true,"_fnparams":["Ele"]}],["def","count-items",{"code":[[["foldl","List","0",{"code":[[["+","A",["count-items-inner","I"]]]],"_fndef":true,"_fnparams":["I","A"]}]]],"_fndef":true,"_fnparams":["List"]}],["print",["count-items","[1","2","[3","4","[5","6]","7]","8]"]]]]
-},{}],11:[function(require,module,exports){
-module.exports=[[["import","class"],["import","file"],["import","lists"],["import","stream"],["def","get-basedir",{"code":[[["var","Possibilities",["list","\"\"","\"node_modules/lithp/\"","\"../\"","\"../node_modules/lithp/\""]],["get-basedir",["head","Possibilities"],["tail","Possibilities"],"Dir"]]],"_fndef":true,"_fnparams":["Dir"]}],["def","get-basedir",{"code":[[["var","Actual",["+","Head","Dir"]],["try",[["read-dir","Actual"],["Actual"]],["catch",{"code":[[["if",[">",["length","Tail"],"0"],[["next","get-basedir",["head","Tail"],["tail","Tail"],"Dir"]],["else",[["throw","\"Cannot find macro\""]]]]]],"_fndef":true,"_fnparams":[]}]]]],"_fndef":true,"_fnparams":["Head","Tail","Dir"]}],["var","MacroPreprocessor",["class","'MacroPreprocessorClass'",["tuple",["class-init"],{"code":[[["var","Dir",["get-basedir","BaseDir"]],["var","Files",["filter",["read-dir","Dir"],{"code":[[["!=",["null"],["match","N",["regex","\"\\\\.h$\""]]]]],"_fndef":true,"_fnparams":["N"]}]],["var","Definitions",["list"]],["each","Files",["scope",{"code":[[["set","Definitions",["++","Definitions",["list",["new","Definition","File"]]]]]],"_fndef":true,"_fnparams":["File"]}]],["member-set","Self","definitions","Definitions"]]],"_fndef":true,"_fnparams":["Self","BaseDir"]}],["tuple","parse",{"code":[[["foldl",["member-get","Self","definitions"],"File",{"code":[[["member-call","Def","parse","Acc"]]],"_fndef":true,"_fnparams":["Def","Acc"]}]]],"_fndef":true,"_fnparams":["Self","File"]}]]],["var","Definition",["class","'DefinitionClass'",["tuple",["class-init"],{"code":[[["var","Contents",["read-lines",["+","Dir","\"/\"","File"]]],["var","Definitions",["dict"]],["dict-set","Definitions","'__FILE__'",["resolve","File"]],["member-set","Self","definitions",["member-call","Self","parse-contents","Contents","Definitions"]]]],"_fndef":true,"_fnparams":["Self","File"]}],["tuple","parse-contents",{"code":[[["if",["==","0",["length","Contents"]],[["Definitions"]],["else",[["while",[[">",["length","Contents"],"0"]],[["var","Line",["head","Contents"]],["set","Contents",["tail","Contents"]],["var","Match",["match","Line",["regex","\"^\\\\s*#([a-z]+)(?:\\\\s+([^ ]+))?(?:\\\\s+(.+))?\\\\s*$\""]]],["if",["!=",["null"],"Match"],[["var","Directive",["index","Match","1"]],["var","Name",["index","Match","2"]],["var","Value",["index","Match","3"]],["if",["==","\"define\"","Directive"],[["dict-set","Definitions","Name","Value"]],["else",[["throw",["+","\"Unknown directive: \"","Directive"]]]]]]]]],["Definitions"]]]]]],"_fndef":true,"_fnparams":["Self","Contents","Definitions"]}],["tuple","add-def",{"code":[[["var","Definitions",["member-get","Self","definitions"]],["if",["dict-present","Definitions","Search"],[["throw",["+","\"Attempted redefinition of \"","Search"]]]],["dict-set","Definitions","Search","Replace"],["Self"]]],"_fndef":true,"_fnparams":["Self","Search","Replace"]}],["tuple","get-defs",{"code":[[["member-get","Self","definitions"]]],"_fndef":true,"_fnparams":["Self"]}],["tuple","parse",{"code":[[["var","Definitions",["member-get","Self","definitions"]],["foldl",["dict-keys","Definitions"],"Contents",["scope",{"code":[[["var","Search",["get","Def"]],["var","Replace",["dict-get","Definitions","Def"]],["replace","Result",["regex","Search","g"],"Replace"]]],"_fndef":true,"_fnparams":["Def","Result"]}]]]],"_fndef":true,"_fnparams":["Self","Contents"]}]]],["var","Preprocessor",["new","MacroPreprocessor","\"macro\""]],["if",["get-def","'__MAIN__'"],[["var","TestCode",["readInputStream"]],["print",["member-call","Preprocessor","parse","TestCode"]]]],["def","macro-preprocessor",{"code":[[["member-call","Preprocessor","parse","Contents"]]],"_fndef":true,"_fnparams":["Contents"]}],["export-global","macro-preprocessor/1"]]]
-},{}],12:[function(require,module,exports){
-module.exports=[[["def","assert",{"code":[[["if",["!","Result"],[["throw",["+","\"Assert failed:\"","Description"]]]],["atom","true"]]],"_fndef":true,"_fnparams":["Result","Description"]}],["def","assert",{"code":[[["if",["!","Result"],[["throw","\"Assert failed\""]]],["atom","true"]]],"_fndef":true,"_fnparams":["Result"]}],["export-global","assert/1","assert/2"],["def","exception-message",{"code":[[["index","E","message"]]],"_fndef":true,"_fnparams":["E"]}],["export-global","exception-message/1"],["if",["get-def","'ASSERT_TEST'"],[["try",[["assert",["==","0","1"],"\"Mismatch check\""]],["catch",{"code":[[["print","\"Mismatch check success\""]]],"_fndef":true,"_fnparams":[]}]],["try",[["assert",["!=","0","0"],"\"Equality check\""],["throw","\"Equality check issue\""]],["catch",{"code":[[["if",["==",["exception-message","E"],"\"Equality check issue\""],[["throw","E"]],["else",[["print","\"Equality check success\""]]]]]],"_fndef":true,"_fnparams":["E"]}]]]]]]
 },{}],13:[function(require,module,exports){
-module.exports=[[["import","\"lists\""],["var","Bignum",["require","\"bignum\""]],["def","bignum",{"code":[[["call","Bignum","Value"]]],"_fndef":true,"_fnparams":["Value"]}],["def","b+",{"code":[[["invoke","A","add","B"]]],"_fndef":true,"_fnparams":["A","B"]}],["def","b-",{"code":[[["invoke","A","sub","B"]]],"_fndef":true,"_fnparams":["A","B"]}],["def","b*",{"code":[[["invoke","A","mul","B"]]],"_fndef":true,"_fnparams":["A","B"]}],["def","b//2",{"code":[[["invoke","A","div","B"]]],"_fndef":true,"_fnparams":["A","B"]}],["def","babs",{"code":[[["invoke","N","abs"]]],"_fndef":true,"_fnparams":["N"]}],["def","bneg",{"code":[[["invoke","N","neg"]]],"_fndef":true,"_fnparams":["N"]}],["def","b>",{"code":[[["==",["invoke","A","gt","B"],["true"]]]],"_fndef":true,"_fnparams":["A","B"]}],["def","b>=",{"code":[[["==",["invoke","A","ge","B"],["true"]]]],"_fndef":true,"_fnparams":["A","B"]}],["def","b<",{"code":[[["==",["invoke","A","lt","B"],["true"]]]],"_fndef":true,"_fnparams":["A","B"]}],["def","b<=",{"code":[[["==",["invoke","A","le","B"],["true"]]]],"_fndef":true,"_fnparams":["A","B"]}],["def","b==",{"code":[[["==",["invoke","A","eq","B"],["true"]]]],"_fndef":true,"_fnparams":["A","B"]}],["def","bpow",{"code":[[["invoke","A","pow","B"]]],"_fndef":true,"_fnparams":["A","B"]}],["def","bpowm",{"code":[[["invoke","A","powm","N","M"]]],"_fndef":true,"_fnparams":["A","N","M"]}],["def","binvertm",{"code":[[["invoke","A","invertm","M"]]],"_fndef":true,"_fnparams":["N","M"]}],["def","brand",{"code":[[["call","Bignum","rand"]]],"_fndef":true,"_fnparams":[]}],["def","brand",{"code":[[["call","Bignum","rand","U"]]],"_fndef":true,"_fnparams":["U"]}],["def","bsqrt",{"code":[[["invoke","N","sqrt"]]],"_fndef":true,"_fnparams":["N"]}],["def","broot",{"code":[[["invoke","N","root","M"]]],"_fndef":true,"_fnparams":["N","M"]}],["def","b<<",{"code":[[["invoke","N","shiftLeft","S"]]],"_fndef":true,"_fnparams":["N","S"]}],["def","b>>",{"code":[[["invoke","N","shiftRight","S"]]],"_fndef":true,"_fnparams":["N","S"]}],["def","bgcd",{"code":[[["invoke","N","gcd","M"]]],"_fndef":true,"_fnparams":["N","M"]}],["def","bjacobi",{"code":[[["invoke","N","jacobi","M"]]],"_fndef":true,"_fnparams":["N","M"]}],["export-global","bignum/1"],["export-global","b+/2","b-/2","b*/2","b//2"],["export-global","babs/1","bneg/1"],["export-global","b>/2","b>=/2","b</2","b<=/2","b==/2"],["export-global","bpow/2","bpowm/3","binvertm/2"],["export-global","brand/0","brand/1","bsqrt/1","broot/2"],["export-global","b<</2","b>>/2","bgcd/2","bjacobi/2"],["def","bsum",{"code":[[["foldl","L",["bignum","0"],["scope",{"code":[[["b+","N","A"]]],"_fndef":true,"_fnparams":["N","A"]}]]]],"_fndef":true,"_fnparams":["L"]}],["def","bprod",{"code":[[["foldl","L",["bignum","1"],["scope",{"code":[[["b*","A",["bignum","N"]]]],"_fndef":true,"_fnparams":["N","A"]}]]]],"_fndef":true,"_fnparams":["L"]}],["export-global","bsum/1","bprod/1"],["if",["get-def","'TEST'"],[["var","N1",["bignum","\"782910138827292261791972728324982\""]],["var","N2",["bignum","\"612948285478570042376183478471174272694879005539119746287405300324\""]],["print",["to-string",["b+","N1","N2"]]],["print",["to-string",["b-","N1","N2"]]],["print",["to-string",["b*","N1","N2"]]],["print",["to-string",["b/","N2","N1"]]],["print",["b>","N1","N2"]],["print",["b>=","N2","N1"]],["print",["brand"]],["print",["brand","2"]],["print",["bsum",["list","N1","N2"]]]]]]]
+module.exports=[[["import","lists"],["import","match"],["def","fac",{"code":[[["when",["tuple","{==","0","N}","{1}"],["tuple","{true}","{*","N",["fac",["-","N","1"]],"}"]]]],"_fndef":true,"_fnparams":["N"]}],["print",["fac","10"]],["print","[1","2","3","4]"],["def","count-items-inner",{"code":[[["when",["tuple","{is-list","Ele}","{count-items","Ele}"],["tuple","{true}","{1}"]]]],"_fndef":true,"_fnparams":["Ele"]}],["def","count-items",{"code":[[["foldl","List","0",{"code":[[["+","A",["count-items-inner","I"]]]],"_fndef":true,"_fnparams":["I","A"]}]]],"_fndef":true,"_fnparams":["List"]}],["print",["count-items","[1","2","[3","4","[5","6]","7]","8]"]]]]
 },{}],14:[function(require,module,exports){
-module.exports=[[["var","Buffer",["index",["require","\"buffer\""],"\"Buffer\""]],["var","DefaultBufferSize","1024"],["def","buffer",{"code":[[["buffer","DefaultBufferSize"]]],"_fndef":true,"_fnparams":[]}],["def","buffer",{"code":[[["call","Buffer","Size"]]],"_fndef":true,"_fnparams":["Size"]}],["export-global","buffer/0","buffer/1"],["if",["get-def","'TEST'"],[["print","\"A buffer: \"",["buffer"]]]]]]
+module.exports=[[["import","class"],["import","file"],["import","lists"],["import","stream"],["def","get-basedir",{"code":[[["var","Possibilities",["list","\"\"","\"node_modules/lithp/\"","\"../\"","\"../node_modules/lithp/\""]],["get-basedir",["head","Possibilities"],["tail","Possibilities"],"Dir"]]],"_fndef":true,"_fnparams":["Dir"]}],["def","get-basedir",{"code":[[["var","Actual",["+","Head","Dir"]],["try",[["read-dir","Actual"],["Actual"]],["catch",{"code":[[["if",[">",["length","Tail"],"0"],[["next","get-basedir",["head","Tail"],["tail","Tail"],"Dir"]],["else",[["throw","\"Cannot find macro\""]]]]]],"_fndef":true,"_fnparams":[]}]]]],"_fndef":true,"_fnparams":["Head","Tail","Dir"]}],["var","MacroPreprocessor",["class","'MacroPreprocessorClass'",["tuple",["class-init"],{"code":[[["var","Dir",["get-basedir","BaseDir"]],["var","Files",["filter",["read-dir","Dir"],{"code":[[["!=",["null"],["match","N",["regex","\"\\\\.h$\""]]]]],"_fndef":true,"_fnparams":["N"]}]],["var","Definitions",["list"]],["each","Files",["scope",{"code":[[["set","Definitions",["++","Definitions",["list",["new","Definition","File"]]]]]],"_fndef":true,"_fnparams":["File"]}]],["member-set","Self","definitions","Definitions"]]],"_fndef":true,"_fnparams":["Self","BaseDir"]}],["tuple","parse",{"code":[[["foldl",["member-get","Self","definitions"],"File",{"code":[[["member-call","Def","parse","Acc"]]],"_fndef":true,"_fnparams":["Def","Acc"]}]]],"_fndef":true,"_fnparams":["Self","File"]}]]],["var","Definition",["class","'DefinitionClass'",["tuple",["class-init"],{"code":[[["var","Contents",["read-lines",["+","Dir","\"/\"","File"]]],["var","Definitions",["dict"]],["dict-set","Definitions","'__FILE__'",["resolve","File"]],["member-set","Self","definitions",["member-call","Self","parse-contents","Contents","Definitions"]]]],"_fndef":true,"_fnparams":["Self","File"]}],["tuple","parse-contents",{"code":[[["if",["==","0",["length","Contents"]],[["Definitions"]],["else",[["while",[[">",["length","Contents"],"0"]],[["var","Line",["head","Contents"]],["set","Contents",["tail","Contents"]],["var","Match",["match","Line",["regex","\"^\\\\s*#([a-z]+)(?:\\\\s+([^ ]+))?(?:\\\\s+(.+))?\\\\s*$\""]]],["if",["!=",["null"],"Match"],[["var","Directive",["index","Match","1"]],["var","Name",["index","Match","2"]],["var","Value",["index","Match","3"]],["if",["==","\"define\"","Directive"],[["dict-set","Definitions","Name","Value"]],["else",[["throw",["+","\"Unknown directive: \"","Directive"]]]]]]]]],["Definitions"]]]]]],"_fndef":true,"_fnparams":["Self","Contents","Definitions"]}],["tuple","add-def",{"code":[[["var","Definitions",["member-get","Self","definitions"]],["if",["dict-present","Definitions","Search"],[["throw",["+","\"Attempted redefinition of \"","Search"]]]],["dict-set","Definitions","Search","Replace"],["Self"]]],"_fndef":true,"_fnparams":["Self","Search","Replace"]}],["tuple","get-defs",{"code":[[["member-get","Self","definitions"]]],"_fndef":true,"_fnparams":["Self"]}],["tuple","parse",{"code":[[["var","Definitions",["member-get","Self","definitions"]],["foldl",["dict-keys","Definitions"],"Contents",["scope",{"code":[[["var","Search",["get","Def"]],["var","Replace",["dict-get","Definitions","Def"]],["replace","Result",["regex","Search","g"],"Replace"]]],"_fndef":true,"_fnparams":["Def","Result"]}]]]],"_fndef":true,"_fnparams":["Self","Contents"]}]]],["var","Preprocessor",["new","MacroPreprocessor","\"macro\""]],["if",["get-def","'__MAIN__'"],[["var","TestCode",["readInputStream"]],["print",["member-call","Preprocessor","parse","TestCode"]]]],["def","macro-preprocessor",{"code":[[["member-call","Preprocessor","parse","Contents"]]],"_fndef":true,"_fnparams":["Contents"]}],["export-global","macro-preprocessor/1"]]]
 },{}],15:[function(require,module,exports){
-module.exports=[[["platform","v1"],["var","Cache",["dict"]],["def","cache-result",["scope",{"code":[[["var","Dict",["dict-get","Cache","Name"]],["if",["==",["null"],"Dict"],[["dict-set","Cache","Name",["dict"]],["set","Dict",["dict-get","Cache","Name"]]]],["if",["dict-present","Dict","Value"],[["dict-get","Dict","Value"]],["else",[["var","R",["call","Function","Value"]],["dict-set","Dict","Value","R"],"R"]]]]],"_fndef":true,"_fnparams":["Value","Name","Function"]}]],["export-global","cache-result/3"],["if",["get-def","'TEST'"],[["def","myf",{"code":[[["if",["<","N","2"],["1"],[["+",["cache-result",["-","N","1"],"myf",["get","\"myf/1\""]],["cache-result",["-","N","2"],"myf",["get","\"myf/1\""]]]]]]],"_fndef":true,"_fnparams":["N"]}],["print","myf","15"],["import","\"lists\""],["each",["seq","1","15"],["scope",{"code":[[["print","\" \"","N","\":\"",["myf","N"]]]],"_fndef":true,"_fnparams":["N"]}]]]]]]
+module.exports=[[["def","assert",{"code":[[["if",["!","Result"],[["throw",["+","\"Assert failed:\"","Description"]]]],["atom","true"]]],"_fndef":true,"_fnparams":["Result","Description"]}],["def","assert",{"code":[[["if",["!","Result"],[["throw","\"Assert failed\""]]],["atom","true"]]],"_fndef":true,"_fnparams":["Result"]}],["export-global","assert/1","assert/2"],["def","exception-message",{"code":[[["index","E","message"]]],"_fndef":true,"_fnparams":["E"]}],["export-global","exception-message/1"],["if",["get-def","'ASSERT_TEST'"],[["try",[["assert",["==","0","1"],"\"Mismatch check\""]],["catch",{"code":[[["print","\"Mismatch check success\""]]],"_fndef":true,"_fnparams":[]}]],["try",[["assert",["!=","0","0"],"\"Equality check\""],["throw","\"Equality check issue\""]],["catch",{"code":[[["if",["==",["exception-message","E"],"\"Equality check issue\""],[["throw","E"]],["else",[["print","\"Equality check success\""]]]]]],"_fndef":true,"_fnparams":["E"]}]]]]]]
 },{}],16:[function(require,module,exports){
-module.exports=[[["import","lists"],["def","class-init",{"code":[[["\"__init\""]]],"_fndef":true,"_fnparams":[]}],["def","class-class",{"code":[[["\"__class__\""]]],"_fndef":true,"_fnparams":[]}],["def","class-funcs",{"code":[[["\"__functions__\""]]],"_fndef":true,"_fnparams":[]}],["def","class-instc",{"code":[[["\"__instance__\""]]],"_fndef":true,"_fnparams":[]}],["export-global","class-init/0","class-class/0","class-funcs/0","class-instc/0"],["def","member-set",{"code":[[["dict-set","Instance","Name","Value"]]],"_fndef":true,"_fnparams":["Instance","Name","Value"]}],["def","member-get",{"code":[[["dict-get","Instance","Name"]]],"_fndef":true,"_fnparams":["Instance","Name"]}],["def","member-present",{"code":[[["dict-present","Instance","Name"]]],"_fndef":true,"_fnparams":["Instance","Name"]}],["export-global","member-set/3","member-get/2","member-present/2"],["def","member-call/*",{"code":[[["var","Self",["head","Args"]],["set","Args",["tail","Args"]],["var","Fun",["head","Args"]],["var","Params",["++",["list","Self"],["tail","Args"]]],["var","Instance",["member-get","Self",["class-instc"]]],["var","Funcs",["member-get","Instance",["class-funcs"]]],["var","Dest",["member-get","Funcs","Fun"]],["apply","Dest","Params"]]],"_fndef":true,"_fnparams":["Args"]}],["export-global","member-call/*"],["def","class/*",{"code":[[["var","Name",["head","Args"]],["var","Members",["tail","Args"]],["var","Instance",["dict"]],["dict-set","Instance",["class-class"],"Name"],["dict-set","Instance",["class-funcs"],["dict"]],["foldl","Members","Instance",{"code":[[["member-set",["dict-get","Self",["class-funcs"]],["index","Member","0"],["index","Member","1"]],["Self"]]],"_fndef":true,"_fnparams":["Member","Self"]}]]],"_fndef":true,"_fnparams":["Args"]}],["def","new/*",{"code":[[["var","Class",["head","Args"]],["var","Params",["tail","Args"]],["var","Instance",["dict"]],["member-set",["get","Instance"],["class-instc"],["get","Class"]],["if",["member-present",["member-get","Class",["class-funcs"]],["class-init"]],[["apply","member-call",["++",["list","Instance",["class-init"]],"Params"]]]],["Instance"]]],"_fndef":true,"_fnparams":["Args"]}],["export-global","class/*","new/*"],["if",["get-def","'CLASS_TEST'"],[["var","TestClass",["class","'TestClass'",["tuple",["class-init"],{"code":[[["member-set","Self","base","Base"]]],"_fndef":true,"_fnparams":["Self","Base"]}],["tuple","'add'",{"code":[[["to-string",["+","A","B"],["member-get","Self","base"]]]],"_fndef":true,"_fnparams":["Self","A","B"]}]]],["var","Base10",["new","TestClass","10"]],["var","Base2",["new","TestClass","2"]],["print",["member-call","Base10","add","5","10"]],["print",["member-call","Base2","add","5","10"]]]]]]
+module.exports=[[["import","\"lists\""],["var","Bignum",["require","\"bignum\""]],["def","bignum",{"code":[[["call","Bignum","Value"]]],"_fndef":true,"_fnparams":["Value"]}],["def","b+",{"code":[[["invoke","A","add","B"]]],"_fndef":true,"_fnparams":["A","B"]}],["def","b-",{"code":[[["invoke","A","sub","B"]]],"_fndef":true,"_fnparams":["A","B"]}],["def","b*",{"code":[[["invoke","A","mul","B"]]],"_fndef":true,"_fnparams":["A","B"]}],["def","b//2",{"code":[[["invoke","A","div","B"]]],"_fndef":true,"_fnparams":["A","B"]}],["def","babs",{"code":[[["invoke","N","abs"]]],"_fndef":true,"_fnparams":["N"]}],["def","bneg",{"code":[[["invoke","N","neg"]]],"_fndef":true,"_fnparams":["N"]}],["def","b>",{"code":[[["==",["invoke","A","gt","B"],["true"]]]],"_fndef":true,"_fnparams":["A","B"]}],["def","b>=",{"code":[[["==",["invoke","A","ge","B"],["true"]]]],"_fndef":true,"_fnparams":["A","B"]}],["def","b<",{"code":[[["==",["invoke","A","lt","B"],["true"]]]],"_fndef":true,"_fnparams":["A","B"]}],["def","b<=",{"code":[[["==",["invoke","A","le","B"],["true"]]]],"_fndef":true,"_fnparams":["A","B"]}],["def","b==",{"code":[[["==",["invoke","A","eq","B"],["true"]]]],"_fndef":true,"_fnparams":["A","B"]}],["def","bpow",{"code":[[["invoke","A","pow","B"]]],"_fndef":true,"_fnparams":["A","B"]}],["def","bpowm",{"code":[[["invoke","A","powm","N","M"]]],"_fndef":true,"_fnparams":["A","N","M"]}],["def","binvertm",{"code":[[["invoke","A","invertm","M"]]],"_fndef":true,"_fnparams":["N","M"]}],["def","brand",{"code":[[["call","Bignum","rand"]]],"_fndef":true,"_fnparams":[]}],["def","brand",{"code":[[["call","Bignum","rand","U"]]],"_fndef":true,"_fnparams":["U"]}],["def","bsqrt",{"code":[[["invoke","N","sqrt"]]],"_fndef":true,"_fnparams":["N"]}],["def","broot",{"code":[[["invoke","N","root","M"]]],"_fndef":true,"_fnparams":["N","M"]}],["def","b<<",{"code":[[["invoke","N","shiftLeft","S"]]],"_fndef":true,"_fnparams":["N","S"]}],["def","b>>",{"code":[[["invoke","N","shiftRight","S"]]],"_fndef":true,"_fnparams":["N","S"]}],["def","bgcd",{"code":[[["invoke","N","gcd","M"]]],"_fndef":true,"_fnparams":["N","M"]}],["def","bjacobi",{"code":[[["invoke","N","jacobi","M"]]],"_fndef":true,"_fnparams":["N","M"]}],["export-global","bignum/1"],["export-global","b+/2","b-/2","b*/2","b//2"],["export-global","babs/1","bneg/1"],["export-global","b>/2","b>=/2","b</2","b<=/2","b==/2"],["export-global","bpow/2","bpowm/3","binvertm/2"],["export-global","brand/0","brand/1","bsqrt/1","broot/2"],["export-global","b<</2","b>>/2","bgcd/2","bjacobi/2"],["def","bsum",{"code":[[["foldl","L",["bignum","0"],["scope",{"code":[[["b+","N","A"]]],"_fndef":true,"_fnparams":["N","A"]}]]]],"_fndef":true,"_fnparams":["L"]}],["def","bprod",{"code":[[["foldl","L",["bignum","1"],["scope",{"code":[[["b*","A",["bignum","N"]]]],"_fndef":true,"_fnparams":["N","A"]}]]]],"_fndef":true,"_fnparams":["L"]}],["export-global","bsum/1","bprod/1"],["if",["get-def","'TEST'"],[["var","N1",["bignum","\"782910138827292261791972728324982\""]],["var","N2",["bignum","\"612948285478570042376183478471174272694879005539119746287405300324\""]],["print",["to-string",["b+","N1","N2"]]],["print",["to-string",["b-","N1","N2"]]],["print",["to-string",["b*","N1","N2"]]],["print",["to-string",["b/","N2","N1"]]],["print",["b>","N1","N2"]],["print",["b>=","N2","N1"]],["print",["brand"]],["print",["brand","2"]],["print",["bsum",["list","N1","N2"]]]]]]]
 },{}],17:[function(require,module,exports){
-module.exports=[[["import","\"lists\""],["var","FS",["require","\"fs\""]],["var","Path",["require","\"path\""]],["def","resolve",{"code":[[["invoke","Path","resolve","Filename"]]],"_fndef":true,"_fnparams":["Filename"]}],["export-global","resolve/1"],["def","read-file",{"code":[[["set","Filename",["invoke","Path","resolve","Filename"]],["invoke","FS","readFileSync","Filename"]]],"_fndef":true,"_fnparams":["Filename"]}],["def","read-file",{"code":[[["set","Filename",["invoke","Path","resolve","Filename"]],["invoke","FS","readFile","Filename",["js-bridge","Callback"]]]],"_fndef":true,"_fnparams":["Filename","Callback"]}],["def","file-exists",{"code":[[["==",["true"],["invoke","FS","existsSync","Path"]]]],"_fndef":true,"_fnparams":["Path"]}],["def","is-file",{"code":[[["==",["true"],["invoke",["file-lstat","Path"],"isFile"]]]],"_fndef":true,"_fnparams":["Path"]}],["def","is-directory",{"code":[[["and",["!",["is-file","Path"]],["file-exists","Path"]]]],"_fndef":true,"_fnparams":["Path"]}],["def","file-lstat",{"code":[[["try",[["invoke","FS","lstatSync","Path"]],["catch",{"code":[[["lstat-empty","Path"]]],"_fndef":true,"_fnparams":["E"]}]]]],"_fndef":true,"_fnparams":["Path"]}],["def","read-dir",{"code":[[["invoke","FS","readdirSync","Path"]]],"_fndef":true,"_fnparams":["Path"]}],["export-global","read-dir/1"],["var","LStatMembers",["list","\"dev\"","\"mode\"","\"nlink\"","\"uid\"","\"gid\"","\"rdev\"","\"blksize\"","\"ino\"","\"size\"","\"blocks\"","\"atime\"","\"mtime\"","\"ctime\"","\"birthtime\""]],["def","lstat-empty",{"code":[[["var","Result",["dict"]],["each","LStatMembers",["scope",{"code":[[["dict-set","Result","M","0"]]],"_fndef":true,"_fnparams":["M"]}]],["dict-set","Result","isFile",["js-bridge",{"code":[[["false"]]],"_fndef":true,"_fnparams":[]}]],["get","Result"]]],"_fndef":true,"_fnparams":["Path"]}],["export-global","read-file/1","read-file/2","file-exists/1","is-file/1","is-directory/1","file-lstat/1"],["def","read-lines",{"code":[[["split",["to-string",["read-file","File"]],["regex","\"\\\\r?\\\\n\""]]]],"_fndef":true,"_fnparams":["File"]}],["export-global","read-lines/1"],["if",["==","true",["get-def","'TEST'"]],[["read-file","\"index.js\"",{"code":[[["print","\"Got Err:\"","Err"],["if",["!=",["undefined"],"Data"],[["print","\"Got Data:\"",["to-string","Data"]]]]]],"_fndef":true,"_fnparams":["Err","Data"]}],["print",["file-exists","\"run\""]],["print",["is-file","\"run\""]],["print",["is-file","\"src\""]],["print",["is-directory","\"src\""]],["print",["file-lstat","\"run1\""]],["print",["is-file","\"run1\""]]]]]]
+module.exports=[[["var","Buffer",["index",["require","\"buffer\""],"\"Buffer\""]],["var","DefaultBufferSize","1024"],["def","buffer",{"code":[[["buffer","DefaultBufferSize"]]],"_fndef":true,"_fnparams":[]}],["def","buffer",{"code":[[["call","Buffer","Size"]]],"_fndef":true,"_fnparams":["Size"]}],["export-global","buffer/0","buffer/1"],["if",["get-def","'TEST'"],[["print","\"A buffer: \"",["buffer"]]]]]]
 },{}],18:[function(require,module,exports){
-module.exports=[[["if",["get-def","'NATIVE'"],[["def","map",{"code":[[["map-inner",["list"],"List","Callback"]]],"_fndef":true,"_fnparams":["List","Callback"]}]]],["def","map-inner",{"code":[[["if",["==","0",["length","List"]],[["Acc"]],["else",[["recurse",["++","Acc",["list",["call","Callback",["head","List"]]]],["tail","List"],"Callback"]]]]]],"_fndef":true,"_fnparams":["Acc","List","Callback"]}],["def","foldl",{"code":[[["if",["==","0",["length","List"]],[["Current"]],["else",[["recurse",["tail","List"],["call","Callback",["head","List"],"Current"],"Callback"]]]]]],"_fndef":true,"_fnparams":["List","Current","Callback"]}],["def","each",{"code":[[["each-inner","0","List","Callback"]]],"_fndef":true,"_fnparams":["List","Callback"]}],["def","each-inner",{"code":[[["if",["==","0",["length","List"]],[["atom","nil"]],["else",[["call","Callback",["head","List"],"Idx"],["recurse",["+","Idx","1"],["tail","List"],"Callback"]]]]]],"_fndef":true,"_fnparams":["Idx","List","Callback"]}],["def","each-idx",{"code":[[["each","List","Callback"]]],"_fndef":true,"_fnparams":["List","Callback"]}],["export-global","each/2","each-idx/2"],["def","seq",{"code":[[["seq","N0","N1",["?",["<","N0","N1"],"1","-1"]]]],"_fndef":true,"_fnparams":["N0","N1"]}],["def","seq",{"code":[[["set","L",["list"]],["var","N",["get","N0"]],["while",[["if",[">=","Inc","1"],[["<=","N","N1"]],[[">=","N","N1"]]]],[["set","L",["++","L",["list","N"]]],["set","N",["+","N","Inc"]]]],"L"]],"_fndef":true,"_fnparams":["N0","N1","Inc"]}],["export-global","map/2","foldl/3","each/2","seq/2","seq/3"],["var","PermutationsPossibilities",["list","0","1","2","6","24","120","720","5040","40320","362880","3628800","39916800","479001600"]],["def","permutations",{"code":[[["var","Length",["length","List"]],["var","Result",["list-fill",["index","PermutationsPossibilities","Length"],"0"]],["var","C",["list-fill","Length","0"]],["var","I","1"],["var","J","1"],["index-set","Result","0",["slice","List"]],["while",[["<","I","Length"]],[["var","CI",["index","C","I"]],["if",["<","CI","I"],[["var","K",["?",["@","I","2"],["get","CI"],"0"]],["var","P",["index","List","I"]],["index-set","List","I",["index","List","K"]],["index-set","List","K","P"],["index-set","C","I",["+","1","CI"]],["set","I","1"],["index-set","Result","J",["slice","List"]],["set","J",["+","1",["get","J"]]]],["else",[["index-set","C","I","0"],["set","I",["+","1",["get","I"]]]]]]]],["get","Result"]]],"_fndef":true,"_fnparams":["List"]}],["export-global","permutations/1"],["def","sum",{"code":[[["foldl","L","0",{"code":[[["+","N","A"]]],"_fndef":true,"_fnparams":["N","A"]}]]],"_fndef":true,"_fnparams":["L"]}],["def","prod",{"code":[[["foldl","L","1",{"code":[[["*","A","N"]]],"_fndef":true,"_fnparams":["N","A"]}]]],"_fndef":true,"_fnparams":["L"]}],["export-global","sum/1","prod/1"],["def","filter",{"code":[[["filter-inner","List","Predicate",["list"]]]],"_fndef":true,"_fnparams":["List","Predicate"]}],["def","filter-inner",{"code":[[["if",["==","0",["length","List"]],[["Acc"]],["else",[["var","Ele",["head","List"]],["if",["call","Predicate","Ele"],[["recurse",["tail","List"],"Predicate",["++","Acc",["list","Ele"]]]],["else",[["recurse",["tail","List"],"Predicate","Acc"]]]]]]]]],"_fndef":true,"_fnparams":["List","Predicate","Acc"]}],["export-global","filter/2"],["def","max/*",{"code":[[["set","List",["flatten","List"]],["foldl",["tail","List"],["head","List"],{"code":[[["?",[">","V","A"],"V","A"]]],"_fndef":true,"_fnparams":["V","A"]}]]],"_fndef":true,"_fnparams":["List"]}],["def","min/*",{"code":[[["set","List",["flatten","List"]],["foldl",["tail","List"],["head","List"],{"code":[[["?",["<","V","A"],"V","A"]]],"_fndef":true,"_fnparams":["V","A"]}]]],"_fndef":true,"_fnparams":["List"]}],["export-global","min/*","max/*"],["if",["get-def","'NATIVE'"],[["def","flat-map",{"code":[[["apply","++",["++",["list"],["map","List","Callback"]]]]],"_fndef":true,"_fnparams":["List","Callback"]}]]],["def","lcomp",{"code":[[["lcomp-inner",["list"],["head","Generators"],"Handler",["tail","Generators"],"Filter"]]],"_fndef":true,"_fnparams":["Handler","Generators","Filter"]}],["def","lcomp",{"code":[[["lcomp","Handler","Generators",{"code":[[["atom","true"]]],"_fndef":true,"_fnparams":[]}]]],"_fndef":true,"_fnparams":["Handler","Generators"]}],["def","lcomp-inner",{"code":[[["flat-map","List",["scope",{"code":[[["var","Current",["++","Base",["list","Ele"]]],["if",[">",["length","Generators"],"0"],[["lcomp-inner","Current",["head","Generators"],"Handler",["tail","Generators"],"Filter"]],["else",[["if",["apply","Filter","Current"],[["list",["apply","Handler","Current"]]],["else",[["list"]]]]]]]]],"_fndef":true,"_fnparams":["Ele"]}]]]],"_fndef":true,"_fnparams":["Base","List","Handler","Generators","Filter"]}],["export-global","lcomp/3","lcomp/2"],["def","reverse",{"code":[[["next","reverse","L",["list"]]]],"_fndef":true,"_fnparams":["L"]}],["def","reverse",{"code":[[["if",["==","0",["length","L"]],[["Acc"]],["else",[["recurse",["tail","L"],["++",["list",["head","L"]],"Acc"]]]]]]],"_fndef":true,"_fnparams":["L","Acc"]}],["export-global","reverse/1"],["def","zip",{"code":[[["zip","A","B",["list"]]]],"_fndef":true,"_fnparams":["A","B"]}],["def","zip",{"code":[[["if",["or",["==","0",["length","A"]],["==","0",["length","B"]]],[["Acc"]],["else",[["recurse",["tail","A"],["tail","B"],["++","Acc",["list",["tuple",["head","A"],["head","B"]]]]]]]]]],"_fndef":true,"_fnparams":["A","B","Acc"]}],["export-global","zip/2"],["if",["==","true",["get-def","'TEST'"]],[["var","SampleList",["list","1","2","4","8","16","32"]],["print","\"Each test: \"",["each","SampleList",{"code":[[["print","N"]]],"_fndef":true,"_fnparams":["N"]}]],["print","\"Each-idx test: \"",["each-idx","SampleList",{"code":[[["print",["++","\"\"","I","\": \"","N"]]]],"_fndef":true,"_fnparams":["N","I"]}]],["print","\"Map test: \"",["map","SampleList",{"code":[[["*","N","2"]]],"_fndef":true,"_fnparams":["N"]}]],["print","\"Foldl test: \"",["foldl","SampleList","0",{"code":[[["+","N","A"]]],"_fndef":true,"_fnparams":["N","A"]}]],["print","\"Foldl test: \"",["foldl","SampleList","0",{"code":[[["<<","N","A"]]],"_fndef":true,"_fnparams":["N","A"]}]],["print","\"Empty map test: \"",["map",["list"],{"code":[[["*","N","2"]]],"_fndef":true,"_fnparams":["N"]}]],["print","\"Empty foldl test:\"",["foldl",["list"],"0",{"code":[[["+","N","A"]]],"_fndef":true,"_fnparams":["N","A"]}]],["each","SampleList",{"code":[[["print","\"N:\"","N"]]],"_fndef":true,"_fnparams":["N"]}],["print","\"Seq test:\"",["seq","1","5"]],["print","\"Reverse seq test:\"",["seq","5","1"]],["print","\"Sum test:\"",["sum","SampleList"]],["print","\"Prod test:\"",["prod","SampleList"]],["print","\"Permutations test: \"",["permutations",["list","1","2","3"]]],["print","\"Max test:\"",["max","10","5","9","4","8","3","6","2","1","0"]],["print","\"Min test:\"",["min","10","5","9","4","8","3","6","2","1","0"]],["print","\"Filter test:\"",["filter",["seq","1","10"],{"code":[["==","0",["@","V","2"]]],"_fndef":true,"_fnparams":["V"]}]],["var","Generators",["list",["seq","1","10"],["seq","1","5"],["seq","1","3"]]],["var","Handler",{"code":[["list",["list","X","Y","Z"]]],"_fndef":true,"_fnparams":["X","Y","Z"]}],["var","Filter",{"code":[[["and",["==","0",["@","X","2"]],["==","0",["@","Y","2"]],["==","0",["@","Z","2"]]]]],"_fndef":true,"_fnparams":["X","Y","Z"]}],["print","\"List comprehension test: \"",["lcomp","Handler","Generators","Filter"]],["print","\"Reverse test: \"",["reverse","SampleList"]],["print","\"Zip test: \"",["zip",["list","a","b","c","d"],["list","1","2","3","4"]]]]]]]
+module.exports=[[["platform","v1"],["var","Cache",["dict"]],["def","cache-result",["scope",{"code":[[["var","Dict",["dict-get","Cache","Name"]],["if",["==",["null"],"Dict"],[["dict-set","Cache","Name",["dict"]],["set","Dict",["dict-get","Cache","Name"]]]],["if",["dict-present","Dict","Value"],[["dict-get","Dict","Value"]],["else",[["var","R",["call","Function","Value"]],["dict-set","Dict","Value","R"],"R"]]]]],"_fndef":true,"_fnparams":["Value","Name","Function"]}]],["export-global","cache-result/3"],["if",["get-def","'TEST'"],[["def","myf",{"code":[[["if",["<","N","2"],["1"],[["+",["cache-result",["-","N","1"],"myf",["get","\"myf/1\""]],["cache-result",["-","N","2"],"myf",["get","\"myf/1\""]]]]]]],"_fndef":true,"_fnparams":["N"]}],["print","myf","15"],["import","\"lists\""],["each",["seq","1","15"],["scope",{"code":[[["print","\" \"","N","\":\"",["myf","N"]]]],"_fndef":true,"_fnparams":["N"]}]]]]]]
 },{}],19:[function(require,module,exports){
-module.exports=[[["def","true",{"code":[[["atom","true"]]],"_fndef":true,"_fnparams":[]}],["def","false",{"code":[[["atom","false"]]],"_fndef":true,"_fnparams":[]}],["export-global","true/0","false/0"],["def","is-number",{"code":[[["==","number",["typeof","V"]]]],"_fndef":true,"_fnparams":["V"]}],["def","is-string",{"code":[[["==","string",["typeof","V"]]]],"_fndef":true,"_fnparams":["V"]}],["def","is-function",{"code":[[["==","function",["typeof","V"]]]],"_fndef":true,"_fnparams":["V"]}],["def","is-function",{"code":[[["if",["is-function","V"],[["==","Arity",["function-arity","V"]]],["else",[["atom","false"]]]]]],"_fndef":true,"_fnparams":["V","Arity"]}],["def","is-list",{"code":[[["==","list",["typeof","V"]]]],"_fndef":true,"_fnparams":["V"]}],["def","is-atom",{"code":[[["==","atom",["typeof","V"]]]],"_fndef":true,"_fnparams":["V"]}],["def","is-dict",{"code":[[["==","dict",["typeof","V"]]]],"_fndef":true,"_fnparams":["V"]}],["def","is-tuple",{"code":[[["==","tuple",["typeof","V"]]]],"_fndef":true,"_fnparams":["V"]}],["export-global","is-number/1","is-string/1","is-function/1","is-function/2","is-list/1","is-atom/1","is-dict/1","is-tuple/1"],["def","when/*",{"code":[[["when-inner","Handlers"]]],"_fndef":true,"_fnparams":["Handlers"]}],["def","when-inner",{"code":[[["var","Handler",["head","Handlers"]],["var","Test",["index","Handler","0"]],["var","Success",["index","Handler","1"]],["var","TestResult","false"],["if",["is-atom","Test"],[["set","TestResult",["get","Test"]]],["else",[["if",["is-function","Test"],[["set","TestResult",["call","Test"]]],["else",[["throw","\"Unknown test given in when/*\""]]]]]]],["if",["==","true","TestResult"],[["call","Success"]],["else",[["if",[">",["length","Handlers"],"1"],[["recurse",["tail","Handlers"]]],["else",[["throw","\"No matching clause in when\""]]]]]]]]],"_fndef":true,"_fnparams":["Handlers"]}],["export-global","when/*"],["if",["get-def","'MATCH_TEST'"],[["import","assert"],["assert",["is-number","1"],"\"is-number integer check\""],["assert",["is-number","1.00"],"\"is-number float check\""],["assert",["is-string","\"A\""],"\"is-string check\""],["assert",["is-list",["list"]],"\"is-list check\""],["assert",["is-atom","atom"],"\"is-atom check\""],["assert",["is-function",["scope",{"code":[[["1"]]],"_fndef":true,"_fnparams":[]}]],"\"is-function check\""],["assert",["is-function",["scope",{"code":[[["1"]]],"_fndef":true,"_fnparams":["A","B","C"]}],"3"],"\"is-function #/3 check\""],["assert",["is-dict",["dict"]],"\"is-dict check\""],["assert",["is-tuple",["tuple"]],"\"is-tuple check\""],["def","test",{"code":[[["when",["tuple",["scope",{"code":[[["is-string","What"]]],"_fndef":true,"_fnparams":[]}],["scope",{"code":[[["atom","string"]]],"_fndef":true,"_fnparams":[]}]],["tuple",["scope",{"code":[[["is-function","What"]]],"_fndef":true,"_fnparams":[]}],["scope",{"code":[[["atom","function"]]],"_fndef":true,"_fnparams":[]}]],["tuple",["scope",{"code":[[["is-list","What"]]],"_fndef":true,"_fnparams":[]}],["scope",{"code":[[["atom","list"]]],"_fndef":true,"_fnparams":[]}]],["tuple",["scope",{"code":[[["is-atom","What"]]],"_fndef":true,"_fnparams":[]}],["scope",{"code":[[["atom","atom"]]],"_fndef":true,"_fnparams":[]}]],["tuple",["scope",{"code":[[["is-dict","What"]]],"_fndef":true,"_fnparams":[]}],["scope",{"code":[[["atom","dict"]]],"_fndef":true,"_fnparams":[]}]],["tuple",["scope",{"code":[[["is-number","What"]]],"_fndef":true,"_fnparams":[]}],["scope",{"code":[[["atom","number"]]],"_fndef":true,"_fnparams":[]}]]]]],"_fndef":true,"_fnparams":["What"]}],["assert",["==","number",["test","1"]],"\"when/* test: number\""],["assert",["==","string",["test","\"123\""]],"\"when/* test: string\""],["try",[["test",["tuple","foo"]],["throw","\"Uh oh\""]],{"code":[[["if",["==",["exception-message","E"],"\"No matching clause in when\""],[["atom","true"]],["else",[["throw","E"]]]]]],"_fndef":true,"_fnparams":["E"]}],["def","test-any",{"code":[[["when",["tuple","true",{"code":[[["\"PASS\""]]],"_fndef":true,"_fnparams":[]}]]]],"_fndef":true,"_fnparams":["What"]}],["assert",["==","\"PASS\"",["test-any","any"]],"\"when/* test: success path\""],["print","\"Match tests succeeded\""]]]]]
+module.exports=[[["import","lists"],["def","class-init",{"code":[[["\"__init\""]]],"_fndef":true,"_fnparams":[]}],["def","class-class",{"code":[[["\"__class__\""]]],"_fndef":true,"_fnparams":[]}],["def","class-funcs",{"code":[[["\"__functions__\""]]],"_fndef":true,"_fnparams":[]}],["def","class-instc",{"code":[[["\"__instance__\""]]],"_fndef":true,"_fnparams":[]}],["export-global","class-init/0","class-class/0","class-funcs/0","class-instc/0"],["def","member-set",{"code":[[["dict-set","Instance","Name","Value"]]],"_fndef":true,"_fnparams":["Instance","Name","Value"]}],["def","member-get",{"code":[[["dict-get","Instance","Name"]]],"_fndef":true,"_fnparams":["Instance","Name"]}],["def","member-present",{"code":[[["dict-present","Instance","Name"]]],"_fndef":true,"_fnparams":["Instance","Name"]}],["export-global","member-set/3","member-get/2","member-present/2"],["def","member-call/*",{"code":[[["var","Self",["head","Args"]],["set","Args",["tail","Args"]],["var","Fun",["head","Args"]],["var","Params",["++",["list","Self"],["tail","Args"]]],["var","Instance",["member-get","Self",["class-instc"]]],["var","Funcs",["member-get","Instance",["class-funcs"]]],["var","Dest",["member-get","Funcs","Fun"]],["apply","Dest","Params"]]],"_fndef":true,"_fnparams":["Args"]}],["export-global","member-call/*"],["def","class/*",{"code":[[["var","Name",["head","Args"]],["var","Members",["tail","Args"]],["var","Instance",["dict"]],["dict-set","Instance",["class-class"],"Name"],["dict-set","Instance",["class-funcs"],["dict"]],["foldl","Members","Instance",{"code":[[["member-set",["dict-get","Self",["class-funcs"]],["index","Member","0"],["index","Member","1"]],["Self"]]],"_fndef":true,"_fnparams":["Member","Self"]}]]],"_fndef":true,"_fnparams":["Args"]}],["def","new/*",{"code":[[["var","Class",["head","Args"]],["var","Params",["tail","Args"]],["var","Instance",["dict"]],["member-set",["get","Instance"],["class-instc"],["get","Class"]],["if",["member-present",["member-get","Class",["class-funcs"]],["class-init"]],[["apply","member-call",["++",["list","Instance",["class-init"]],"Params"]]]],["Instance"]]],"_fndef":true,"_fnparams":["Args"]}],["export-global","class/*","new/*"],["if",["get-def","'CLASS_TEST'"],[["var","TestClass",["class","'TestClass'",["tuple",["class-init"],{"code":[[["member-set","Self","base","Base"]]],"_fndef":true,"_fnparams":["Self","Base"]}],["tuple","'add'",{"code":[[["to-string",["+","A","B"],["member-get","Self","base"]]]],"_fndef":true,"_fnparams":["Self","A","B"]}]]],["var","Base10",["new","TestClass","10"]],["var","Base2",["new","TestClass","2"]],["print",["member-call","Base10","add","5","10"]],["print",["member-call","Base2","add","5","10"]]]]]]
 },{}],20:[function(require,module,exports){
-module.exports=[[["import","lists"],["var","ArityFuns",["dict",["tuple","1",["list","abs","acos","acosh","asin","asinh","atan","atanh","cbrt","ceil","clz32","cos","cosh","exp","expm1","floor","fround","log","log1p","log10","log2","round","sign","sin","sinh","sqrt","tan","tanh","trunc"]],["tuple","2",["list","atan2","imul","pow"]],["tuple","*",["list","hypot"]]]],["var","Math",["math-object"]],["each",["dict-keys","ArityFuns"],["scope",{"code":[[["var","Entries",["dict-get","ArityFuns","Arity"]],["each","Entries",["scope",{"code":[[["var","FullName",["atom",["+","Entry","\"/\"","Arity"]]],["if",["==","1","Arity"],[["def","FullName",["scope",{"code":[[["invoke","Math","Entry","A"]]],"_fndef":true,"_fnparams":["A"]}]],["export-global","FullName"]],["else",[["if",["==","2","Arity"],[["def","FullName",["scope",{"code":[[["invoke","Math","Entry","A","B"]]],"_fndef":true,"_fnparams":["A","B"]}]],["export-global","FullName"]],["else",[["if",["==","*","Arity"],[["def","FullName",["scope",{"code":[[["apply",["dict-get","Math","Entry"],"Args"]]],"_fndef":true,"_fnparams":["Args"]}]],["export-global","FullName"]]]]]]]]]]],"_fndef":true,"_fnparams":["Entry"]}]]]],"_fndef":true,"_fnparams":["Arity"]}]]]]
+module.exports=[[["import","\"lists\""],["var","FS",["require","\"fs\""]],["var","Path",["require","\"path\""]],["def","resolve",{"code":[[["invoke","Path","resolve","Filename"]]],"_fndef":true,"_fnparams":["Filename"]}],["export-global","resolve/1"],["def","read-file",{"code":[[["set","Filename",["invoke","Path","resolve","Filename"]],["invoke","FS","readFileSync","Filename"]]],"_fndef":true,"_fnparams":["Filename"]}],["def","read-file",{"code":[[["set","Filename",["invoke","Path","resolve","Filename"]],["invoke","FS","readFile","Filename",["js-bridge","Callback"]]]],"_fndef":true,"_fnparams":["Filename","Callback"]}],["def","file-exists",{"code":[[["==",["true"],["invoke","FS","existsSync","Path"]]]],"_fndef":true,"_fnparams":["Path"]}],["def","is-file",{"code":[[["==",["true"],["invoke",["file-lstat","Path"],"isFile"]]]],"_fndef":true,"_fnparams":["Path"]}],["def","is-directory",{"code":[[["and",["!",["is-file","Path"]],["file-exists","Path"]]]],"_fndef":true,"_fnparams":["Path"]}],["def","file-lstat",{"code":[[["try",[["invoke","FS","lstatSync","Path"]],["catch",{"code":[[["lstat-empty","Path"]]],"_fndef":true,"_fnparams":["E"]}]]]],"_fndef":true,"_fnparams":["Path"]}],["def","read-dir",{"code":[[["invoke","FS","readdirSync","Path"]]],"_fndef":true,"_fnparams":["Path"]}],["export-global","read-dir/1"],["var","LStatMembers",["list","\"dev\"","\"mode\"","\"nlink\"","\"uid\"","\"gid\"","\"rdev\"","\"blksize\"","\"ino\"","\"size\"","\"blocks\"","\"atime\"","\"mtime\"","\"ctime\"","\"birthtime\""]],["def","lstat-empty",{"code":[[["var","Result",["dict"]],["each","LStatMembers",["scope",{"code":[[["dict-set","Result","M","0"]]],"_fndef":true,"_fnparams":["M"]}]],["dict-set","Result","isFile",["js-bridge",{"code":[[["false"]]],"_fndef":true,"_fnparams":[]}]],["get","Result"]]],"_fndef":true,"_fnparams":["Path"]}],["export-global","read-file/1","read-file/2","file-exists/1","is-file/1","is-directory/1","file-lstat/1"],["def","read-lines",{"code":[[["split",["to-string",["read-file","File"]],["regex","\"\\\\r?\\\\n\""]]]],"_fndef":true,"_fnparams":["File"]}],["export-global","read-lines/1"],["if",["==","true",["get-def","'TEST'"]],[["read-file","\"index.js\"",{"code":[[["print","\"Got Err:\"","Err"],["if",["!=",["undefined"],"Data"],[["print","\"Got Data:\"",["to-string","Data"]]]]]],"_fndef":true,"_fnparams":["Err","Data"]}],["print",["file-exists","\"run\""]],["print",["is-file","\"run\""]],["print",["is-file","\"src\""]],["print",["is-directory","\"src\""]],["print",["file-lstat","\"run1\""]],["print",["is-file","\"run1\""]]]]]]
 },{}],21:[function(require,module,exports){
-module.exports=[[["import","lists"],["var","Modules",["dict"]],["def","module-new",{"code":[[["var","InnerState",["dict"]],["var","Members",["call","Callback","Name","InnerState"]],["var","Module",["dict",["tuple","module","Name"],["tuple","state","InnerState"]]],["map",["dict-keys","Members"],["scope",{"code":[[["dict-set","Module",["+","\"fn_\"","Member"],["scope",{"code":[[["apply",["dict-get","Members","Member"],"Args"]]],"_fndef":true,"_fnparams":["Self","Args"]}]]]],"_fndef":true,"_fnparams":["Member"]}]],["dict-set","Modules","Name","Module"],["Module"]]],"_fndef":true,"_fnparams":["Name","Callback"]}],["def","module-extends",{"code":[[["throw","not_implemented"]]],"_fndef":true,"_fnparams":["Name","Overrides"]}],["def","module-call/*",{"code":[[["var","ModName",["head","Params"]],["set","Params",["tail","Params"]],["var","FunName",["+","\"fn_\"",["head","Params"]]],["set","Params",["tail","Params"]],["var","Module",["dict-get","Modules","ModName"]],["var","Fun",["dict-get","Module","FunName"]],["call","Fun","Module","Params"]]],"_fndef":true,"_fnparams":["Params"]}],["export-global","module-new/2","module-extends/2","module-call/*"],["if",["get-def","'TEST'"],[["var","M",["module-new","test",{"code":[[["dict",["tuple","add",{"code":[[["+","A","B"]]],"_fndef":true,"_fnparams":["A","B"]}]]]],"_fndef":true,"_fnparams":["State"]}]],["print",["module-call","test","add","1","2"]]]]]]
+module.exports=[[["if",["get-def","'NATIVE'"],[["def","map",{"code":[[["map-inner",["list"],"List","Callback"]]],"_fndef":true,"_fnparams":["List","Callback"]}]]],["def","map-inner",{"code":[[["if",["==","0",["length","List"]],[["Acc"]],["else",[["recurse",["++","Acc",["list",["call","Callback",["head","List"]]]],["tail","List"],"Callback"]]]]]],"_fndef":true,"_fnparams":["Acc","List","Callback"]}],["def","foldl",{"code":[[["if",["==","0",["length","List"]],[["Current"]],["else",[["recurse",["tail","List"],["call","Callback",["head","List"],"Current"],"Callback"]]]]]],"_fndef":true,"_fnparams":["List","Current","Callback"]}],["def","each",{"code":[[["each-inner","0","List","Callback"]]],"_fndef":true,"_fnparams":["List","Callback"]}],["def","each-inner",{"code":[[["if",["==","0",["length","List"]],[["atom","nil"]],["else",[["call","Callback",["head","List"],"Idx"],["recurse",["+","Idx","1"],["tail","List"],"Callback"]]]]]],"_fndef":true,"_fnparams":["Idx","List","Callback"]}],["def","each-idx",{"code":[[["each","List","Callback"]]],"_fndef":true,"_fnparams":["List","Callback"]}],["export-global","each/2","each-idx/2"],["def","seq",{"code":[[["seq","N0","N1",["?",["<","N0","N1"],"1","-1"]]]],"_fndef":true,"_fnparams":["N0","N1"]}],["def","seq",{"code":[[["set","L",["list"]],["var","N",["get","N0"]],["while",[["if",[">=","Inc","1"],[["<=","N","N1"]],[[">=","N","N1"]]]],[["set","L",["++","L",["list","N"]]],["set","N",["+","N","Inc"]]]],"L"]],"_fndef":true,"_fnparams":["N0","N1","Inc"]}],["export-global","map/2","foldl/3","each/2","seq/2","seq/3"],["var","PermutationsPossibilities",["list","0","1","2","6","24","120","720","5040","40320","362880","3628800","39916800","479001600"]],["def","permutations",{"code":[[["var","Length",["length","List"]],["var","Result",["list-fill",["index","PermutationsPossibilities","Length"],"0"]],["var","C",["list-fill","Length","0"]],["var","I","1"],["var","J","1"],["index-set","Result","0",["slice","List"]],["while",[["<","I","Length"]],[["var","CI",["index","C","I"]],["if",["<","CI","I"],[["var","K",["?",["@","I","2"],["get","CI"],"0"]],["var","P",["index","List","I"]],["index-set","List","I",["index","List","K"]],["index-set","List","K","P"],["index-set","C","I",["+","1","CI"]],["set","I","1"],["index-set","Result","J",["slice","List"]],["set","J",["+","1",["get","J"]]]],["else",[["index-set","C","I","0"],["set","I",["+","1",["get","I"]]]]]]]],["get","Result"]]],"_fndef":true,"_fnparams":["List"]}],["export-global","permutations/1"],["def","sum",{"code":[[["foldl","L","0",{"code":[[["+","N","A"]]],"_fndef":true,"_fnparams":["N","A"]}]]],"_fndef":true,"_fnparams":["L"]}],["def","prod",{"code":[[["foldl","L","1",{"code":[[["*","A","N"]]],"_fndef":true,"_fnparams":["N","A"]}]]],"_fndef":true,"_fnparams":["L"]}],["export-global","sum/1","prod/1"],["def","filter",{"code":[[["filter-inner","List","Predicate",["list"]]]],"_fndef":true,"_fnparams":["List","Predicate"]}],["def","filter-inner",{"code":[[["if",["==","0",["length","List"]],[["Acc"]],["else",[["var","Ele",["head","List"]],["if",["call","Predicate","Ele"],[["recurse",["tail","List"],"Predicate",["++","Acc",["list","Ele"]]]],["else",[["recurse",["tail","List"],"Predicate","Acc"]]]]]]]]],"_fndef":true,"_fnparams":["List","Predicate","Acc"]}],["export-global","filter/2"],["def","max/*",{"code":[[["set","List",["flatten","List"]],["foldl",["tail","List"],["head","List"],{"code":[[["?",[">","V","A"],"V","A"]]],"_fndef":true,"_fnparams":["V","A"]}]]],"_fndef":true,"_fnparams":["List"]}],["def","min/*",{"code":[[["set","List",["flatten","List"]],["foldl",["tail","List"],["head","List"],{"code":[[["?",["<","V","A"],"V","A"]]],"_fndef":true,"_fnparams":["V","A"]}]]],"_fndef":true,"_fnparams":["List"]}],["export-global","min/*","max/*"],["if",["get-def","'NATIVE'"],[["def","flat-map",{"code":[[["apply","++",["++",["list"],["map","List","Callback"]]]]],"_fndef":true,"_fnparams":["List","Callback"]}]]],["def","lcomp",{"code":[[["lcomp-inner",["list"],["head","Generators"],"Handler",["tail","Generators"],"Filter"]]],"_fndef":true,"_fnparams":["Handler","Generators","Filter"]}],["def","lcomp",{"code":[[["lcomp","Handler","Generators",{"code":[[["atom","true"]]],"_fndef":true,"_fnparams":[]}]]],"_fndef":true,"_fnparams":["Handler","Generators"]}],["def","lcomp-inner",{"code":[[["flat-map","List",["scope",{"code":[[["var","Current",["++","Base",["list","Ele"]]],["if",[">",["length","Generators"],"0"],[["lcomp-inner","Current",["head","Generators"],"Handler",["tail","Generators"],"Filter"]],["else",[["if",["apply","Filter","Current"],[["list",["apply","Handler","Current"]]],["else",[["list"]]]]]]]]],"_fndef":true,"_fnparams":["Ele"]}]]]],"_fndef":true,"_fnparams":["Base","List","Handler","Generators","Filter"]}],["export-global","lcomp/3","lcomp/2"],["def","reverse",{"code":[[["next","reverse","L",["list"]]]],"_fndef":true,"_fnparams":["L"]}],["def","reverse",{"code":[[["if",["==","0",["length","L"]],[["Acc"]],["else",[["recurse",["tail","L"],["++",["list",["head","L"]],"Acc"]]]]]]],"_fndef":true,"_fnparams":["L","Acc"]}],["export-global","reverse/1"],["def","zip",{"code":[[["zip","A","B",["list"]]]],"_fndef":true,"_fnparams":["A","B"]}],["def","zip",{"code":[[["if",["or",["==","0",["length","A"]],["==","0",["length","B"]]],[["Acc"]],["else",[["recurse",["tail","A"],["tail","B"],["++","Acc",["list",["tuple",["head","A"],["head","B"]]]]]]]]]],"_fndef":true,"_fnparams":["A","B","Acc"]}],["export-global","zip/2"],["if",["==","true",["get-def","'TEST'"]],[["var","SampleList",["list","1","2","4","8","16","32"]],["print","\"Each test: \"",["each","SampleList",{"code":[[["print","N"]]],"_fndef":true,"_fnparams":["N"]}]],["print","\"Each-idx test: \"",["each-idx","SampleList",{"code":[[["print",["++","\"\"","I","\": \"","N"]]]],"_fndef":true,"_fnparams":["N","I"]}]],["print","\"Map test: \"",["map","SampleList",{"code":[[["*","N","2"]]],"_fndef":true,"_fnparams":["N"]}]],["print","\"Foldl test: \"",["foldl","SampleList","0",{"code":[[["+","N","A"]]],"_fndef":true,"_fnparams":["N","A"]}]],["print","\"Foldl test: \"",["foldl","SampleList","0",{"code":[[["<<","N","A"]]],"_fndef":true,"_fnparams":["N","A"]}]],["print","\"Empty map test: \"",["map",["list"],{"code":[[["*","N","2"]]],"_fndef":true,"_fnparams":["N"]}]],["print","\"Empty foldl test:\"",["foldl",["list"],"0",{"code":[[["+","N","A"]]],"_fndef":true,"_fnparams":["N","A"]}]],["each","SampleList",{"code":[[["print","\"N:\"","N"]]],"_fndef":true,"_fnparams":["N"]}],["print","\"Seq test:\"",["seq","1","5"]],["print","\"Reverse seq test:\"",["seq","5","1"]],["print","\"Sum test:\"",["sum","SampleList"]],["print","\"Prod test:\"",["prod","SampleList"]],["print","\"Permutations test: \"",["permutations",["list","1","2","3"]]],["print","\"Max test:\"",["max","10","5","9","4","8","3","6","2","1","0"]],["print","\"Min test:\"",["min","10","5","9","4","8","3","6","2","1","0"]],["print","\"Filter test:\"",["filter",["seq","1","10"],{"code":[["==","0",["@","V","2"]]],"_fndef":true,"_fnparams":["V"]}]],["var","Generators",["list",["seq","1","10"],["seq","1","5"],["seq","1","3"]]],["var","Handler",{"code":[["list",["list","X","Y","Z"]]],"_fndef":true,"_fnparams":["X","Y","Z"]}],["var","Filter",{"code":[[["and",["==","0",["@","X","2"]],["==","0",["@","Y","2"]],["==","0",["@","Z","2"]]]]],"_fndef":true,"_fnparams":["X","Y","Z"]}],["print","\"List comprehension test: \"",["lcomp","Handler","Generators","Filter"]],["print","\"Reverse test: \"",["reverse","SampleList"]],["print","\"Zip test: \"",["zip",["list","a","b","c","d"],["list","1","2","3","4"]]]]]]]
 },{}],22:[function(require,module,exports){
-module.exports=[[["platform","ext"],["import","lists"],["import","random"],["import","symbols"],["var","AttemptsDefault","50000"],["def","pivot",{"code":[[["var","Current","0"],["var","Result","nil"],["var","AttemptsRemaining",["get","AttemptsDefault"]],["var","LastPrintNum",["get","AttemptsRemaining"]],["var","I","0"],["var","Permutations",["permutations","Ops"]],["var","PermutationsLength",["length",["get","Permutations"]]],["while",[["and",["!=","Current","Desired"],[">","AttemptsRemaining","0"]]],[["var","OpsToTry",["index","Permutations","I"]],["set","I",["+","1",["get","I"]]],["if",[">=","I","PermutationsLength"],[["set","I","0"]]],["var","OpsPadded",["map",["tail","Nums"],["scope",{"code":[[["list-rand","OpsToTry"]]],"_fndef":true,"_fnparams":["N"]}]]],["var","Str","\"\""],["each-idx","Nums",["scope",{"code":[[["var","Op",["+","\"\"",["index","OpsPadded","Idx"]]],["if",["!=","\"\"","Op"],[["set","Str",["+","Str","\"(\"","Op","\" \"","N","\" \""]]],["else",[["set","Str",["+","Str","N","\")\""]]]]]]],"_fndef":true,"_fnparams":["N","Idx"]}]],["set","Str",["+","Str",["repeat","\")\"",["length","Nums"]]]],["set","Current",["eval","Str"]],["if",["==","Current","Desired"],[["set","Result",["get","Str"]]]],["set","AttemptsRemaining",["-","AttemptsRemaining","1"]],["if",[">=",["-","LastPrintNum","AttemptsRemaining"],"100"],[["set","LastPrintNum",["get","AttemptsRemaining"]],["invoke",["stdout"],"write",["+","\"\\r\"","LastPrintNum"]]]]]],["invoke",["stdout"],"write","\"...Success:\\n\""],["get","Result"]]],"_fndef":true,"_fnparams":["Desired","Nums","Ops"]}],["export-global","pivot/3"],["if",["get-def","'PIVOT_TEST'"],[["var","Numbers",["list","1","5","2","2"]],["var","Operators",["list","*","+"]],["var","Desired","20"],["print",["pivot","Desired","Numbers","Operators"]],["set","Numbers",["list","0","1","2","4","8","16","32"]],["set","Operators",["list","+","*","-","/","|","^"]],["print",["pivot","63","Numbers","Operators"]],["print",["pivot","64","Numbers","Operators"]]]]]]
+module.exports=[[["def","true",{"code":[[["atom","true"]]],"_fndef":true,"_fnparams":[]}],["def","false",{"code":[[["atom","false"]]],"_fndef":true,"_fnparams":[]}],["export-global","true/0","false/0"],["def","is-number",{"code":[[["==","number",["typeof","V"]]]],"_fndef":true,"_fnparams":["V"]}],["def","is-string",{"code":[[["==","string",["typeof","V"]]]],"_fndef":true,"_fnparams":["V"]}],["def","is-function",{"code":[[["==","function",["typeof","V"]]]],"_fndef":true,"_fnparams":["V"]}],["def","is-function",{"code":[[["if",["is-function","V"],[["==","Arity",["function-arity","V"]]],["else",[["atom","false"]]]]]],"_fndef":true,"_fnparams":["V","Arity"]}],["def","is-list",{"code":[[["==","list",["typeof","V"]]]],"_fndef":true,"_fnparams":["V"]}],["def","is-atom",{"code":[[["==","atom",["typeof","V"]]]],"_fndef":true,"_fnparams":["V"]}],["def","is-dict",{"code":[[["==","dict",["typeof","V"]]]],"_fndef":true,"_fnparams":["V"]}],["def","is-tuple",{"code":[[["==","tuple",["typeof","V"]]]],"_fndef":true,"_fnparams":["V"]}],["export-global","is-number/1","is-string/1","is-function/1","is-function/2","is-list/1","is-atom/1","is-dict/1","is-tuple/1"],["def","when/*",{"code":[[["when-inner","Handlers"]]],"_fndef":true,"_fnparams":["Handlers"]}],["def","when-inner",{"code":[[["var","Handler",["head","Handlers"]],["var","Test",["index","Handler","0"]],["var","Success",["index","Handler","1"]],["var","TestResult","false"],["if",["is-atom","Test"],[["set","TestResult",["get","Test"]]],["else",[["if",["is-function","Test"],[["set","TestResult",["call","Test"]]],["else",[["throw","\"Unknown test given in when/*\""]]]]]]],["if",["==","true","TestResult"],[["call","Success"]],["else",[["if",[">",["length","Handlers"],"1"],[["recurse",["tail","Handlers"]]],["else",[["throw","\"No matching clause in when\""]]]]]]]]],"_fndef":true,"_fnparams":["Handlers"]}],["export-global","when/*"],["if",["get-def","'MATCH_TEST'"],[["import","assert"],["assert",["is-number","1"],"\"is-number integer check\""],["assert",["is-number","1.00"],"\"is-number float check\""],["assert",["is-string","\"A\""],"\"is-string check\""],["assert",["is-list",["list"]],"\"is-list check\""],["assert",["is-atom","atom"],"\"is-atom check\""],["assert",["is-function",["scope",{"code":[[["1"]]],"_fndef":true,"_fnparams":[]}]],"\"is-function check\""],["assert",["is-function",["scope",{"code":[[["1"]]],"_fndef":true,"_fnparams":["A","B","C"]}],"3"],"\"is-function #/3 check\""],["assert",["is-dict",["dict"]],"\"is-dict check\""],["assert",["is-tuple",["tuple"]],"\"is-tuple check\""],["def","test",{"code":[[["when",["tuple",["scope",{"code":[[["is-string","What"]]],"_fndef":true,"_fnparams":[]}],["scope",{"code":[[["atom","string"]]],"_fndef":true,"_fnparams":[]}]],["tuple",["scope",{"code":[[["is-function","What"]]],"_fndef":true,"_fnparams":[]}],["scope",{"code":[[["atom","function"]]],"_fndef":true,"_fnparams":[]}]],["tuple",["scope",{"code":[[["is-list","What"]]],"_fndef":true,"_fnparams":[]}],["scope",{"code":[[["atom","list"]]],"_fndef":true,"_fnparams":[]}]],["tuple",["scope",{"code":[[["is-atom","What"]]],"_fndef":true,"_fnparams":[]}],["scope",{"code":[[["atom","atom"]]],"_fndef":true,"_fnparams":[]}]],["tuple",["scope",{"code":[[["is-dict","What"]]],"_fndef":true,"_fnparams":[]}],["scope",{"code":[[["atom","dict"]]],"_fndef":true,"_fnparams":[]}]],["tuple",["scope",{"code":[[["is-number","What"]]],"_fndef":true,"_fnparams":[]}],["scope",{"code":[[["atom","number"]]],"_fndef":true,"_fnparams":[]}]]]]],"_fndef":true,"_fnparams":["What"]}],["assert",["==","number",["test","1"]],"\"when/* test: number\""],["assert",["==","string",["test","\"123\""]],"\"when/* test: string\""],["try",[["test",["tuple","foo"]],["throw","\"Uh oh\""]],{"code":[[["if",["==",["exception-message","E"],"\"No matching clause in when\""],[["atom","true"]],["else",[["throw","E"]]]]]],"_fndef":true,"_fnparams":["E"]}],["def","test-any",{"code":[[["when",["tuple","true",{"code":[[["\"PASS\""]]],"_fndef":true,"_fnparams":[]}]]]],"_fndef":true,"_fnparams":["What"]}],["assert",["==","\"PASS\"",["test-any","any"]],"\"when/* test: success path\""],["print","\"Match tests succeeded\""]]]]]
 },{}],23:[function(require,module,exports){
-module.exports=[[["var","DefaultMin","0"],["var","DefaultMax","1000000"],["def","random",{"code":[[["random","DefaultMin","DefaultMax"]]],"_fndef":true,"_fnparams":[]}],["def","random",{"code":[[["random","0","End"]]],"_fndef":true,"_fnparams":["End"]}],["def","random",{"code":[[["+","Start",["floor",["*",["rand"],["-","End","Start"]]]]]],"_fndef":true,"_fnparams":["Start","End"]}],["export","random/0","random/1","random/2"],["def","random-list-item",{"code":[[["index","List",["random",["length","List"]]]]],"_fndef":true,"_fnparams":["List"]}],["export","random-list-item/1"],["if",["get-def","'TEST'"],[["print",["random"]],["print",["random","10"]],["print",["random","1","10"]],["print",["random","1","100"]],["print",["random-list-item",["list","1","2","3","4","5","6","7"]]]]]]]
+module.exports=[[["import","lists"],["var","ArityFuns",["dict",["tuple","1",["list","abs","acos","acosh","asin","asinh","atan","atanh","cbrt","ceil","clz32","cos","cosh","exp","expm1","floor","fround","log","log1p","log10","log2","round","sign","sin","sinh","sqrt","tan","tanh","trunc"]],["tuple","2",["list","atan2","imul","pow"]],["tuple","*",["list","hypot"]]]],["var","Math",["math-object"]],["each",["dict-keys","ArityFuns"],["scope",{"code":[[["var","Entries",["dict-get","ArityFuns","Arity"]],["each","Entries",["scope",{"code":[[["var","FullName",["atom",["+","Entry","\"/\"","Arity"]]],["if",["==","1","Arity"],[["def","FullName",["scope",{"code":[[["invoke","Math","Entry","A"]]],"_fndef":true,"_fnparams":["A"]}]],["export-global","FullName"]],["else",[["if",["==","2","Arity"],[["def","FullName",["scope",{"code":[[["invoke","Math","Entry","A","B"]]],"_fndef":true,"_fnparams":["A","B"]}]],["export-global","FullName"]],["else",[["if",["==","*","Arity"],[["def","FullName",["scope",{"code":[[["apply",["dict-get","Math","Entry"],"Args"]]],"_fndef":true,"_fnparams":["Args"]}]],["export-global","FullName"]]]]]]]]]]],"_fndef":true,"_fnparams":["Entry"]}]]]],"_fndef":true,"_fnparams":["Arity"]}]]]]
 },{}],24:[function(require,module,exports){
-module.exports=[[["platform","v1"],["try",[["var","Readline",["require","\"readline\""]],["var","RL",["invoke","Readline","\"createInterface\"",["dict",["tuple","input",["stdin"]],["tuple","output",["stdout"]]]]],["invoke","RL","pause"],["def","readline",{"code":[[["invoke","RL","\"question\"","Question",["js-bridge",{"code":[[["invoke","RL","\"pause\""],["call","Callback","Answer"]]],"_fndef":true,"_fnparams":["Answer"]}]]]],"_fndef":true,"_fnparams":["Question","Callback"]}],["export-global","readline/2"]],["catch",{"code":[[["atom","nil"]]],"_fndef":true,"_fnparams":[]}]],["if",["==","true",["get-def","'TEST'"]],[["readline","\"How are you? \"",{"code":[[["print","A"],["readline","\"How are you really? \"",{"code":[[["print","B"]]],"_fndef":true,"_fnparams":["B"]}]]],"_fndef":true,"_fnparams":["A"]}]]]]]
+module.exports=[[["platform","ext"],["import","lists"],["import","random"],["import","symbols"],["var","AttemptsDefault","50000"],["def","pivot",{"code":[[["var","Current","0"],["var","Result","nil"],["var","AttemptsRemaining",["get","AttemptsDefault"]],["var","LastPrintNum",["get","AttemptsRemaining"]],["var","I","0"],["var","Permutations",["permutations","Ops"]],["var","PermutationsLength",["length",["get","Permutations"]]],["while",[["and",["!=","Current","Desired"],[">","AttemptsRemaining","0"]]],[["var","OpsToTry",["index","Permutations","I"]],["set","I",["+","1",["get","I"]]],["if",[">=","I","PermutationsLength"],[["set","I","0"]]],["var","OpsPadded",["map",["tail","Nums"],["scope",{"code":[[["list-rand","OpsToTry"]]],"_fndef":true,"_fnparams":["N"]}]]],["var","Str","\"\""],["each-idx","Nums",["scope",{"code":[[["var","Op",["+","\"\"",["index","OpsPadded","Idx"]]],["if",["!=","\"\"","Op"],[["set","Str",["+","Str","\"(\"","Op","\" \"","N","\" \""]]],["else",[["set","Str",["+","Str","N","\")\""]]]]]]],"_fndef":true,"_fnparams":["N","Idx"]}]],["set","Str",["+","Str",["repeat","\")\"",["length","Nums"]]]],["set","Current",["eval","Str"]],["if",["==","Current","Desired"],[["set","Result",["get","Str"]]]],["set","AttemptsRemaining",["-","AttemptsRemaining","1"]],["if",[">=",["-","LastPrintNum","AttemptsRemaining"],"100"],[["set","LastPrintNum",["get","AttemptsRemaining"]],["invoke",["stdout"],"write",["+","\"\\r\"","LastPrintNum"]]]]]],["invoke",["stdout"],"write","\"...Success:\\n\""],["get","Result"]]],"_fndef":true,"_fnparams":["Desired","Nums","Ops"]}],["export-global","pivot/3"],["if",["get-def","'PIVOT_TEST'"],[["var","Numbers",["list","1","5","2","2"]],["var","Operators",["list","*","+"]],["var","Desired","20"],["print",["pivot","Desired","Numbers","Operators"]],["set","Numbers",["list","0","1","2","4","8","16","32"]],["set","Operators",["list","+","*","-","/","|","^"]],["print",["pivot","63","Numbers","Operators"]],["print",["pivot","64","Numbers","Operators"]]]]]]
 },{}],25:[function(require,module,exports){
-module.exports=[[["import","readline"],["import","stderr"],["import","switch"],["var","ContinueLoop","true"],["var","_","nil"],["var","DebugMode","false"],["var","Result","nil"],["def","nil",{"code":[[["atom","\"nil\""]]],"_fndef":true,"_fnparams":[]}],["def","local-eval",["scope",{"code":[[["if","DebugMode",[["lithp-debug","true"]]],["set","E",["eval","Code"]],["if","DebugMode",[["lithp-debug","false"]]],["get","E"]]],"_fndef":true,"_fnparams":["Code"]}]],["var","CaseQuit",["case","\"\\\\q\"",["scope",{"code":[[["set","ContinueLoop","false"],["nil"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseUnderscore",["case","\"_\"",["scope",{"code":[["get","_"]],"_fndef":true,"_fnparams":[]}]]],["var","CaseDebugMode",["case","\"\\\\d\"",["scope",{"code":[[["set","DebugMode",["!",["get","DebugMode"]]],["print","\"Debug mode now \"",["?","DebugMode","\"ON\"","\"off\""]],["nil"]]],"_fndef":true,"_fnparams":[]}]]],["var","DisplayHelp",{"code":[[["print","\"Type standard Lithp expressions.\""],["print","\"Example: (var Fac #N::((if(== 0 N)((1))((* N(call Fac(- N 1)))))))(print (call Fac 10\""],["print","\"Or for a recursive factorial:\""],["print","\"((def f #N :: ( (def fi #N,A :: ( (if (== 1 N) ((A)) (else ((recurse (- N 1) (* N A)))) ) )) (fi N 1) )) (print (f 10)) )\""],["print","\"\""],["print","\"The following additional commands are available:\""],["print","\"  ?        Print this help\""],["print","\"  \\\\q       Quit the REPL\""],["print","\"  \\\\d       Toggle DEBUG mode\""],["print","\"  _        Print the last value\""],["print","\"\""],["nil"]]],"_fndef":true,"_fnparams":[]}],["var","CaseHelp1",["case","\"?\"","DisplayHelp"]],["var","CaseHelp2",["case","\"help\"","DisplayHelp"]],["var","CaseDefault",["default",["scope",{"code":[[["set-top-level","true"],["try",[["local-eval",["+","\"(\"","Input","\")\""]]],{"code":[[["stderr-write",["+","\"\\nError during eval: \"",["to-string","E"],"\"\\n\""]]]],"_fndef":true,"_fnparams":["E"]}]]],"_fndef":true,"_fnparams":["Input"]}]]],["var","CaseList",["list","CaseQuit","CaseUnderscore","CaseDebugMode","CaseHelp1","CaseHelp2","CaseDefault"]],["def","repl-input",["scope",{"code":[[["var","Tmp",["switch","Input","CaseList"]],["set","Result",["get","Tmp"]],["print","\"Success, result: \"","Result"],["set","\"_\"",["get","Result"]],["set-top-level","false"]]],"_fndef":true,"_fnparams":["Input"]}]],["export-global","repl-input/1"],["var","LoopHandler",["scope",{"code":[[["repl-input","Input"],["repl-loop"]]],"_fndef":true,"_fnparams":["Input"]}]],["def","repl-loop",["scope",{"code":[[["if","ContinueLoop",[["readline","\"> \"","LoopHandler"]]]]],"_fndef":true,"_fnparams":[]}]],["def","set-repl-continue",["scope",{"code":[[["set","ContinueLoop",["get","Bool"]]]],"_fndef":true,"_fnparams":["Bool"]}]],["export-global","repl-loop/0","set-repl-continue/1"]]]
+module.exports=[[["var","DefaultMin","0"],["var","DefaultMax","1000000"],["def","random",{"code":[[["random","DefaultMin","DefaultMax"]]],"_fndef":true,"_fnparams":[]}],["def","random",{"code":[[["random","0","End"]]],"_fndef":true,"_fnparams":["End"]}],["def","random",{"code":[[["+","Start",["floor",["*",["rand"],["-","End","Start"]]]]]],"_fndef":true,"_fnparams":["Start","End"]}],["export","random/0","random/1","random/2"],["def","random-list-item",{"code":[[["index","List",["random",["length","List"]]]]],"_fndef":true,"_fnparams":["List"]}],["export","random-list-item/1"],["if",["get-def","'TEST'"],[["print",["random"]],["print",["random","10"]],["print",["random","1","10"]],["print",["random","1","100"]],["print",["random-list-item",["list","1","2","3","4","5","6","7"]]]]]]]
 },{}],26:[function(require,module,exports){
-module.exports=[[["def","stderr-write",{"code":[[["invoke",["stderr"],"write","V"]]],"_fndef":true,"_fnparams":["V"]}],["export-global","stderr-write/1"]]]
+module.exports=[[["platform","v1"],["try",[["var","Readline",["require","\"readline\""]],["var","RL",["invoke","Readline","\"createInterface\"",["dict",["tuple","input",["stdin"]],["tuple","output",["stdout"]]]]],["invoke","RL","pause"],["def","readline",{"code":[[["invoke","RL","\"question\"","Question",["js-bridge",{"code":[[["invoke","RL","\"pause\""],["call","Callback","Answer"]]],"_fndef":true,"_fnparams":["Answer"]}]]]],"_fndef":true,"_fnparams":["Question","Callback"]}],["export-global","readline/2"]],["catch",{"code":[[["atom","nil"]]],"_fndef":true,"_fnparams":[]}]],["if",["==","true",["get-def","'TEST'"]],[["readline","\"How are you? \"",{"code":[[["print","A"],["readline","\"How are you really? \"",{"code":[[["print","B"]]],"_fndef":true,"_fnparams":["B"]}]]],"_fndef":true,"_fnparams":["A"]}]]]]]
 },{}],27:[function(require,module,exports){
-module.exports=[[["var","Modules",["list","assert","buffer","cache","class","file","lists","math","random","switch","symbols"]],["def","import-modules",{"code":[[["if",["!=","0",["length","List"]],[["import",["head","List"]],["recurse",["tail","List"]]]]]],"_fndef":true,"_fnparams":["List"]}],["import-modules","Modules"]]]
+module.exports=[[["import","readline"],["import","stderr"],["import","switch"],["var","ContinueLoop","true"],["var","_","nil"],["var","DebugMode","false"],["var","Result","nil"],["def","nil",{"code":[[["atom","\"nil\""]]],"_fndef":true,"_fnparams":[]}],["def","local-eval",["scope",{"code":[[["if","DebugMode",[["lithp-debug","true"]]],["set","E",["eval","Code"]],["if","DebugMode",[["lithp-debug","false"]]],["get","E"]]],"_fndef":true,"_fnparams":["Code"]}]],["var","CaseQuit",["case","\"\\\\q\"",["scope",{"code":[[["set","ContinueLoop","false"],["nil"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseUnderscore",["case","\"_\"",["scope",{"code":[["get","_"]],"_fndef":true,"_fnparams":[]}]]],["var","CaseDebugMode",["case","\"\\\\d\"",["scope",{"code":[[["set","DebugMode",["!",["get","DebugMode"]]],["print","\"Debug mode now \"",["?","DebugMode","\"ON\"","\"off\""]],["nil"]]],"_fndef":true,"_fnparams":[]}]]],["var","DisplayHelp",{"code":[[["print","\"Type standard Lithp expressions.\""],["print","\"Example: (var Fac #N::((if(== 0 N)((1))((* N(call Fac(- N 1)))))))(print (call Fac 10\""],["print","\"Or for a recursive factorial:\""],["print","\"((def f #N :: ( (def fi #N,A :: ( (if (== 1 N) ((A)) (else ((recurse (- N 1) (* N A)))) ) )) (fi N 1) )) (print (f 10)) )\""],["print","\"\""],["print","\"The following additional commands are available:\""],["print","\"  ?        Print this help\""],["print","\"  \\\\q       Quit the REPL\""],["print","\"  \\\\d       Toggle DEBUG mode\""],["print","\"  _        Print the last value\""],["print","\"\""],["nil"]]],"_fndef":true,"_fnparams":[]}],["var","CaseHelp1",["case","\"?\"","DisplayHelp"]],["var","CaseHelp2",["case","\"help\"","DisplayHelp"]],["var","CaseDefault",["default",["scope",{"code":[[["set-top-level","true"],["try",[["local-eval",["+","\"(\"","Input","\")\""]]],{"code":[[["stderr-write",["+","\"\\nError during eval: \"",["to-string","E"],"\"\\n\""]]]],"_fndef":true,"_fnparams":["E"]}]]],"_fndef":true,"_fnparams":["Input"]}]]],["var","CaseList",["list","CaseQuit","CaseUnderscore","CaseDebugMode","CaseHelp1","CaseHelp2","CaseDefault"]],["def","repl-input",["scope",{"code":[[["var","Tmp",["switch","Input","CaseList"]],["set","Result",["get","Tmp"]],["print","\"Success, result: \"","Result"],["set","\"_\"",["get","Result"]],["set-top-level","false"]]],"_fndef":true,"_fnparams":["Input"]}]],["export-global","repl-input/1"],["var","LoopHandler",["scope",{"code":[[["repl-input","Input"],["repl-loop"]]],"_fndef":true,"_fnparams":["Input"]}]],["def","repl-loop",["scope",{"code":[[["if","ContinueLoop",[["readline","\"> \"","LoopHandler"]]]]],"_fndef":true,"_fnparams":[]}]],["def","set-repl-continue",["scope",{"code":[[["set","ContinueLoop",["get","Bool"]]]],"_fndef":true,"_fnparams":["Bool"]}]],["export-global","repl-loop/0","set-repl-continue/1"]]]
 },{}],28:[function(require,module,exports){
-module.exports=[[["import","buffer"],["var","FS",["require","\"fs\""]],["def","isTTY",{"code":[[["?",["==",["true"],["index",["stdin"],"isTTY"]],"true","false"]]],"_fndef":true,"_fnparams":["Stream"]}],["def","readInputStream",{"code":[[["if",["isTTY",["stdin"]],[["\"\""]],["else",[["read-stream-to-buffer",["stdin"]]]]]]],"_fndef":true,"_fnparams":[]}],["var","BufferSize","256"],["def","stream-fd",{"code":[[["index","Stream","fd"]]],"_fndef":true,"_fnparams":["Stream"]}],["def","read-stream-to-buffer",{"code":[[["var","Result","\"\""],["var","BytesRead","1"],["var","Buf",["buffer","BufferSize"]],["while",[[">","BytesRead","0"]],[["set","BytesRead","0"],["try",[["set","BytesRead",["invoke","FS","readSync",["stream-fd","Stream"],"Buf","0","BufferSize"]],["set","Result",["+","Result",["to-string","Buf",["null"],"0","BytesRead"]]]],{"code":[[["atom","nil"]]],"_fndef":true,"_fnparams":["E"]}]]],["get","Result"]]],"_fndef":true,"_fnparams":["Stream"]}],["export-global","isTTY/1","stream-fd/1","read-stream-to-buffer/1","readInputStream/0"]]]
+module.exports=[[["def","stderr-write",{"code":[[["invoke",["stderr"],"write","V"]]],"_fndef":true,"_fnparams":["V"]}],["export-global","stderr-write/1"]]]
 },{}],29:[function(require,module,exports){
-module.exports=[[["def","concat/*",{"code":[[["var","Result","\"\""],["map","List",["scope",{"code":[[["set","Result",["+","Result",["+","\" \"","Str"]]]]],"_fndef":true,"_fnparams":["Str"]}]],["get","Result"]]],"_fndef":true,"_fnparams":["List"]}],["export-global","concat/*"]]]
+module.exports=[[["var","Modules",["list","assert","buffer","cache","class","file","lists","math","random","switch","symbols"]],["def","import-modules",{"code":[[["if",["!=","0",["length","List"]],[["import",["head","List"]],["recurse",["tail","List"]]]]]],"_fndef":true,"_fnparams":["List"]}],["import-modules","Modules"]]]
 },{}],30:[function(require,module,exports){
-module.exports=[[["def","true",{"code":[["atom","true"]],"_fndef":true,"_fnparams":[]}],["def","false",{"code":[["atom","false"]],"_fndef":true,"_fnparams":[]}],["export-global","true/0","false/0"],["def","case",{"code":[[["scope",{"code":[[["if",["==","Given","Value"],[["tuple","ok",["call","Action"]]],["else",[["tuple","false","false"]]]]]],"_fndef":true,"_fnparams":["Given"]}]]],"_fndef":true,"_fnparams":["Value","Action"]}],["def","default",{"code":[[["scope",{"code":[[["tuple","default",["call","Action","Given"]]]],"_fndef":true,"_fnparams":["Given"]}]]],"_fndef":true,"_fnparams":["Action"]}],["def","switch",{"code":[[["var","Result","nil"],["var","ResultSet","false"],["var","DefaultValue","nil"],["while",[["and",["!","ResultSet"],[">",["length","Handlers"],"0"]]],[["var","Head",["head","Handlers"]],["var","Tail",["tail","Handlers"]],["set","Handlers",["get","Tail"]],["var","InnerResult",["call","Head","Value"]],["if",["==","ok",["index","InnerResult","0"]],[["set","Result",["index","InnerResult","1"]],["set","ResultSet","true"]],["else",[["if",["==","default",["index","InnerResult","0"]],[["set","DefaultValue",["index","InnerResult","1"]]]]]]]]],["?","ResultSet","Result","DefaultValue"]]],"_fndef":true,"_fnparams":["Value","Handlers"]}],["def","switch/*",{"code":[[["switch",["head","Args"],["tail","Args"]]]],"_fndef":true,"_fnparams":["Args"]}],["if",["==","true",["get-def","'TEST'"]],[["print","\"Debug is on, running tests\""],["var","Case1",["case","1",{"code":[["\"one\""]],"_fndef":true,"_fnparams":[]}]],["var","Case2",["case","2",{"code":[["\"two\""]],"_fndef":true,"_fnparams":[]}]],["var","Case3",["case","3",{"code":[["\"three\""]],"_fndef":true,"_fnparams":[]}]],["var","Case4",["case","4",{"code":[["\"four\""]],"_fndef":true,"_fnparams":[]}]],["var","Default",["default",{"code":[[["+","\"Other: \"","Given"]]],"_fndef":true,"_fnparams":["Given"]}]],["var","Value","1"],["print",["switch","Value","Case1","Case2","Case3","Case4","Default"]],["print",["switch","Value",["list",["case","1",{"code":[["\"one\""]],"_fndef":true,"_fnparams":[]}],["case","2",{"code":[["\"two\""]],"_fndef":true,"_fnparams":[]}],["case","3",{"code":[["\"three\""]],"_fndef":true,"_fnparams":[]}],["case","4",{"code":[["\"four\""]],"_fndef":true,"_fnparams":[]}],["default",{"code":[[["+","\"Other: \"","N"]]],"_fndef":true,"_fnparams":["N"]}]]]]]],["export-global","case/2","default/1","switch/2","switch/*"]]]
+module.exports=[[["import","buffer"],["var","FS",["require","\"fs\""]],["def","isTTY",{"code":[[["?",["==",["true"],["index",["stdin"],"isTTY"]],"true","false"]]],"_fndef":true,"_fnparams":["Stream"]}],["def","readInputStream",{"code":[[["if",["isTTY",["stdin"]],[["\"\""]],["else",[["read-stream-to-buffer",["stdin"]]]]]]],"_fndef":true,"_fnparams":[]}],["var","BufferSize","256"],["def","stream-fd",{"code":[[["index","Stream","fd"]]],"_fndef":true,"_fnparams":["Stream"]}],["def","read-stream-to-buffer",{"code":[[["var","Result","\"\""],["var","BytesRead","1"],["var","Buf",["buffer","BufferSize"]],["while",[[">","BytesRead","0"]],[["set","BytesRead","0"],["try",[["set","BytesRead",["invoke","FS","readSync",["stream-fd","Stream"],"Buf","0","BufferSize"]],["set","Result",["+","Result",["to-string","Buf",["null"],"0","BytesRead"]]]],{"code":[[["atom","nil"]]],"_fndef":true,"_fnparams":["E"]}]]],["get","Result"]]],"_fndef":true,"_fnparams":["Stream"]}],["export-global","isTTY/1","stream-fd/1","read-stream-to-buffer/1","readInputStream/0"]]]
 },{}],31:[function(require,module,exports){
-module.exports=[[["def","get-fn",{"code":[[["try",[["get",["+","Name","\"/\"","Arity"]]],{"code":[[["get",["+","Name","\"/*\""]]]],"_fndef":true,"_fnparams":["E"]}]]],"_fndef":true,"_fnparams":["Name","Arity"]}],["export-global","get-fn/2"],["def","call-fn",{"code":[[["call",["get-fn","Name","1"],"Arg1"]]],"_fndef":true,"_fnparams":["Name","Arg1"]}],["def","call-fn",{"code":[[["call",["get-fn","Name","2"],"Arg1","Arg2"]]],"_fndef":true,"_fnparams":["Name","Arg1","Arg2"]}],["def","call-fn",{"code":[[["call",["get-fn","Name","3"],"Arg1","Arg2","Arg3"]]],"_fndef":true,"_fnparams":["Name","Arg1","Arg2","Arg3"]}],["def","call-fn",{"code":[[["call",["get-fn","Name","4"],"Arg1","Arg2","Arg3","Arg4"]]],"_fndef":true,"_fnparams":["Name","Arg1","Arg2","Arg3","Arg4"]}],["def","call-fn",{"code":[[["call",["get-fn","Name","5"],"Arg1","Arg2","Arg3","Arg4","Arg5"]]],"_fndef":true,"_fnparams":["Name","Arg1","Arg2","Arg3","Arg4","Arg5"]}],["def","call-fn",{"code":[[["call",["get-fn","Name","6"],"Arg1","Arg2","Arg3","Arg4","Arg5","Arg6"]]],"_fndef":true,"_fnparams":["Name","Arg1","Arg2","Arg3","Arg4","Arg5","Arg6"]}],["def","call-fn",{"code":[[["call",["get-fn","Name","7"],"Arg1","Arg2","Arg3","Arg4","Arg5","Arg6","Arg7"]]],"_fndef":true,"_fnparams":["Name","Arg1","Arg2","Arg3","Arg4","Arg5","Arg6","Arg7"]}],["export-global","call-fn/2","call-fn/3","call-fn/4","call-fn/5","call-fn/6","call-fn/7","call-fn/8"],["if",["get-def","'TEST'"],[["import","lists"],["var","Operators",["list","+","-","/","*"]],["var","A","5"],["var","B","10"],["each","Operators",["scope",{"code":[[["var","Fn",["get-fn","Op","2"]],["print",["+","A","\" \"","Op","\" \"","B","\" = \"",["call","Fn","A","B"]]]]],"_fndef":true,"_fnparams":["Op"]}]],["each","Operators",["scope",{"code":[[["print",["+","A","\" \"","Op","\" \"","B","\" = \"",["call-fn","Op","A","B"]]]]],"_fndef":true,"_fnparams":["Op"]}]]]]]]
+module.exports=[[["def","concat/*",{"code":[[["var","Result","\"\""],["map","List",["scope",{"code":[[["set","Result",["+","Result",["+","\" \"","Str"]]]]],"_fndef":true,"_fnparams":["Str"]}]],["get","Result"]]],"_fndef":true,"_fnparams":["List"]}],["export-global","concat/*"]]]
 },{}],32:[function(require,module,exports){
+module.exports=[[["def","true",{"code":[["atom","true"]],"_fndef":true,"_fnparams":[]}],["def","false",{"code":[["atom","false"]],"_fndef":true,"_fnparams":[]}],["export-global","true/0","false/0"],["def","case",{"code":[[["scope",{"code":[[["if",["==","Given","Value"],[["tuple","ok",["call","Action"]]],["else",[["tuple","false","false"]]]]]],"_fndef":true,"_fnparams":["Given"]}]]],"_fndef":true,"_fnparams":["Value","Action"]}],["def","default",{"code":[[["scope",{"code":[[["tuple","default",["call","Action","Given"]]]],"_fndef":true,"_fnparams":["Given"]}]]],"_fndef":true,"_fnparams":["Action"]}],["def","switch",{"code":[[["var","Result","nil"],["var","ResultSet","false"],["var","DefaultValue","nil"],["while",[["and",["!","ResultSet"],[">",["length","Handlers"],"0"]]],[["var","Head",["head","Handlers"]],["var","Tail",["tail","Handlers"]],["set","Handlers",["get","Tail"]],["var","InnerResult",["call","Head","Value"]],["if",["==","ok",["index","InnerResult","0"]],[["set","Result",["index","InnerResult","1"]],["set","ResultSet","true"]],["else",[["if",["==","default",["index","InnerResult","0"]],[["set","DefaultValue",["index","InnerResult","1"]]]]]]]]],["?","ResultSet","Result","DefaultValue"]]],"_fndef":true,"_fnparams":["Value","Handlers"]}],["def","switch/*",{"code":[[["switch",["head","Args"],["tail","Args"]]]],"_fndef":true,"_fnparams":["Args"]}],["if",["==","true",["get-def","'TEST'"]],[["print","\"Debug is on, running tests\""],["var","Case1",["case","1",{"code":[["\"one\""]],"_fndef":true,"_fnparams":[]}]],["var","Case2",["case","2",{"code":[["\"two\""]],"_fndef":true,"_fnparams":[]}]],["var","Case3",["case","3",{"code":[["\"three\""]],"_fndef":true,"_fnparams":[]}]],["var","Case4",["case","4",{"code":[["\"four\""]],"_fndef":true,"_fnparams":[]}]],["var","Default",["default",{"code":[[["+","\"Other: \"","Given"]]],"_fndef":true,"_fnparams":["Given"]}]],["var","Value","1"],["print",["switch","Value","Case1","Case2","Case3","Case4","Default"]],["print",["switch","Value",["list",["case","1",{"code":[["\"one\""]],"_fndef":true,"_fnparams":[]}],["case","2",{"code":[["\"two\""]],"_fndef":true,"_fnparams":[]}],["case","3",{"code":[["\"three\""]],"_fndef":true,"_fnparams":[]}],["case","4",{"code":[["\"four\""]],"_fndef":true,"_fnparams":[]}],["default",{"code":[[["+","\"Other: \"","N"]]],"_fndef":true,"_fnparams":["N"]}]]]]]],["export-global","case/2","default/1","switch/2","switch/*"]]]
+},{}],33:[function(require,module,exports){
+module.exports=[[["def","get-fn",{"code":[[["try",[["get",["+","Name","\"/\"","Arity"]]],{"code":[[["get",["+","Name","\"/*\""]]]],"_fndef":true,"_fnparams":["E"]}]]],"_fndef":true,"_fnparams":["Name","Arity"]}],["export-global","get-fn/2"],["def","call-fn",{"code":[[["call",["get-fn","Name","1"],"Arg1"]]],"_fndef":true,"_fnparams":["Name","Arg1"]}],["def","call-fn",{"code":[[["call",["get-fn","Name","2"],"Arg1","Arg2"]]],"_fndef":true,"_fnparams":["Name","Arg1","Arg2"]}],["def","call-fn",{"code":[[["call",["get-fn","Name","3"],"Arg1","Arg2","Arg3"]]],"_fndef":true,"_fnparams":["Name","Arg1","Arg2","Arg3"]}],["def","call-fn",{"code":[[["call",["get-fn","Name","4"],"Arg1","Arg2","Arg3","Arg4"]]],"_fndef":true,"_fnparams":["Name","Arg1","Arg2","Arg3","Arg4"]}],["def","call-fn",{"code":[[["call",["get-fn","Name","5"],"Arg1","Arg2","Arg3","Arg4","Arg5"]]],"_fndef":true,"_fnparams":["Name","Arg1","Arg2","Arg3","Arg4","Arg5"]}],["def","call-fn",{"code":[[["call",["get-fn","Name","6"],"Arg1","Arg2","Arg3","Arg4","Arg5","Arg6"]]],"_fndef":true,"_fnparams":["Name","Arg1","Arg2","Arg3","Arg4","Arg5","Arg6"]}],["def","call-fn",{"code":[[["call",["get-fn","Name","7"],"Arg1","Arg2","Arg3","Arg4","Arg5","Arg6","Arg7"]]],"_fndef":true,"_fnparams":["Name","Arg1","Arg2","Arg3","Arg4","Arg5","Arg6","Arg7"]}],["export-global","call-fn/2","call-fn/3","call-fn/4","call-fn/5","call-fn/6","call-fn/7","call-fn/8"],["if",["get-def","'TEST'"],[["import","lists"],["var","Operators",["list","+","-","/","*"]],["var","A","5"],["var","B","10"],["each","Operators",["scope",{"code":[[["var","Fn",["get-fn","Op","2"]],["print",["+","A","\" \"","Op","\" \"","B","\" = \"",["call","Fn","A","B"]]]]],"_fndef":true,"_fnparams":["Op"]}]],["each","Operators",["scope",{"code":[[["print",["+","A","\" \"","Op","\" \"","B","\" = \"",["call-fn","Op","A","B"]]]]],"_fndef":true,"_fnparams":["Op"]}]]]]]]
+},{}],34:[function(require,module,exports){
 module.exports={
   "_args": [
     [
@@ -2162,7 +2893,7 @@ module.exports={
     ]
   ],
   "_from": "git+https://github.com/andrakis/node-lithp.git",
-  "_id": "lithp@0.20.2",
+  "_id": "lithp@0.22.2",
   "_inCache": true,
   "_installable": true,
   "_location": "/lithp",
@@ -2187,8 +2918,8 @@ module.exports={
   "_requiredBy": [
     "/lithp-pkg"
   ],
-  "_resolved": "git+https://github.com/andrakis/node-lithp.git#b3972d932ccf08ab0136b67822239c3f1e6b1166",
-  "_shasum": "40b725f297bc55a6c64d5c016648160cdb32e5f8",
+  "_resolved": "git+https://github.com/andrakis/node-lithp.git#bafadc5e13a0cb7d9a86f60b34d458fe0a8e6f7b",
+  "_shasum": "074ca70dfb430cc60afa23b0c2de4cc6dc8554dd",
   "_shrinkwrap": null,
   "_spec": "lithp@git+https://github.com/andrakis/node-lithp.git",
   "_where": "/home/daedalus/git/lithp-webide/node_modules/lithp-pkg",
@@ -2206,7 +2937,7 @@ module.exports={
   "dependencies": {},
   "description": "A small Lisp-like language with a tiny interpreter",
   "devDependencies": {},
-  "gitHead": "b3972d932ccf08ab0136b67822239c3f1e6b1166",
+  "gitHead": "bafadc5e13a0cb7d9a86f60b34d458fe0a8e6f7b",
   "homepage": "https://github.com/andrakis/node-lithp#readme",
   "keywords": [
     "lisp",
@@ -2216,7 +2947,7 @@ module.exports={
   "main": "index.js",
   "name": "lithp",
   "optionalDependencies": {},
-  "readme": "Lithp\n=====\n\nA small Lisp-like programming language, with a small interpreter.\n-----------------------------------------------------------------\n\nThis language borrows some ideas from Lisp (functional programming, the\nfunction call syntax itself) but is designed around a small interpreter to\ncarry out the basic execution, and builtin library functions to provide\ncontrol flow, function definitions, and basic arithmatic and similar\noperations.\n\nIt aims to provide a basic framework as powerful as JavaScript. Much of this\nis accomplished through the use of native Lithp [modules](https://github.com/andrakis/node-lithp/tree/master/modules)\nand some powerful builtin functions allowing use of native Node.js modules.\n\nThe [readfile example](https://github.com/andrakis/node-lithp/blob/master/samples/readfile.lithp) demonstrates all of the above features, importing the\nNode.js `fs` module, and calling `fs.readFileSync` and `fs.readFile` using a\ncallback and a Lithp function to print the results.\n\nThe [main interpreter](https://github.com/andrakis/node-lithp/blob/master/lib/interpreter.js) is around 270 lines of sparse code.\nThis size would be even lower without the\ndebug statements and detailed comments.\n\nLanguage Examples\n=================\n\nThe examples are in the [samples](https://github.com/andrakis/node-lithp/tree/master/samples) directory.\n\nSimple test\n-----------\n\nPrint a string.\n\n\t((set Test \"test\")\n\t (print \"Test: \" Test))\n\n\nSimple function\n---------------\n\nDefine a simple function and call it.\n\n\t((def add #A,B :: ((+ A B)))\n\t (print \"Add 5+10: \" (add 5 10)))\n\n\nMultiple functions and logic\n----------------------------\n\nDefine two functions and use comparison logic to print a message\nbased on the input.\n\n\t(\n\t\t(def is_zero#N :: ((== 0 N)))\n\t\t(def test#N :: (\n\t\t\t(if (is_zero N) (\n\t\t\t\t(print \"N is zero\")\n\t\t\t) (else (\n\t\t\t\t(print \"N is not zero, it is: \" N)\n\t\t\t)))\n\t\t))\n\t\t(test 1)\n\t\t(test 0)\n\t)\n\nA recursive function\n--------------------\n\nDefine a recursive function that calculates the factorial of the\ngiven number, and call it.\n\n\t((def fac #N :: (\n\t\t(if (== 0 N) (1)\n\t\t\t(else ((* N (fac (- N 1)))))\n\t\t)\n\t))\n\t(set Test 10)\n\t(print \"factorial of \" Test \": \" (fac Test)))\n\nA tail recursive function\n-------------------------\n\nTail recursion is implemented via the builtin recurse/* function.\n\n\t((def fac-recursive #N :: (\n\t\t(def inner #N,Acc :: (\n\t\t\t(if (== 0 N) (\n\t\t\t\t(Acc)\n\t\t\t) (else (\n\t\t\t\t(recurse (- N 1) (* N Acc))\n\t\t\t)))\n\t\t))\n\t\t(inner N 0)\n\t))\n\t(print (fac-recursive 50)))\n\nList comprehension\n------------------\n\nList comprehension is provided by the `lists` module. Here is an example usage:\n\n\tCode:\n\t\t(import lists)\n\t\t% Supply 3 generators\n\t\t(set Generators (list (seq 1 10) (seq 1 5) (seq 1 3)))\n\t\t% Handler simply returns a list of given numbers\n\t\t(set Handler #X,Y,Z::((list X Y Z)))\n\t\t% Filter checks that X, Y, and Z are divisible by two using modulo (@).\n\t\t(set Filter #X,Y,Z::((and (== 0 (@ X 2)) (== 0 (@ Y 2)) (== 0 (@ Z 2)))))\n\t\t(print \"List comprehension test: \" (lcomp Handler Generators Filter))\n\tOutput:\n\t\tList comprehension test:  [ [ 2, 2, 2 ],\n\t\t  [ 2, 4, 2 ],\n\t\t  [ 4, 2, 2 ],\n\t\t  [ 4, 4, 2 ],\n\t\t  [ 6, 2, 2 ],\n\t\t  [ 6, 4, 2 ],\n\t\t  [ 8, 2, 2 ],\n\t\t  [ 8, 4, 2 ],\n\t\t  [ 10, 2, 2 ],\n\t\t  [ 10, 4, 2 ] ]\n\nRunning some sample code\n========================\n\nYou have three options:\n\n  * The online REPL\n\n     A REPL is [available online](https://andrakis.github.io/lithp/) that will run basic code snippits. This does not yet support running an entire script.\n\n  * The console REPL\n\n     The REPL, or Read Execute Print Loop, is available in the top level directory. To start it invoke:\n\n\t\t./repl          or\n\t\t./repl.lithp\n\n  * Run a script file\n\n     Use the file `run.js` in the top level directory, and specify a path to a Lithp\n     source file. There are [several provided](https://github.com/andrakis/node-lithp/tree/master/samples) that work with the current parser.\n\n    To run the [factorial example](https://github.com/andrakis/node-lithp/blob/master/samples/factorial.lithp):\n\n    ```\n        node run.js samples/factorial.lithp\n    ```\n\n    You can see the internals of what the parser and interpreter are doing by passing\n    the `-d` flag to run.js to enable debug mode. This prints out a tree of function\n    calls, allowing you to follow the interpreters call sequence.\n\nLanguage Status\n===============\n\nVersion: 0.20.2 (STABLE)\n---------------------\n\nCurrently the language can run hand-compiled code or use the Bootstrap Parser\nfor a fairly feature-complete compilation experience. The parser does not\ncurrently supports all the constructs it should - these are being corrected\nas they are found.\n\nModules are supported, and a standard library is starting to be expanded upon.\nFor more information on modules, see the [module](https://github.com/andrakis/node-lithp/blob/master/samples/module.lithp) example for how functions may be defined, exported,\nand imported.\n\nSee `run.js` or the `Running some sample code` section for information on how\nto run existing examples of Lithp code, parsed by the Bootstrap Parser.\n\nThe Bootstrap Parser or Platform V0 Parser is written in JavaScript for\nquick implementation. See the `Longterm goals` section for information about\nthe design of a new parser, implemented in Lithp.\n\nThe Bootstrap Parser is very simple and will not protect you from simple mistakes\nlike too many closing brackets. It also gets tripped up over some slight syntax\nissues, but the basic framework implemented should allow for all of these to be\ncorrected.\n\nImplemented milestones\n----------------------\n\n* Parsing\n\n  * Serialization of compiled OpChains to AST. Allows for other Lithp interpreters to run parsed code. (A C# interpreter is in progress.)\n\n  * AST parsing and compilation has been implemented.\n\n  * This allows faster script startup, and allows packaging the entire project using browserify.\n\n* Modules\n\n  * A list comprehension function, `lcomp`, is available in the [lists module](https://github.com/andrakis/node-lithp/blob/master/modules/lists.lithp)\n\n  * The same module also provides a flat-map function.\n\n  * Lists module has been improved with use of recursive functions.\n\n* REPL\n\n  * An online REPL is [available](https://andrakis.github.io/lithp/)\n\n  * A REPL is available for Node.js. Simply run `./repl` to start it. Type `?` for help.\n\n* Language enhancements\n\n  * Package the REPL using browserify to provide an online interpreter. (see [lithp-pkg](https://github.com/andrakis/lithp-pkg))\n\n  * Implemented `recurse/*`, enabling tail recursion.\n\n  * Implemented `while/2`, enabling non-recursive looping.\n\n  * The lists module has been rewritten to use `while/2`, resulting in much less\n    memory usage and improved runtime speed.\n\n  * Moved many functions from `Platform V1` to standard builtin library.\n\n  * Added many math builtins.\n\n  * Added missing regex test function (`test/2`)\n\n  * Added `env/0`, `argv/0`, `cwd/0` for command line information.\n\n  * Added number parsing: `parse-float/1`, `parse-int/1`\n\n  * Added `eval/1` allowing runtime code evaluation using the Bootstrap Parser.\n    Also adds `eval/*` for providing additional variables.\n\n  * Added `chr/1` and `asc/1` for converting to and from character codes and strings.\n\n* Debugging enhancements\n\n  * User defined functions now have a readable name, resulting in much more readable\n    debug output.\n\n  * The spacing and depth indications have been corrected and are now more consistent.\n\n  * No longer prints known symbol names when a symbol is not found. This was proving to\n    be too useless.\n\n* BootStrap Parser\n\n  * This basic parser, written in JavaScript, is able to convert scripts to the\n    OpChains the interpreter needs.\n\n  * It is designed to be powerful enough to parse enough Lithp code with which\n    to implement a better parser. To this end, there are numerous [examples](https://github.com/andrakis/node-lithp/tree/master/samples)\n    demonstrating the language and what the parser is capable of parsing.\n\n  * It is considered feature complete. Only bugfixes are to be implemented.\n\n  * Future parsing work is to be done on the Platform V1 parser, implemented\n    in Lithp and parsed by this parser. This should make maintenance and enhancements\n    easier to implement.\n\n  * Now recognises a number of builtin functions and saves runtime speed by resolving\n    these to arity star functions during parsing.\n\n  * Floating point numbers now work correctly, as does \\t escape sequence.\n\n  * Issues parsing tabs and newlines corrected.\n\n* Module system\n\n  * Allows scripts to import another module. Imported module is parsed by\n    the BootStrap parser and all functions run in their own instance of Lithp.\n\n  * A small standard library is provided. This is being expanded upon.\n\n  * Modules can define their own functions, call any function they want, and\n    export defined functions.\n\n  * Scripts that import modules add them to their function definition tree.\n\n  * Imported functions run in the new instance, retaining access to all their\n    own functions and variables.\n\n  * Scripts that call imported functions can be passed any Lithp object,\n    including anonymous functions.\n\n  * When passed anonymous functions will, like the imported module functions,\n    run in the instance of the interpreter in which they were defined. This\n    retains their access to all defined functions and variables.\n\n  * Enhanced import/1 to search a set of module paths, allowing for greater\n    flexibility.\n\n  * Several standard modules are now provided\n\n  * Added `import-instance/1` which retains the old behaviour of `import/1`.\n    `import/1` no longer imports modules into a new instance.\n\n* Speed improvements\n\n  * A number of enhancements have been made that improve the runtime speed\n    of the language. These include quicker name lookups, caching of arity\n    star functions once recognised, and strict mode.\n\n  * Strict mode is now implemented across all files.\n\nShort term goals\n----------------\n\n* Implement a Lithp package system with library dependancies.\n\n* Expand the standard module library.\n\n* The language is considered powerful enough and feature complete that\n  personal work has begun on new projects using Lithp as their base language. These are all works in progress.\n\n  * [Livium](https://github.com/andrakis/lithp-livium) - an implementation of Vi in Lithp.\n\n  * [Lithp-pkg](https://github.com/andrakis/lithp-pkg) - package Lithp into a browserified file.\n\n  * [Dungeons of Lithp](https://github.com/andrakis/lithp-dol) - a MUD-style dungeon crawler.\n\nLongterm goals\n--------------\n\nThese features are desired, but may be a long time coming.\n\n* Platform V1: Parser\n\n\tThe new native parser will feature more language features, including the ability\n\tto alter the parser itself at runtime, allowing completely new features to be\n\timplemented at runtime.\n\nDesign\n======\n\nThe basic syntax is very Lisp-like, however it has its own runtime library\nthat uses much different names, design, and implementation. For instance, the\nLithp code is broken down in OpChains, function calls, and literal values, and\nthese are interpreted to run the program. In comparison, Lisp implementations\noften use a low level virtual machine or compiles your code to an executable.\n\nIt also borrows some core ideas from Erlang:\n\n\t* Tuples:                       {val1, val2, ...}\n\t* Atoms:                        lowercase-Start-Is-Atom\n\t* Quoted Atoms:                 'A quoted atom'\n\t* Variables:                    StartWithUpperCase\n\t* Functions include arity:      (def add/2 #A,B :: ((+ A B)))\n\t                                Note that if not provided, this is\n\t                                automatically added according to the\n\t                                number of parameters the function takes.\n\t                                All functions in the definition table\n\t                                have the arity in their name.\n\t* Modules can export functions: (export add/2 divide/2)\n\t* Scripts can import modules:   (import \"lib\")\n\t                                Note that Erlang expects a list of function\n\t                                arity definitions for importing, whereas\n\t                                all exported functions are imported here.\n\n\nHowever, features such as destructive assignment are present, which differs\nfrom Erlang. A number of other useful features such as pattern matching,\nlist comprehension, binary buffers are implemented as modules.\n\nAdditionally, one may define functions with an arity of *, which\npasses all parameters in the first parameter:\n\n\t((def count_params/* #List :: ((print \"You gave me \" (length List) \" parameters\")))\n\t (count_params 1 2 3 atom \"string\" 'quoted atom' #N :: (\"anonymous function\")))\n\nOther features are available in many other languages. The prime one of these\nis the functional programming approach. All functions return the value of the\nlast executed function call, even if there are multiple function calls\npreceding it.\n\nAll Lithp functions are implemented as anonymous functions, which allows you\nto assign them to variables, provide them as function arguments, and call them\nusing the `call` function. The builtin `def` function adds anonymous functions\nto a closure table allowing them to be called at runtime by name. All builtins\nare also added to this table, making them indistuinguisable from user defined\nfunctions.\n\nVariable scoping (closures) is somewhat implemented, but none yet to liking.\nPresently, one needs to call the `scope/1` function. This takes an anonymous\nfunction as its parameter, and returns a callable function which retains\naccess to the scope in which it was defined. Ideally this would be implemented\nas a parser feature.\n\nA standard Lithp script compiles to an OpChain, which contains function calls,\nliteral values, and potentially more OpChains with the same.\n\nA simple program:\n\n\t((print \"Hello, world!\"))\n\nThis is an OpChain consisting of a single function call, with a single literal\nvalue as a parameter. Parameters are separated by spaces, and the function name\nappears as the first token after the opening bracket. Any function currently\ndefined by builtins or using the def/2 function is callable in this way.\n\nOther functions, such as those assigned to variables, must be called with the\ncall/* function.\n\nEach function call may itself have additional function calls for the values of\nthe parameters. These are parsed first, and this process repeats recursively\nuntil all parameters for the current function call have been resolved. This\nusually involves calling intermediate functions, which repeat the same process.\nThis is the meat of the language.\n\n\t ((def add #A,B :: ((+ A B)))\n\t  (print \"Add 5+10: \" (add 5 10)))\n\nThis simple design, consisting of only nested function calls and literal values,\nallows for a very simple interpreter that can implement powerful constructs.\n\nLithp functions are always anonymous, take a certain number of parameters (in\nthe above example, A and B), and assign this anonymous function to an atom in\nthe current closure, allowing it to be called like other inbuilt functions.\n\nWhen functions are set in the closure, they include in their name the arity of\nthe function. This is either a zero-or-positive-number, or * to indicate the\nfunction takes an unlimited number of parameters. In the case of arity * all\narguments are passed in the first parameter of the function.\n\nPrint itself is an arity * builtin runtime function defined in JavaScript.\nMost low level functions are provided in JavaScript, such as basic control\nflow, comparison, assignment and retrieval, and defining new functions in the\nLithp language itself.\n\nThe runtime library is fairly small, aiming for a very basic but usable\nset of functions that can implement most algorithms.\nMore advanced functionality is provided by additional libraries, such as\nwith Platform V1 which has functions for manipulating native Lithp types\n(for creating and filling OpChains.)\n\nSome functions are provided for readability, such as in an if construct:\n\n\t\t(if (== 0 N) (1)\n\t\t\t(else ((* N (fac (- N 1)))))\n\t\t)\n\nIn this case, else is just a function that calls the given function chain.\nIt could be ommitted, but it provides better readability in a language that\nis very terse.\n\nModules\n=======\n\nModules allow functions from one script to be exported to another script.\n\nAn example is provided, consisting of a [module](https://github.com/andrakis/node-lithp/blob/master/samples/module_lib.lithp) and a [script](https://github.com/andrakis/node-lithp/blob/master/samples/module.lithp) to call it.\n\nThe module is a standard Lithp script that contains calls to export/* to\nnote symbols to export:\n\n\t% lib.lithp\n\t((def add #A,B :: ((+ A B)))\n\t (export add/2))\n\nA different Lithp script may then use import/1 to bring all exported\ndefinitions into the running script's closure:\n\n\t% main.lithp\n\t((import \"lib\")\n\t (print \"2+2:\" (add 2 2)))\n\nHowever, a key point is that imported functions run in a different instance\nof the interpreter, allowing them to perform their own runtime logic completely\nindependent of the script that imported it.\n\nSince variables and function calls are resolved prior to calling a function, one\nmay call an imported function and provide it parameters and callbacks native to\nthe a different instance of the Lithp interpreter than the module.\n\nTo put it another way, module functions run in their own instance, but you can pass\nthem any usual value, including callbacks that retain access to defined values.\n\nSyntax Highlighting\n===================\n\nSee the directory `syntax` for Lithp syntax files.\n\nThe following syntax files are provided:\n\n* EditPlus\n\n   Standard EditPlus syntax file. Seems to work correctly.\n\n* VIM\n\n   Based upon the Lisp syntax file. The author's understanding of VIM syntax files\n   is not very good, hence it doesn't do everything correctly.\n",
+  "readme": "Lithp\n=====\n\nA small Lisp-like programming language, with a small interpreter.\n-----------------------------------------------------------------\n\nThis language borrows some ideas from Lisp (functional programming, the\nfunction call syntax itself) but is designed around a small interpreter to\ncarry out the basic execution, and builtin library functions to provide\ncontrol flow, function definitions, and basic arithmatic and similar\noperations.\n\nIt aims to provide a basic framework as powerful as JavaScript. Much of this\nis accomplished through the use of native Lithp [modules](https://github.com/andrakis/node-lithp/tree/master/modules)\nand some powerful builtin functions allowing use of native Node.js modules.\n\nThe [main interpreter](https://github.com/andrakis/node-lithp/blob/master/lib/interpreter.js) is around 270 lines of sparse code.\nThis size would be even lower without the\ndebug statements and detailed comments.\n\nLanguage Examples\n=================\n\nMore examples are in the [samples](https://github.com/andrakis/node-lithp/tree/master/samples) directory.\n\nSimple test\n-----------\n\nPrint a string.\n\n\t((set Test \"test\")\n\t (print \"Test: \" Test))\n\n[Try it online!](https://andrakis.github.io/lithp-webide/?code=JSBQcmludCBhIHN0cmluZy4KKAogICAgKHNldCBUZXN0ICJ0ZXN0IikKICAgIChwcmludCAiVGVzdDogIiBUZXN0KQopCg==)\n\nSimple function\n---------------\n\nDefine a simple function and call it.\n\n\t((def add #A,B :: ((+ A B)))\n\t (print \"Add 5+10: \" (add 5 10)))\n\n[Try it online!](https://andrakis.github.io/lithp-webide/?code=JSBEZWZpbmUgYSBzaW1wbGUgZnVuY3Rpb24gYW5kIGNhbGwgaXQuCigKICAgIChkZWYgYWRkICNBLEIgOjogKCgrIEEgQikpKQogICAgKHByaW50ICJBZGQgNSsxMDogIiAoYWRkIDUgMTApKQopCg==)\n\nMultiple functions and logic\n----------------------------\n\nDefine two functions and use comparison logic to print a message\nbased on the input.\n\n\t(\n\t\t(def is_zero #N :: ((== 0 N)))\n\t\t(def test #N :: (\n\t\t\t(if (is_zero N) (\n\t\t\t\t(print \"N is zero\")\n\t\t\t) (else (\n\t\t\t\t(print \"N is not zero, it is: \" N)\n\t\t\t)))\n\t\t))\n\t\t(test 1)\n\t\t(test 0)\n\t)\n\n[Try it online!](https://andrakis.github.io/lithp-webide/?code=JSBEZWZpbmUgdHdvIGZ1bmN0aW9ucyBhbmQgdXNlIGNvbXBhcmlzb24gbG9naWMgdG8gcHJpbnQgYSBtZXNzYWdlCiUgYmFzZWQgb24gdGhlIGlucHV0LgooCiAgICAoZGVmIGlzX3plcm8gI04gOjogKCg9PSAwIE4pKSkKICAgIChkZWYgdGVzdCAjTiA6OiAoCiAgICAgICAgKGlmIChpc196ZXJvIE4pICgKICAgICAgICAgICAgKHByaW50ICJOIGlzIHplcm8iKQogICAgICAgICkgKGVsc2UgKAogICAgICAgICAgICAocHJpbnQgIk4gaXMgbm90IHplcm8sIGl0IGlzOiAiIE4pCiAgICAgICAgKSkpCiAgICApKQogICAgKHRlc3QgMSkKICAgICh0ZXN0IDApCikK)\n\nA recursive function\n--------------------\n\nDefine a recursive function that calculates the factorial of the\ngiven number, and call it.\n\n\t((def fac #N :: (\n\t\t(if (== 0 N) (1)\n\t\t\t(else ((* N (fac (- N 1)))))\n\t\t)\n\t))\n\t(set Test 10)\n\t(print \"factorial of \" Test \": \" (fac Test)))\n\n[Try it online!](https://andrakis.github.io/lithp-webide/?code=JSBEZWZpbmUgYSByZWN1cnNpdmUgZnVuY3Rpb24gdGhhdCBjYWxjdWxhdGVzIHRoZSBmYWN0b3JpYWwgb2YgdGhlCiUgZ2l2ZW4gbnVtYmVyLCBhbmQgY2FsbCBpdC4KKAogICAgKGRlZiBmYWMgI04gOjogKAogICAgICAgIChpZiAoPT0gMCBOKSAoMSkKICAgICAgICAgICAgKGVsc2UgKCgqIE4gKGZhYyAoLSBOIDEpKSkpKQogICAgICAgICkKICAgICkpCiAgICAoc2V0IFRlc3QgMTApCiAgICAocHJpbnQgImZhY3RvcmlhbCBvZiAiIFRlc3QgIjogIiAoZmFjIFRlc3QpKQopCg==)\n\nA tail recursive function\n-------------------------\n\nTail recursion is implemented via the builtin recurse/* function.\n\n\t((def fac-recursive #N :: (\n\t\t(def inner #N,Acc :: (\n\t\t\t(if (== 0 N) (\n\t\t\t\t(Acc)\n\t\t\t) (else (\n\t\t\t\t(recurse (- N 1) (* N Acc))\n\t\t\t)))\n\t\t))\n\t\t(inner N 1)\n\t))\n\t(print (fac-recursive 50)))\n\n[Try it online!](https://andrakis.github.io/lithp-webide/?code=JSBUYWlsIHJlY3Vyc2lvbiBpcyBpbXBsZW1lbnRlZCB2aWEgdGhlIGJ1aWx0aW4gcmVjdXJzZS8qIGZ1bmN0aW9uLgooCiAgICAoZGVmIGZhYy1yZWN1cnNpdmUgI04gOjogKAogICAgICAgIChkZWYgaW5uZXIgI04sQWNjIDo6ICgKICAgICAgICAgICAgKGlmICg9PSAwIE4pICgKICAgICAgICAgICAgICAgIChBY2MpCiAgICAgICAgICAgICkgKGVsc2UgKAogICAgICAgICAgICAgICAgKHJlY3Vyc2UgKC0gTiAxKSAoKiBOIEFjYykpCiAgICAgICAgICAgICkpKQogICAgICAgICkpCiAgICAgICAgKGlubmVyIE4gMSkKICAgICkpCiAgICAocHJpbnQgKGZhYy1yZWN1cnNpdmUgNTApKQopCg==)\n\nList comprehension\n------------------\n\nList comprehension is provided by the `lists` module. Here is an example usage:\n\n\tCode:\n\t\t(import lists)\n\t\t% Supply 3 generators\n\t\t(set Generators (list (seq 1 10) (seq 1 5) (seq 1 3)))\n\t\t% Handler simply returns a list of given numbers\n\t\t(set Handler #X,Y,Z::((list X Y Z)))\n\t\t% Filter checks that X, Y, and Z are divisible by two using modulo (@).\n\t\t(set Filter #X,Y,Z::((and (== 0 (@ X 2)) (== 0 (@ Y 2)) (== 0 (@ Z 2)))))\n\t\t(print \"List comprehension test: \" (lcomp Handler Generators Filter))\n\tOutput:\n\t\tList comprehension test:  [ [ 2, 2, 2 ],\n\t\t  [ 2, 4, 2 ],\n\t\t  [ 4, 2, 2 ],\n\t\t  [ 4, 4, 2 ],\n\t\t  [ 6, 2, 2 ],\n\t\t  [ 6, 4, 2 ],\n\t\t  [ 8, 2, 2 ],\n\t\t  [ 8, 4, 2 ],\n\t\t  [ 10, 2, 2 ],\n\t\t  [ 10, 4, 2 ] ]\n\n[Try it online!](https://andrakis.github.io/lithp-webide/?code=JSBMaXN0IGNvbXByZWhlbnNpb24gaXMgcHJvdmlkZWQgYnkgdGhlIGBsaXN0c2AgbW9kdWxlLiBIZXJlIGlzIGFuIGV4YW1wbGUgdXNhZ2U6CigKICAgIChpbXBvcnQgbGlzdHMpCiAgICAlIFN1cHBseSAzIGdlbmVyYXRvcnMKICAgIChzZXQgR2VuZXJhdG9ycyAobGlzdCAoc2VxIDEgMTApIChzZXEgMSA1KSAoc2VxIDEgMykpKQogICAgJSBIYW5kbGVyIHNpbXBseSByZXR1cm5zIGEgbGlzdCBvZiBnaXZlbiBudW1iZXJzCiAgICAoc2V0IEhhbmRsZXIgI1gsWSxaOjooKGxpc3QgWCBZIFopKSkKICAgICUgRmlsdGVyIGNoZWNrcyB0aGF0IFgsIFksIGFuZCBaIGFyZSBkaXZpc2libGUgYnkgdHdvIHVzaW5nIG1vZHVsbyAoQCkuCiAgICAoc2V0IEZpbHRlciAjWCxZLFo6OigoYW5kICg9PSAwIChAIFggMikpICg9PSAwIChAIFkgMikpICg9PSAwIChAIFogMikpKSkpCiAgICAocHJpbnQgIkxpc3QgY29tcHJlaGVuc2lvbiB0ZXN0OiAiIChsY29tcCBIYW5kbGVyIEdlbmVyYXRvcnMgRmlsdGVyKSkKKQ==)\n\nRunning some sample code\n========================\n\nYou have four options:\n\n  * The online Web IDE\n\n     An [IDE capable of running Lithp code](https://andrakis.github.io/lithp-webide) directly is available.\n\n  * The online REPL\n\n     A REPL is [available online](https://andrakis.github.io/lithp/) that will run basic code snippits. This does not yet support running an entire script.\n\n  * The console REPL\n\n     The REPL, or Read Execute Print Loop, is available in the top level directory. To start it invoke:\n\n\t\t./repl          or\n\t\t./repl.lithp\n\n  * Run a script file\n\n     Use the file `run.js` in the top level directory, and specify a path to a Lithp\n     source file. There are [several provided](https://github.com/andrakis/node-lithp/tree/master/samples) that work with the current parser.\n\n    To run the [factorial example](https://github.com/andrakis/node-lithp/blob/master/samples/factorial.lithp):\n\n    ```\n        node run.js samples/factorial.lithp\n    ```\n\n    You can see the internals of what the parser and interpreter are doing by passing\n    the `-d` flag to run.js to enable debug mode. This prints out a tree of function\n    calls, allowing you to follow the interpreters call sequence.\n\nLanguage Status\n===============\n\nVersion: 0.22.0 (STABLE)\n---------------------\n\nA [web IDE](https://andrakis.github.io/lithp-webide) is available for developing in your browswer.\n\nCurrently the language can run hand-compiled code or use the Bootstrap Parser\nfor a fairly feature-complete compilation experience. The parser does not\ncurrently supports all the constructs it should - these are being corrected\nas they are found.\n\nModules are supported, and a standard library is starting to be expanded upon.\nFor more information on modules, see the [module](https://github.com/andrakis/node-lithp/blob/master/samples/module.lithp) example for how functions may be defined, exported,\nand imported.\n\nSee `run.js` or the `Running some sample code` section for information on how\nto run existing examples of Lithp code, parsed by the Bootstrap Parser.\n\nThe Bootstrap Parser or Platform V0 Parser is written in JavaScript for\nquick implementation. See the `Longterm goals` section for information about\nthe design of a new parser, implemented in Lithp.\n\nThe Bootstrap Parser is very simple and will not protect you from simple mistakes\nlike too many closing brackets. It also gets tripped up over some slight syntax\nissues, but the basic framework implemented should allow for all of these to be\ncorrected.\n\nImplemented milestones\n----------------------\n\n* Lithp in the browser\n\n  * [lithp-pkg](https://github.com/andrakis/lithp-pkg) has been used to package all of Lithp up into a set of files that browserify can use.\n\n  * [Online web IDE](https://andrakis.github.io/lithp-webide), developed using [lithp-webide](https://github.com/andrakis/lithp-webide).\n\n* Parsing\n\n  * Serialization of compiled OpChains to AST. Allows for other Lithp interpreters to run parsed code. (A C# interpreter is in progress.)\n\n  * AST parsing and compilation has been implemented.\n\n  * This allows faster script startup, and allows packaging the entire project using browserify.\n\n* Modules\n\n  * A list comprehension function, `lcomp`, is available in the [lists module](https://github.com/andrakis/node-lithp/blob/master/modules/lists.lithp)\n\n  * The same module also provides a flat-map function.\n\n  * Lists module has been improved with use of recursive functions.\n\n* REPL\n\n  * An online REPL is [available](https://andrakis.github.io/lithp/)\n\n  * A REPL is available for Node.js. Simply run `./repl` to start it. Type `?` for help.\n\n* Language enhancements\n\n  * Package the REPL using browserify to provide an online interpreter. (see [lithp-pkg](https://github.com/andrakis/lithp-pkg))\n\n  * Implemented `recurse/*`, enabling tail recursion.\n\n  * Implemented `while/2`, enabling non-recursive looping.\n\n  * The lists module has been rewritten to use `while/2`, resulting in much less\n    memory usage and improved runtime speed.\n\n  * Moved many functions from `Platform V1` to standard builtin library.\n\n  * Added many math builtins.\n\n  * Added missing regex test function (`test/2`)\n\n  * Added `env/0`, `argv/0`, `cwd/0` for command line information.\n\n  * Added number parsing: `parse-float/1`, `parse-int/1`\n\n  * Added `eval/1` allowing runtime code evaluation using the Bootstrap Parser.\n    Also adds `eval/*` for providing additional variables.\n\n  * Added `chr/1` and `asc/1` for converting to and from character codes and strings.\n\n* Debugging enhancements\n\n  * User defined functions now have a readable name, resulting in much more readable\n    debug output.\n\n  * The spacing and depth indications have been corrected and are now more consistent.\n\n  * No longer prints known symbol names when a symbol is not found. This was proving to\n    be too useless.\n\n* BootStrap Parser\n\n  * This basic parser, written in JavaScript, is able to convert scripts to the\n    OpChains the interpreter needs.\n\n  * It is designed to be powerful enough to parse enough Lithp code with which\n    to implement a better parser. To this end, there are numerous [examples](https://github.com/andrakis/node-lithp/tree/master/samples)\n    demonstrating the language and what the parser is capable of parsing.\n\n  * It is considered feature complete. Only bugfixes are to be implemented.\n\n  * Future parsing work is to be done on the Platform V1 parser, implemented\n    in Lithp and parsed by this parser. This should make maintenance and enhancements\n    easier to implement.\n\n  * Now recognises a number of builtin functions and saves runtime speed by resolving\n    these to arity star functions during parsing.\n\n  * Floating point numbers now work correctly, as does \\t escape sequence.\n\n  * Issues parsing tabs and newlines corrected.\n\n* Module system\n\n  * Allows scripts to import another module. Imported module is parsed by\n    the BootStrap parser and all functions run in their own instance of Lithp.\n\n  * A small standard library is provided. This is being expanded upon.\n\n  * Modules can define their own functions, call any function they want, and\n    export defined functions.\n\n  * Scripts that import modules add them to their function definition tree.\n\n  * Imported functions run in the new instance, retaining access to all their\n    own functions and variables.\n\n  * Scripts that call imported functions can be passed any Lithp object,\n    including anonymous functions.\n\n  * When passed anonymous functions will, like the imported module functions,\n    run in the instance of the interpreter in which they were defined. This\n    retains their access to all defined functions and variables.\n\n  * Enhanced import/1 to search a set of module paths, allowing for greater\n    flexibility.\n\n  * Several standard modules are now provided\n\n  * Added `import-instance/1` which retains the old behaviour of `import/1`.\n    `import/1` no longer imports modules into a new instance.\n\n* Speed improvements\n\n  * A number of enhancements have been made that improve the runtime speed\n    of the language. These include quicker name lookups, caching of arity\n    star functions once recognised, and strict mode.\n\n  * Strict mode is now implemented across all files.\n\nShort term goals\n----------------\n\n* Implement a Lithp package system with library dependancies.\n\n* Expand the standard module library.\n\n* The language is considered powerful enough and feature complete that\n  personal work has begun on new projects using Lithp as their base language. These are all works in progress.\n\n  * [Livium](https://github.com/andrakis/lithp-livium) - an implementation of Vi in Lithp.\n\n  * [Lithp-pkg](https://github.com/andrakis/lithp-pkg) - package Lithp into a browserified file.\n\n  * [Lithp-webide](https://github.com/andrakis/lithp-webide) - an IDE for the browser supporting Lithp.\n\n  * [Dungeons of Lithp](https://github.com/andrakis/lithp-dol) - a MUD-style dungeon crawler.\n\nLongterm goals\n--------------\n\nThese features are desired, but may be a long time coming.\n\n* Platform V1: Parser\n\n\tThe new native parser will feature more language features, including the ability\n\tto alter the parser itself at runtime, allowing completely new features to be\n\timplemented at runtime.\n\nDesign\n======\n\nThe basic syntax is very Lisp-like, however it has its own runtime library\nthat uses much different names, design, and implementation. For instance, the\nLithp code is broken down in OpChains, function calls, and literal values, and\nthese are interpreted to run the program. In comparison, Lisp implementations\noften use a low level virtual machine or compiles your code to an executable.\n\nIt also borrows some core ideas from Erlang:\n\n\t* Tuples:                       {val1, val2, ...}\n\t* Atoms:                        lowercase-Start-Is-Atom\n\t* Quoted Atoms:                 'A quoted atom'\n\t* Variables:                    StartWithUpperCase\n\t* Functions include arity:      (def add/2 #A,B :: ((+ A B)))\n\t                                Note that if not provided, this is\n\t                                automatically added according to the\n\t                                number of parameters the function takes.\n\t                                All functions in the definition table\n\t                                have the arity in their name.\n\t* Modules can export functions: (export add/2 divide/2)\n\t* Scripts can import modules:   (import \"lib\")\n\t                                Note that Erlang expects a list of function\n\t                                arity definitions for importing, whereas\n\t                                all exported functions are imported here.\n\n\nHowever, features such as destructive assignment are present, which differs\nfrom Erlang. A number of other useful features such as pattern matching,\nlist comprehension, binary buffers are implemented as modules.\n\nAdditionally, one may define functions with an arity of *, which\npasses all parameters in the first parameter:\n\n\t((def count_params/* #List :: ((print \"You gave me \" (length List) \" parameters\")))\n\t (count_params 1 2 3 atom \"string\" 'quoted atom' #N :: (\"anonymous function\")))\n\nOther features are available in many other languages. The prime one of these\nis the functional programming approach. All functions return the value of the\nlast executed function call, even if there are multiple function calls\npreceding it.\n\nAll Lithp functions are implemented as anonymous functions, which allows you\nto assign them to variables, provide them as function arguments, and call them\nusing the `call` function. The builtin `def` function adds anonymous functions\nto a closure table allowing them to be called at runtime by name. All builtins\nare also added to this table, making them indistuinguisable from user defined\nfunctions.\n\nVariable scoping (closures) is somewhat implemented, but none yet to liking.\nPresently, one needs to call the `scope/1` function. This takes an anonymous\nfunction as its parameter, and returns a callable function which retains\naccess to the scope in which it was defined. Ideally this would be implemented\nas a parser feature.\n\nA standard Lithp script compiles to an OpChain, which contains function calls,\nliteral values, and potentially more OpChains with the same.\n\nA simple program:\n\n\t((print \"Hello, world!\"))\n\nThis is an OpChain consisting of a single function call, with a single literal\nvalue as a parameter. Parameters are separated by spaces, and the function name\nappears as the first token after the opening bracket. Any function currently\ndefined by builtins or using the def/2 function is callable in this way.\n\nOther functions, such as those assigned to variables, must be called with the\ncall/* function.\n\nEach function call may itself have additional function calls for the values of\nthe parameters. These are parsed first, and this process repeats recursively\nuntil all parameters for the current function call have been resolved. This\nusually involves calling intermediate functions, which repeat the same process.\nThis is the meat of the language.\n\n\t ((def add #A,B :: ((+ A B)))\n\t  (print \"Add 5+10: \" (add 5 10)))\n\nThis simple design, consisting of only nested function calls and literal values,\nallows for a very simple interpreter that can implement powerful constructs.\n\nLithp functions are always anonymous, take a certain number of parameters (in\nthe above example, A and B), and assign this anonymous function to an atom in\nthe current closure, allowing it to be called like other inbuilt functions.\n\nWhen functions are set in the closure, they include in their name the arity of\nthe function. This is either a zero-or-positive-number, or * to indicate the\nfunction takes an unlimited number of parameters. In the case of arity * all\narguments are passed in the first parameter of the function.\n\nPrint itself is an arity * builtin runtime function defined in JavaScript.\nMost low level functions are provided in JavaScript, such as basic control\nflow, comparison, assignment and retrieval, and defining new functions in the\nLithp language itself.\n\nThe runtime library is fairly small, aiming for a very basic but usable\nset of functions that can implement most algorithms.\nMore advanced functionality is provided by additional libraries, such as\nwith Platform V1 which has functions for manipulating native Lithp types\n(for creating and filling OpChains.)\n\nSome functions are provided for readability, such as in an if construct:\n\n\t\t(if (== 0 N) (1)\n\t\t\t(else ((* N (fac (- N 1)))))\n\t\t)\n\nIn this case, else is just a function that calls the given function chain.\nIt could be ommitted, but it provides better readability in a language that\nis very terse.\n\nModules\n=======\n\nModules allow functions from one script to be exported to another script.\n\nAn example is provided, consisting of a [module](https://github.com/andrakis/node-lithp/blob/master/samples/module_lib.lithp) and a [script](https://github.com/andrakis/node-lithp/blob/master/samples/module.lithp) to call it.\n\nThe module is a standard Lithp script that contains calls to export/* to\nnote symbols to export:\n\n\t% lib.lithp\n\t((def add #A,B :: ((+ A B)))\n\t (export add/2))\n\nA different Lithp script may then use import/1 to bring all exported\ndefinitions into the running script's closure:\n\n\t% main.lithp\n\t((import \"lib\")\n\t (print \"2+2:\" (add 2 2)))\n\nHowever, a key point is that imported functions run in a different instance\nof the interpreter, allowing them to perform their own runtime logic completely\nindependent of the script that imported it.\n\nSince variables and function calls are resolved prior to calling a function, one\nmay call an imported function and provide it parameters and callbacks native to\nthe a different instance of the Lithp interpreter than the module.\n\nTo put it another way, module functions run in their own instance, but you can pass\nthem any usual value, including callbacks that retain access to defined values.\n\nSyntax Highlighting\n===================\n\nSee the directory `syntax` for Lithp syntax files.\n\nThe following syntax files are provided:\n\n* EditPlus\n\n   Standard EditPlus syntax file. Seems to work correctly.\n\n* VIM\n\n   Based upon the Lisp syntax file. The author's understanding of VIM syntax files\n   is not very good, hence it doesn't do everything correctly.\n",
   "readmeFilename": "README.md",
   "repository": {
     "type": "git",
@@ -2225,10 +2956,10 @@ module.exports={
   "scripts": {
     "postinstall": "if [ ! -e run ]; then ln -s run.js run; fi"
   },
-  "version": "0.20.2"
+  "version": "0.22.2"
 }
 
-},{}],33:[function(require,module,exports){
+},{}],35:[function(require,module,exports){
 (function (global){
 /**
  * Bootstrap Parser, Platform V0, for Lithp
@@ -2824,7 +3555,7 @@ exports.BootstrapParser = BootstrapParser;
 
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./../../index":4,"util":81}],34:[function(require,module,exports){
+},{"./../../index":7,"util":83}],36:[function(require,module,exports){
 /**
  * Parser V1, Platform V0, switch() implementation.
  *
@@ -3024,7 +3755,7 @@ exports.functions = {
 	"switch": lib_switch
 };
 
-},{"./../../.":4,"util":81}],35:[function(require,module,exports){
+},{"./../../.":7,"util":83}],37:[function(require,module,exports){
 /**
  * Standard library for Parser V1, Platform V0.
  *
@@ -3230,89 +3961,89 @@ function lib_with (chain) {
 	 */
 }
 
-},{"./../../.":4,"./lib-parser-switch":34,"util":81}],36:[function(require,module,exports){
+},{"./../../.":7,"./lib-parser-switch":36,"util":83}],38:[function(require,module,exports){
 module.exports=[[["import","\"modules/repl\""],["print","\"Welcome to Lithp v\"",["host-version"],"\"running on\"",["host"]],["print","\"Type \\\\q exit. Type ? for help.\""],["repl-loop"]]]
-},{}],37:[function(require,module,exports){
-module.exports=[[["import","\"lists\""],["def","f",{"code":[[["/",["*","A","B","C"],["+","B","C",["-","0","A"]],["+","A","C",["-","0","B"]],["+","A","B",["-","0","C"]]]]],"_fndef":true,"_fnparams":["A","B","C"]}],["print",["f","1","1","1"]],["print",["f","3","4","5"]],["print",["f","42","42","3.14"]],["print",["f","14","6","12"]],["print",["f","6","12","14"]],["print",["f","0.5","0.6","0.7"]]]]
-},{}],38:[function(require,module,exports){
-module.exports=[[["def","get-fn-by-name",{"code":[[["var","R1",["+","Name","\"/\""]],["var","Ref",["+","R1","Arity"]],["get",["to-string","Ref"]]]],"_fndef":true,"_fnparams":["Name","Arity"]}],["'print'","\"+ is\"",["get-fn-by-name","+","*"]],["call",["get-fn-by-name","\"print\"","*"],"\"Testing\""]]]
 },{}],39:[function(require,module,exports){
-module.exports=[[["platform","v1"],["platform","ext"],["import","\"file\""],["import","\"switch\""],["invoke",["stdin"],"setRawMode","1"],["def","readkey",{"code":[[["invoke",["stdin"],"resume"],["invoke",["stdin"],"on","data",["js-bridge",{"code":[[["invoke",["stdin"],"pause"],["call","Callback","Data"]]],"_fndef":true,"_fnparams":["Data"]}]]]],"_fndef":true,"_fnparams":["Callback"]}],["def","inc",{"code":[[["+","V","1"]]],"_fndef":true,"_fnparams":["V"]}],["def","dec",{"code":[[["-","V","1"]]],"_fndef":true,"_fnparams":["V"]}],["def","prog",{"code":[[["index","BfProg","X"]]],"_fndef":true,"_fnparams":["X"]}],["def","bracket-open",{"code":[[["var","BracketOpenInner",["scope",{"code":[[["var","Y",["-",["length","BfProg"],"Ip"]],["if",["<","X","Y"],[["var","Ch",["prog",["+","Ip","X"]],["if",["==","Ch","\"]\""],[["call","BracketOpenInner",["dec","OpenBraces"],["inc","X"]]],["else",[["if",["==","Ch","\"]\""],[["call","BracketOpenInner",["inc","OpenBraces"],["inc","X"]]],["else",[["if",["==","0","OpenBrces"],[["if",["==",["stack-peek"],"Ip"],[["stack-pop"]],["else",[["call","BracketOpenInner","OpenBraces",["inc","X"]]]]]]]]]]]]]]]]]],"_fndef":true,"_fnparams":["OpenBraces","X"]}]],["call","BracketOpenInner","1","1"]]],"_fndef":true,"_fnparams":[]}],["def","stack-push",{"code":[[["invoke","Stack","push","N"]]],"_fndef":true,"_fnparams":["N"]}],["def","stack-pop",{"code":[[["invoke","Stack","pop"]]],"_fndef":true,"_fnparams":[]}],["def","stack-peek",{"code":[[["?",[">",["length","Stack"],"0"],["index","Stack",["-",["length","Stack"],"1"]],"nil"]]],"_fndef":true,"_fnparams":[]}],["def","mem",{"code":[[["var","V",["dict-get","Mem","Ptr"]],["?",["==","V",["undefined"]],"0","V"]]],"_fndef":true,"_fnparams":["Ptr"]}],["var","Source","\"+<<---[[<+>->++++>---<<]>++]<<<++.<+++.<..<-.<<++.<-.>>>.<.>>.>-.<<<<+.\""],["var","Stack",["list"]],["var","BfProg",["split","Source","\"\""]],["var","Mem",["dict"]],["var","Ptr","0"],["var","Ip","0"],["var","Len",["length","BfProg"]],["var","CasePtrInc",["case","\">\"",["scope",{"code":[[["set","Ptr",["inc","Ptr"]]]],"_fndef":true,"_fnparams":[]}]]],["var","CasePtrDec",["case","\"<\"",["scope",{"code":[[["set","Ptr",["dec","Ptr"]]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseMemInc",["case","\"+\"",["scope",{"code":[[["var","I",["mem","Ptr"]],["dict-set","Mem","Ptr",["inc","I"]]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseMemDec",["case","\"-\"",["scope",{"code":[[["var","I",["mem","Ptr"]],["dict-set","Mem","Ptr",["dec","I"]]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseWrite",["case","\".\"",["scope",{"code":[[["var","I",["mem","Ptr"]],["print","I"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseRead",["case","\",\"",["scope",{"code":[[["readkey",["scope",{"code":[[["dict-set","Mem","Ptr",["index","Key","0"]]]],"_fndef":true,"_fnparams":["Key"]}]]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseBracketOpen",["case","\"[\"",["scope",{"code":[[["if",["==","0",["mem","Ptr"]],[["bracket-open"]],["else",[["stack-push","Ip"]]]]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseBracketClose",["case","\"]\"",["scope",{"code":[[["if",["==","0",["mem","Ptr"]],[["stack-pop"]],["else",[["set","Ip",["stack-peek"]]]]]]],"_fndef":true,"_fnparams":[]}]]],["var","SwitchCases",["list","CasePtrInc","CasePtrDec","CaseMemInc","CaseMemDec","CaseWrite","CaseRead","CaseBracketOpen","CaseBracketClose"]],["def","execute-contents",{"code":[[["set","BfProg",["get","FileData"]],["set","Len",["length","BfProg"]],["set","Ip","0"],["set","Ptr","0"],["print","\"Loaded \"","Len","\" bytes\""],["execution-loop"]]],"_fndef":true,"_fnparams":["FileData"]}],["var","ExecutionCond",{"code":[[["<","Ip","Len"]]],"_fndef":true,"_fnparams":[]}],["var","ExecutionAction",{"code":[[[["switch",["prog","Ip"],"SwitchCases"],["set","Ip",["inc","Ip"]]]]],"_fndef":true,"_fnparams":[]}],["def","execution-loop",{"code":[[["while","ExecutionCond","ExecutionAction"]]],"_fndef":true,"_fnparams":[]}],["if",["!=","false",["get-def","'FILE'"]],[["var","File",["+","\"\"",["get-def","'FILE'"]]],["read-file","File",["scope",{"code":[[["if",["==",["null"],"Err"],[["print","File","\" loaded, starting execution\""],["execute-contents","Data"]]]]],"_fndef":true,"_fnparams":["Err","Data"]}]]],["else",[["execution-loop"]]]]]]
+module.exports=[[["import","\"lists\""],["def","f",{"code":[[["/",["*","A","B","C"],["+","B","C",["-","0","A"]],["+","A","C",["-","0","B"]],["+","A","B",["-","0","C"]]]]],"_fndef":true,"_fnparams":["A","B","C"]}],["print",["f","1","1","1"]],["print",["f","3","4","5"]],["print",["f","42","42","3.14"]],["print",["f","14","6","12"]],["print",["f","6","12","14"]],["print",["f","0.5","0.6","0.7"]]]]
 },{}],40:[function(require,module,exports){
-module.exports=[[["import","\"bignum\""],["import","\"lists\""],["var","FL",["dict"]],["var","Base","16"],["def","b",{"code":[[["bignum","N"]]],"_fndef":true,"_fnparams":["N"]}],["def","s",{"code":[[["to-string","N","Base"]]],"_fndef":true,"_fnparams":["N"]}],["def","fib",{"code":[[["if",["b<=","N",["b","2"]],[["b","1"]],[["+",["fibFL",["b-","N",["b","2"]]],["fibFL",["b-","N",["b","1"]]]]]]]],"_fndef":true,"_fnparams":["N"]}],["def","fibFL",{"code":[[["if",["dict-present","FL",["s","N"]],[["dict-get","FL",["s","N"]]],[["var","I",["fib","N"]],["set","FL",["dict-set","FL",["s","N"],"I"]],["I"]]]]],"_fndef":true,"_fnparams":["N"]}],["def","fib-orial",{"code":[[["bprod",["map",["seq","1","N"],["scope",{"code":[[["fib",["b","I"]]]],"_fndef":true,"_fnparams":["I"]}]]]]],"_fndef":true,"_fnparams":["N"]}],["each",["seq","2","20"],["scope",{"code":[[["print",["s",["fib-orial","N"]]]]],"_fndef":true,"_fnparams":["N"]}]]]]
+module.exports=[[["def","get-fn-by-name",{"code":[[["var","R1",["+","Name","\"/\""]],["var","Ref",["+","R1","Arity"]],["get",["to-string","Ref"]]]],"_fndef":true,"_fnparams":["Name","Arity"]}],["'print'","\"+ is\"",["get-fn-by-name","+","*"]],["call",["get-fn-by-name","\"print\"","*"],"\"Testing\""]]]
 },{}],41:[function(require,module,exports){
-module.exports=[[["import","lists"],["import","math"],["import","readline"],["import","switch"],["import","stderr"],["var","Acc","0"],["def","=",{"code":[["Value"]],"_fndef":true,"_fnparams":["Ignored","Value"]}],["def","v",{"code":[["Acc"]],"_fndef":true,"_fnparams":[]}],["def","p",{"code":[[["print",["format-acc"]],["v"]]],"_fndef":true,"_fnparams":[]}],["def","f",{"code":[[["floor","Acc"]]],"_fndef":true,"_fnparams":[]}],["def","c",{"code":[[["ceil","Acc"]]],"_fndef":true,"_fnparams":[]}],["def","e",{"code":[[["exit"]]],"_fndef":true,"_fnparams":[]}],["def","acc-op",["scope",{"code":[[["var","Code",["+","\"(\"","Op","\" Acc \"","Value","\")\""]],["stderr-write",["+","\"Code: \"","Code","\"\\n\""]],["eval","Code"]]],"_fndef":true,"_fnparams":["Op","Value"]}]],["var","Commands",["dict",["tuple","\"c\"","\"Ceil of Acc\""],["tuple","\"f\"","\"Floor of Acc\""],["tuple","\"h\"","\"Display this help\""],["tuple","\"?\"","\"Display this help\""],["tuple","\"e\"","\"Exit\""],["tuple","\"p\"","\"Print Acc\""],["tuple","\"v\"","\"Current value of Acc\""],["tuple","\"=\"","\"Set Acc to given value\""],["tuple","\"H\"","\"Set hex mode output\""],["tuple","\"D\"","\"Set decimal mode output\""],["tuple","\"B\"","\"Set binary mode output\""]]],["var","AccFormat","\"D\""],["def","format-acc",{"code":[[["format-acc","AccFormat"]]],"_fndef":true,"_fnparams":[]}],["var","FormatAccCaseHex",["case","\"H\"",["scope",{"code":[[["+","\"0x\"",["to-string","Acc","16"]]]],"_fndef":true,"_fnparams":[]}]]],["var","FormatAccCaseDecimal",["case","\"D\"",["scope",{"code":[[["get","Acc"]]],"_fndef":true,"_fnparams":[]}]]],["var","FormatAccCaseBinary",["case","\"B\"",["scope",{"code":[[["+","\"B\"",["to-string","Acc","2"]]]],"_fndef":true,"_fnparams":[]}]]],["var","FormatAccCaseList",["list","FormatAccCaseHex","FormatAccCaseDecimal","FormatAccCaseBinary"]],["def","format-acc",{"code":[[["switch","Format","FormatAccCaseList"]]],"_fndef":true,"_fnparams":["Format"]}],["def","set-acc-format",{"code":[[["set","AccFormat",["get","Format"]],["v"]]],"_fndef":true,"_fnparams":["Format"]}],["var","BuiltinsAvailable",["dict",["tuple","1",["list","abs","acos","acosh","asin","asinh","atan","atanh","cbrt","ceil","clz32","cos","cosh","floor","hypot","log","log10","log1p","log2","sign","sin","sinh","aqrt","tan","tanh"]],["tuple","2",["list","min","max","round","pow","imul","exp","expm1","fround","round"]]]],["def","show-help",{"code":[[["print","\"Available commands:\""],["each",["dict-keys","Commands"],{"code":[[["print","\"    \"","Command","\" -> \"",["index","Commands","Command"]]]],"_fndef":true,"_fnparams":["Command"]}],["print","\"Syntax: op value value value\""],["print","\"    eg: = 1\""],["print","\"      : + 2 2 3 v (sinh (pi))\""],["print","\"      : = 33.548739357257745\""],["print","\"Available builtins:\""],["print",["join",["map",["dict-keys",["dict-get","BuiltinsAvailable","1"]],{"code":[[["+","\"(\"",["dict-get",["dict-get","BuiltinsAvailable","1"],"Name"],"\" N)\""]]],"_fndef":true,"_fnparams":["Name"]}],"\", \""]],["print",["join",["map",["dict-keys",["dict-get","BuiltinsAvailable","2"]],{"code":[[["+","\"(\"",["dict-get",["dict-get","BuiltinsAvailable","2"],"Name"],"\" A B)\""]]],"_fndef":true,"_fnparams":["Name"]}],"\", \""]],["get","Acc"]]],"_fndef":true,"_fnparams":[]}],["var","CasePrint",["case","\"p\"",["scope",{"code":[[["p"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseQuit",["case","\"q\"",["scope",{"code":[[["e"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseCurrent",["case","\"v\"",["scope",{"code":[[["v"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseFloor",["case","\"f\"",["scope",{"code":[[["f"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseCeil",["case","\"c\"",["scope",{"code":[[["c"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseHex",["case","\"H\"",["scope",{"code":[[["set-acc-format","\"H\""]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseDecimal",["case","\"D\"",["scope",{"code":[[["set-acc-format","\"D\""]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseBinary",["case","\"B\"",["scope",{"code":[[["set-acc-format","\"B\""]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseHelp1",["case","\"h\"",["scope",{"code":[[["show-help"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseHelp2",["case","\"?\"",["scope",{"code":[[["show-help"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseDefault",["default",["scope",{"code":[[["print","\"Unknown command\""],["get","Acc"]]],"_fndef":true,"_fnparams":["Given"]}]]],["var","CaseList",["list","CasePrint","CaseQuit","CaseCurrent","CaseFloor","CaseCeil","CaseHex","CaseDecimal","CaseBinary","CaseHelp1","CaseHelp2","CaseDefault"]],["def","parse",{"code":[[["var","Matches",["match","Entry","\"([-=+*/!@#$%^&<>a-z]+) (.*)$\""]],["if",["==",["null"],"Matches"],[["switch","Entry","CaseList"]],["else",[["var","Tail",["index","Matches","2"]],["set","Tail",["replace","Tail",["regex","\"(?:^|\\\\s)([a-z]+)(?=\\\\s|$)\"","\"g\""],["js-bridge",{"code":[[["+","\"(\"",["trim","Value"],"\") \""]]],"_fndef":true,"_fnparams":["Value"]}]]],["try",[["acc-op",["index","Matches","1"],"Tail"]],{"code":[[["stderr-write",["+","\"Failed to parse: \"",["to-string","E"],"\"\\n\""]],["c"]]],"_fndef":true,"_fnparams":["E"]}]]]]]],"_fndef":true,"_fnparams":["Entry"]}],["def","input-loop",{"code":[[["readline",["+",["format-acc"],"\">\""],["scope",{"code":[[["set","Acc",["parse","Value"]],["input-loop"]]],"_fndef":true,"_fnparams":["Value"]}]]]],"_fndef":true,"_fnparams":[]}],["input-loop"]]]
+module.exports=[[["platform","v1"],["platform","ext"],["import","\"file\""],["import","\"switch\""],["invoke",["stdin"],"setRawMode","1"],["def","readkey",{"code":[[["invoke",["stdin"],"resume"],["invoke",["stdin"],"on","data",["js-bridge",{"code":[[["invoke",["stdin"],"pause"],["call","Callback","Data"]]],"_fndef":true,"_fnparams":["Data"]}]]]],"_fndef":true,"_fnparams":["Callback"]}],["def","inc",{"code":[[["+","V","1"]]],"_fndef":true,"_fnparams":["V"]}],["def","dec",{"code":[[["-","V","1"]]],"_fndef":true,"_fnparams":["V"]}],["def","prog",{"code":[[["index","BfProg","X"]]],"_fndef":true,"_fnparams":["X"]}],["def","bracket-open",{"code":[[["var","BracketOpenInner",["scope",{"code":[[["var","Y",["-",["length","BfProg"],"Ip"]],["if",["<","X","Y"],[["var","Ch",["prog",["+","Ip","X"]],["if",["==","Ch","\"]\""],[["call","BracketOpenInner",["dec","OpenBraces"],["inc","X"]]],["else",[["if",["==","Ch","\"]\""],[["call","BracketOpenInner",["inc","OpenBraces"],["inc","X"]]],["else",[["if",["==","0","OpenBrces"],[["if",["==",["stack-peek"],"Ip"],[["stack-pop"]],["else",[["call","BracketOpenInner","OpenBraces",["inc","X"]]]]]]]]]]]]]]]]]],"_fndef":true,"_fnparams":["OpenBraces","X"]}]],["call","BracketOpenInner","1","1"]]],"_fndef":true,"_fnparams":[]}],["def","stack-push",{"code":[[["invoke","Stack","push","N"]]],"_fndef":true,"_fnparams":["N"]}],["def","stack-pop",{"code":[[["invoke","Stack","pop"]]],"_fndef":true,"_fnparams":[]}],["def","stack-peek",{"code":[[["?",[">",["length","Stack"],"0"],["index","Stack",["-",["length","Stack"],"1"]],"nil"]]],"_fndef":true,"_fnparams":[]}],["def","mem",{"code":[[["var","V",["dict-get","Mem","Ptr"]],["?",["==","V",["undefined"]],"0","V"]]],"_fndef":true,"_fnparams":["Ptr"]}],["var","Source","\"+<<---[[<+>->++++>---<<]>++]<<<++.<+++.<..<-.<<++.<-.>>>.<.>>.>-.<<<<+.\""],["var","Stack",["list"]],["var","BfProg",["split","Source","\"\""]],["var","Mem",["dict"]],["var","Ptr","0"],["var","Ip","0"],["var","Len",["length","BfProg"]],["var","CasePtrInc",["case","\">\"",["scope",{"code":[[["set","Ptr",["inc","Ptr"]]]],"_fndef":true,"_fnparams":[]}]]],["var","CasePtrDec",["case","\"<\"",["scope",{"code":[[["set","Ptr",["dec","Ptr"]]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseMemInc",["case","\"+\"",["scope",{"code":[[["var","I",["mem","Ptr"]],["dict-set","Mem","Ptr",["inc","I"]]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseMemDec",["case","\"-\"",["scope",{"code":[[["var","I",["mem","Ptr"]],["dict-set","Mem","Ptr",["dec","I"]]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseWrite",["case","\".\"",["scope",{"code":[[["var","I",["mem","Ptr"]],["print","I"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseRead",["case","\",\"",["scope",{"code":[[["readkey",["scope",{"code":[[["dict-set","Mem","Ptr",["index","Key","0"]]]],"_fndef":true,"_fnparams":["Key"]}]]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseBracketOpen",["case","\"[\"",["scope",{"code":[[["if",["==","0",["mem","Ptr"]],[["bracket-open"]],["else",[["stack-push","Ip"]]]]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseBracketClose",["case","\"]\"",["scope",{"code":[[["if",["==","0",["mem","Ptr"]],[["stack-pop"]],["else",[["set","Ip",["stack-peek"]]]]]]],"_fndef":true,"_fnparams":[]}]]],["var","SwitchCases",["list","CasePtrInc","CasePtrDec","CaseMemInc","CaseMemDec","CaseWrite","CaseRead","CaseBracketOpen","CaseBracketClose"]],["def","execute-contents",{"code":[[["set","BfProg",["get","FileData"]],["set","Len",["length","BfProg"]],["set","Ip","0"],["set","Ptr","0"],["print","\"Loaded \"","Len","\" bytes\""],["execution-loop"]]],"_fndef":true,"_fnparams":["FileData"]}],["var","ExecutionCond",{"code":[[["<","Ip","Len"]]],"_fndef":true,"_fnparams":[]}],["var","ExecutionAction",{"code":[[[["switch",["prog","Ip"],"SwitchCases"],["set","Ip",["inc","Ip"]]]]],"_fndef":true,"_fnparams":[]}],["def","execution-loop",{"code":[[["while","ExecutionCond","ExecutionAction"]]],"_fndef":true,"_fnparams":[]}],["if",["!=","false",["get-def","'FILE'"]],[["var","File",["+","\"\"",["get-def","'FILE'"]]],["read-file","File",["scope",{"code":[[["if",["==",["null"],"Err"],[["print","File","\" loaded, starting execution\""],["execute-contents","Data"]]]]],"_fndef":true,"_fnparams":["Err","Data"]}]]],["else",[["execution-loop"]]]]]]
 },{}],42:[function(require,module,exports){
-module.exports=[[["import","\"lists\""],["def","c",{"code":[[["def","r",{"code":[[["map",["seq","1","N"],{"code":[["chr",["parse-int",["*",["rand"],"10000"]]]],"_fndef":true,"_fnparams":[]}]]],"_fndef":true,"_fnparams":[]}],["join",["map",["split","S","\"\""],{"code":[[["list","C"]]],"_fndef":true,"_fnparams":["C"]}]]],["print",["c","\"The treasure is here\"","2"]]],"_fndef":true,"_fnparams":["S","N"]}]]]
+module.exports=[[["import","\"bignum\""],["import","\"lists\""],["var","FL",["dict"]],["var","Base","16"],["def","b",{"code":[[["bignum","N"]]],"_fndef":true,"_fnparams":["N"]}],["def","s",{"code":[[["to-string","N","Base"]]],"_fndef":true,"_fnparams":["N"]}],["def","fib",{"code":[[["if",["b<=","N",["b","2"]],[["b","1"]],[["+",["fibFL",["b-","N",["b","2"]]],["fibFL",["b-","N",["b","1"]]]]]]]],"_fndef":true,"_fnparams":["N"]}],["def","fibFL",{"code":[[["if",["dict-present","FL",["s","N"]],[["dict-get","FL",["s","N"]]],[["var","I",["fib","N"]],["set","FL",["dict-set","FL",["s","N"],"I"]],["I"]]]]],"_fndef":true,"_fnparams":["N"]}],["def","fib-orial",{"code":[[["bprod",["map",["seq","1","N"],["scope",{"code":[[["fib",["b","I"]]]],"_fndef":true,"_fnparams":["I"]}]]]]],"_fndef":true,"_fnparams":["N"]}],["each",["seq","2","20"],["scope",{"code":[[["print",["s",["fib-orial","N"]]]]],"_fndef":true,"_fnparams":["N"]}]]]]
 },{}],43:[function(require,module,exports){
-module.exports=[[["var","A","1"],["var","B",["+","A","1"]],["var","C",["+","B","1"]],["print","\"A:\"","A","\"B:\"","B","\"C:\"","C"],["if",["==","A",["-","C","2"]],[["print","\"Well now\""],["if",["==","B",["-","C","1"]],[["print","\"All is well\""]],["else",[["print","\"Oh\""]]]]],["else",[["print","\"Oh, ok\""]]]]]]
+module.exports=[[["import","lists"],["import","math"],["import","readline"],["import","switch"],["import","stderr"],["var","Acc","0"],["def","=",{"code":[["Value"]],"_fndef":true,"_fnparams":["Ignored","Value"]}],["def","v",{"code":[["Acc"]],"_fndef":true,"_fnparams":[]}],["def","p",{"code":[[["print",["format-acc"]],["v"]]],"_fndef":true,"_fnparams":[]}],["def","f",{"code":[[["floor","Acc"]]],"_fndef":true,"_fnparams":[]}],["def","c",{"code":[[["ceil","Acc"]]],"_fndef":true,"_fnparams":[]}],["def","e",{"code":[[["exit"]]],"_fndef":true,"_fnparams":[]}],["def","acc-op",["scope",{"code":[[["var","Code",["+","\"(\"","Op","\" Acc \"","Value","\")\""]],["stderr-write",["+","\"Code: \"","Code","\"\\n\""]],["eval","Code"]]],"_fndef":true,"_fnparams":["Op","Value"]}]],["var","Commands",["dict",["tuple","\"c\"","\"Ceil of Acc\""],["tuple","\"f\"","\"Floor of Acc\""],["tuple","\"h\"","\"Display this help\""],["tuple","\"?\"","\"Display this help\""],["tuple","\"e\"","\"Exit\""],["tuple","\"p\"","\"Print Acc\""],["tuple","\"v\"","\"Current value of Acc\""],["tuple","\"=\"","\"Set Acc to given value\""],["tuple","\"H\"","\"Set hex mode output\""],["tuple","\"D\"","\"Set decimal mode output\""],["tuple","\"B\"","\"Set binary mode output\""]]],["var","AccFormat","\"D\""],["def","format-acc",{"code":[[["format-acc","AccFormat"]]],"_fndef":true,"_fnparams":[]}],["var","FormatAccCaseHex",["case","\"H\"",["scope",{"code":[[["+","\"0x\"",["to-string","Acc","16"]]]],"_fndef":true,"_fnparams":[]}]]],["var","FormatAccCaseDecimal",["case","\"D\"",["scope",{"code":[[["get","Acc"]]],"_fndef":true,"_fnparams":[]}]]],["var","FormatAccCaseBinary",["case","\"B\"",["scope",{"code":[[["+","\"B\"",["to-string","Acc","2"]]]],"_fndef":true,"_fnparams":[]}]]],["var","FormatAccCaseList",["list","FormatAccCaseHex","FormatAccCaseDecimal","FormatAccCaseBinary"]],["def","format-acc",{"code":[[["switch","Format","FormatAccCaseList"]]],"_fndef":true,"_fnparams":["Format"]}],["def","set-acc-format",{"code":[[["set","AccFormat",["get","Format"]],["v"]]],"_fndef":true,"_fnparams":["Format"]}],["var","BuiltinsAvailable",["dict",["tuple","1",["list","abs","acos","acosh","asin","asinh","atan","atanh","cbrt","ceil","clz32","cos","cosh","floor","hypot","log","log10","log1p","log2","sign","sin","sinh","aqrt","tan","tanh"]],["tuple","2",["list","min","max","round","pow","imul","exp","expm1","fround","round"]]]],["def","show-help",{"code":[[["print","\"Available commands:\""],["each",["dict-keys","Commands"],{"code":[[["print","\"    \"","Command","\" -> \"",["index","Commands","Command"]]]],"_fndef":true,"_fnparams":["Command"]}],["print","\"Syntax: op value value value\""],["print","\"    eg: = 1\""],["print","\"      : + 2 2 3 v (sinh (pi))\""],["print","\"      : = 33.548739357257745\""],["print","\"Available builtins:\""],["print",["join",["map",["dict-keys",["dict-get","BuiltinsAvailable","1"]],{"code":[[["+","\"(\"",["dict-get",["dict-get","BuiltinsAvailable","1"],"Name"],"\" N)\""]]],"_fndef":true,"_fnparams":["Name"]}],"\", \""]],["print",["join",["map",["dict-keys",["dict-get","BuiltinsAvailable","2"]],{"code":[[["+","\"(\"",["dict-get",["dict-get","BuiltinsAvailable","2"],"Name"],"\" A B)\""]]],"_fndef":true,"_fnparams":["Name"]}],"\", \""]],["get","Acc"]]],"_fndef":true,"_fnparams":[]}],["var","CasePrint",["case","\"p\"",["scope",{"code":[[["p"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseQuit",["case","\"q\"",["scope",{"code":[[["e"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseCurrent",["case","\"v\"",["scope",{"code":[[["v"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseFloor",["case","\"f\"",["scope",{"code":[[["f"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseCeil",["case","\"c\"",["scope",{"code":[[["c"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseHex",["case","\"H\"",["scope",{"code":[[["set-acc-format","\"H\""]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseDecimal",["case","\"D\"",["scope",{"code":[[["set-acc-format","\"D\""]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseBinary",["case","\"B\"",["scope",{"code":[[["set-acc-format","\"B\""]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseHelp1",["case","\"h\"",["scope",{"code":[[["show-help"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseHelp2",["case","\"?\"",["scope",{"code":[[["show-help"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseDefault",["default",["scope",{"code":[[["print","\"Unknown command\""],["get","Acc"]]],"_fndef":true,"_fnparams":["Given"]}]]],["var","CaseList",["list","CasePrint","CaseQuit","CaseCurrent","CaseFloor","CaseCeil","CaseHex","CaseDecimal","CaseBinary","CaseHelp1","CaseHelp2","CaseDefault"]],["def","parse",{"code":[[["var","Matches",["match","Entry","\"([-=+*/!@#$%^&<>a-z]+) (.*)$\""]],["if",["==",["null"],"Matches"],[["switch","Entry","CaseList"]],["else",[["var","Tail",["index","Matches","2"]],["set","Tail",["replace","Tail",["regex","\"(?:^|\\\\s)([a-z]+)(?=\\\\s|$)\"","\"g\""],["js-bridge",{"code":[[["+","\"(\"",["trim","Value"],"\") \""]]],"_fndef":true,"_fnparams":["Value"]}]]],["try",[["acc-op",["index","Matches","1"],"Tail"]],{"code":[[["stderr-write",["+","\"Failed to parse: \"",["to-string","E"],"\"\\n\""]],["c"]]],"_fndef":true,"_fnparams":["E"]}]]]]]],"_fndef":true,"_fnparams":["Entry"]}],["def","input-loop",{"code":[[["readline",["+",["format-acc"],"\">\""],["scope",{"code":[[["set","Acc",["parse","Value"]],["input-loop"]]],"_fndef":true,"_fnparams":["Value"]}]]]],"_fndef":true,"_fnparams":[]}],["input-loop"]]]
 },{}],44:[function(require,module,exports){
-module.exports=[[["print","\"Definitions:\"",["definitions"]],["define","test","true"],["print","\"Definitions:\"",["definitions"]],["if",["defined","test"],[["print","\"'test' is defined\""]],["else",[["print","\"'test' is not defined!\""]]]],["print","\"Value of 'test':\"",["get-def","test"]],["if",["defined","'DEBUG'"],[["print","\"DEBUG mode is on\""]],["else",[["print","\"DEBUG mode is not on.\""]]]],["var","MySecretValue","\"A secret value\""],["var","Fn",{"code":[["MySecretValue"]],"_fndef":true,"_fnparams":[]}],["print","\"Call one: \"",["call","Fn"]],["define","get-secret-value","Fn"],["print","\"Call two: \"",["call",["get-def","get-secret-value"]]]]]
+module.exports=[[["import","\"lists\""],["def","c",{"code":[[["def","r",{"code":[[["map",["seq","1","N"],{"code":[["chr",["parse-int",["*",["rand"],"10000"]]]],"_fndef":true,"_fnparams":[]}]]],"_fndef":true,"_fnparams":[]}],["join",["map",["split","S","\"\""],{"code":[[["list","C"]]],"_fndef":true,"_fnparams":["C"]}]]],["print",["c","\"The treasure is here\"","2"]]],"_fndef":true,"_fnparams":["S","N"]}]]]
 },{}],45:[function(require,module,exports){
-module.exports=[[["def","quote",{"code":[["+",["chr","34"],["get","S"],["chr","34"]]],"_fndef":true,"_fnparams":["S"]}],["var","Str",["+","\"((print \"",["quote","\"Hello world\""],"\"))\""]],["var","Str2",["+","\"((print M) M)\""]],["print","Str"],["eval","Str"],["eval","Str2",["tuple","\"M\"","\"Hello world\""]],["var","S","\"Hello World\""],["eval","\"((print S))\""],["var","Add",["eval",["+","\"((def x #A,B::((+ A B)))(get x/2))\""]]],["print",["call","Add","1","2"]]]]
+module.exports=[[["var","A","1"],["var","B",["+","A","1"]],["var","C",["+","B","1"]],["print","\"A:\"","A","\"B:\"","B","\"C:\"","C"],["if",["==","A",["-","C","2"]],[["print","\"Well now\""],["if",["==","B",["-","C","1"]],[["print","\"All is well\""]],["else",[["print","\"Oh\""]]]]],["else",[["print","\"Oh, ok\""]]]]]]
 },{}],46:[function(require,module,exports){
-module.exports=[[["platform","ext"],["print","\"Test count: \"",["count-params","1","2","3"]]]]
+module.exports=[[["print","\"Definitions:\"",["definitions"]],["define","test","true"],["print","\"Definitions:\"",["definitions"]],["if",["defined","test"],[["print","\"'test' is defined\""]],["else",[["print","\"'test' is not defined!\""]]]],["print","\"Value of 'test':\"",["get-def","test"]],["if",["defined","'DEBUG'"],[["print","\"DEBUG mode is on\""]],["else",[["print","\"DEBUG mode is not on.\""]]]],["var","MySecretValue","\"A secret value\""],["var","Fn",{"code":[["MySecretValue"]],"_fndef":true,"_fnparams":[]}],["print","\"Call one: \"",["call","Fn"]],["define","get-secret-value","Fn"],["print","\"Call two: \"",["call",["get-def","get-secret-value"]]]]]
 },{}],47:[function(require,module,exports){
-module.exports=[[["def","fac",{"code":[[["if",["==","0","N"],[["1"]],[["else",[["*","N",["fac",["-","N","1"]]]]]]]]],"_fndef":true,"_fnparams":["N"]}],["var","Test","10"],["print","\"factorial of \"","Test","\": \"",["fac","Test"]]]]
+module.exports=[[["def","quote",{"code":[["+",["chr","34"],["get","S"],["chr","34"]]],"_fndef":true,"_fnparams":["S"]}],["var","Str",["+","\"((print \"",["quote","\"Hello world\""],"\"))\""]],["var","Str2",["+","\"((print M) M)\""]],["print","Str"],["eval","Str"],["eval","Str2",["tuple","\"M\"","\"Hello world\""]],["var","S","\"Hello World\""],["eval","\"((print S))\""],["var","Add",["eval",["+","\"((def x #A,B::((+ A B)))(get x/2))\""]]],["print",["call","Add","1","2"]]]]
 },{}],48:[function(require,module,exports){
-module.exports=[[["platform","v1"],["import","\"lists\""],["var","FL",["dict"]],["def","fib",{"code":[[["if",["<","N","2"],["1"],[["+",["fibFL",["-","N","2"]],["fibFL",["-","N","1"]]]]]]],"_fndef":true,"_fnparams":["N"]}],["def","fibFL",{"code":[[["if",["dict-present","FL","N"],[["dict-get","FL","N"]],[["var","I",["fib","N"]],["set","FL",["dict-set","FL","N","I"]],["I"]]]]],"_fndef":true,"_fnparams":["N"]}],["def","fib-orial",{"code":[[["prod",["map",["seq","1","N"],["scope",{"code":[[["fib","I"]]],"_fndef":true,"_fnparams":["I"]}]]]]],"_fndef":true,"_fnparams":["N"]}],["each",["seq","2","20"],["scope",{"code":[[["print",["fib-orial","N"]]]],"_fndef":true,"_fnparams":["N"]}]]]]
+module.exports=[[["platform","ext"],["print","\"Test count: \"",["count-params","1","2","3"]]]]
 },{}],49:[function(require,module,exports){
-module.exports=[[["import","lists"],["import","symbols"],["var","Operators",["list","+","-","/","*"]],["var","A","5"],["var","B","10"],["each","Operators",["scope",{"code":[[["print",["+","A","\" \"","Op","\" \"","B","\" = \"",["call-fn","Op","A","B"]]]]],"_fndef":true,"_fnparams":["Op"]}]]]]
+module.exports=[[["def","fac",{"code":[[["if",["==","0","N"],[["1"]],[["else",[["*","N",["fac",["-","N","1"]]]]]]]]],"_fndef":true,"_fnparams":["N"]}],["var","Test","10"],["print","\"factorial of \"","Test","\": \"",["fac","Test"]]]]
 },{}],50:[function(require,module,exports){
-module.exports=[[["def","for",{"code":[[["var","Index","0"],["var","ForInner",["scope",{"code":[[["print","\"Running callback for \"","Index","\" on \"","Head"],["call","Callback","Head","Index"],["set","Index",["+","1","Index"]],["if",["!=","0",["length","Tail"]],[["call","ForInner",["head","Tail"],["tail","Tail"]]]]]],"_fndef":true,"_fnparams":["Head","Tail"]}]],["call","ForInner",["head","List"],["tail","List"]]]],"_fndef":true,"_fnparams":["List","Callback"]}],["for",["list","1","2","3"],{"code":[[["print","\"Element at index \"","Index","\": \"","Element"]]],"_fndef":true,"_fnparams":["Element","Index"]}]]]
+module.exports=[[["platform","v1"],["import","\"lists\""],["var","FL",["dict"]],["def","fib",{"code":[[["if",["<","N","2"],["1"],[["+",["fibFL",["-","N","2"]],["fibFL",["-","N","1"]]]]]]],"_fndef":true,"_fnparams":["N"]}],["def","fibFL",{"code":[[["if",["dict-present","FL","N"],[["dict-get","FL","N"]],[["var","I",["fib","N"]],["set","FL",["dict-set","FL","N","I"]],["I"]]]]],"_fndef":true,"_fnparams":["N"]}],["def","fib-orial",{"code":[[["prod",["map",["seq","1","N"],["scope",{"code":[[["fib","I"]]],"_fndef":true,"_fnparams":["I"]}]]]]],"_fndef":true,"_fnparams":["N"]}],["each",["seq","2","20"],["scope",{"code":[[["print",["fib-orial","N"]]]],"_fndef":true,"_fnparams":["N"]}]]]]
 },{}],51:[function(require,module,exports){
-module.exports=[[["platform","ext"],["invoke",["stdin"],"resume"]]]
+module.exports=[[["import","lists"],["import","symbols"],["var","Operators",["list","+","-","/","*"]],["var","A","5"],["var","B","10"],["each","Operators",["scope",{"code":[[["print",["+","A","\" \"","Op","\" \"","B","\" = \"",["call-fn","Op","A","B"]]]]],"_fndef":true,"_fnparams":["Op"]}]]]]
 },{}],52:[function(require,module,exports){
-module.exports=[[["platform","v1"],["def","f",{"code":[[["invoke","P","\"map\"",["js-bridge",{"code":[["replace","W",["regex","\".\"","\"g\""],["js-bridge",{"code":[["index",["index","P",["&",["+","I","J"],"1"]],"J"]],"_fndef":true,"_fnparams":["C","J"]}]]],"_fndef":true,"_fnparams":["W","I"]}]]]],"_fndef":true,"_fnparams":["P"]}],["def","f",{"code":[[["invoke","P","\"map\"",["js-bridge",{"code":[["replace","W",["regex","\".\"","\"g\""],["js-bridge",{"code":[["index",["index","P",["&",["+","I","J"],"1"]],"J"]],"_fndef":true,"_fnparams":["C","J"]}]]],"_fndef":true,"_fnparams":["W","I"]}]]]],"_fndef":true,"_fnparams":["P"]}],["print",["f",["list","\"Hello,\"","\"world!\""]]]]]
+module.exports=[[["def","for",{"code":[[["var","Index","0"],["var","ForInner",["scope",{"code":[[["print","\"Running callback for \"","Index","\" on \"","Head"],["call","Callback","Head","Index"],["set","Index",["+","1","Index"]],["if",["!=","0",["length","Tail"]],[["call","ForInner",["head","Tail"],["tail","Tail"]]]]]],"_fndef":true,"_fnparams":["Head","Tail"]}]],["call","ForInner",["head","List"],["tail","List"]]]],"_fndef":true,"_fnparams":["List","Callback"]}],["for",["list","1","2","3"],{"code":[[["print","\"Element at index \"","Index","\": \"","Element"]]],"_fndef":true,"_fnparams":["Element","Index"]}]]]
 },{}],53:[function(require,module,exports){
-module.exports=[[["def","i",{"code":[[["replace","S",["regex","\"\\\\d\"","\"g\""],["js-bridge",{"code":[[["^","X","1"]]],"_fndef":true,"_fnparams":["X"]}]]]],"_fndef":true,"_fnparams":["S"]}],["print",["i","\"01010101111000\""]]]]
+module.exports=[[["platform","ext"],["invoke",["stdin"],"resume"]]]
 },{}],54:[function(require,module,exports){
-module.exports=[[["def","m",{"code":[[["var","X",["list","16","13","1","11","8","5","1","3","1","3","1","5","8","11","1","13"]],["var","Y",["list","0","1","1","0","1","0","0","1","0","1","0","0","1","0","1","1"]],["var","I","0"],["var","N","0"],["def","n",{"code":[[["if",["!=","0",["length","A"]],[["set","I",["+","I",["*",["-","1",["*","2",["head","B"]]],["head","A"]]]],["set","Z",["list"]],["set","N",["+","N","1"]],["if",["==","4","N"],[["set","Z",["list","\"|\""]],["set","N","0"]]],["++",["list","I"],"Z",["n",["tail","A"],["tail","B"]]]],["else",[["list"]]]]]],"_fndef":true,"_fnparams":["A","B"]}],["n","X","Y"]]],"_fndef":true,"_fnparams":[]}],["def","m",{"code":[[["var","X",["list","16","13","1","11","8","5","1","3","1","3","1","5","8","11","1","13"]],["var","Y",["list","0","1","1","0","1","0","0","1","0","1","0","0","1","0","1","1"]],["var","I","0"],["var","N","0"],["def","n",{"code":[[["if",["!=","0",["length","A"]],[["set","I",["+","I",["*",["-","1",["*","2",["head","B"]]],["head","A"]]]],["set","Z",["list"]],["set","N",["+","N","1"]],["if",["==","4","N"],[["set","Z",["list","\"|\""]],["set","N","0"]]],["++",["list","I"],"Z",["n",["tail","A"],["tail","B"]]]],["else",[["list"]]]]]],"_fndef":true,"_fnparams":["A","B"]}],["n","X","Y"]]],"_fndef":true,"_fnparams":[]}],["print",["m"]]]]
+module.exports=[[["platform","v1"],["def","f",{"code":[[["invoke","P","\"map\"",["js-bridge",{"code":[["replace","W",["regex","\".\"","\"g\""],["js-bridge",{"code":[["index",["index","P",["&",["+","I","J"],"1"]],"J"]],"_fndef":true,"_fnparams":["C","J"]}]]],"_fndef":true,"_fnparams":["W","I"]}]]]],"_fndef":true,"_fnparams":["P"]}],["def","f",{"code":[[["invoke","P","\"map\"",["js-bridge",{"code":[["replace","W",["regex","\".\"","\"g\""],["js-bridge",{"code":[["index",["index","P",["&",["+","I","J"],"1"]],"J"]],"_fndef":true,"_fnparams":["C","J"]}]]],"_fndef":true,"_fnparams":["W","I"]}]]]],"_fndef":true,"_fnparams":["P"]}],["print",["f",["list","\"Hello,\"","\"world!\""]]]]]
 },{}],55:[function(require,module,exports){
-module.exports=[[["def","map",{"code":[[["var","Result",["list"]],["var","MapInner",["scope",{"code":[[["set","Result",["++","Result",["call","Callback","Head"]]],["if",["!=","0",["length","Tail"]],[["call","MapInner",["head","Tail"],["tail","Tail"]]]]]],"_fndef":true,"_fnparams":["Head","Tail"]}]],["call","MapInner",["head","List"],["tail","List"]],["Result"]]],"_fndef":true,"_fnparams":["List","Callback"]}],["print",["map",["list","1","2","3"],{"code":[[["+","N","1"]]],"_fndef":true,"_fnparams":["N"]}]],["print",["map",["list","1","2","3"],{"code":[[["*","N","2"]]],"_fndef":true,"_fnparams":["N"]}]]]]
+module.exports=[[["def","i",{"code":[[["replace","S",["regex","\"\\\\d\"","\"g\""],["js-bridge",{"code":[[["^","X","1"]]],"_fndef":true,"_fnparams":["X"]}]]]],"_fndef":true,"_fnparams":["S"]}],["print",["i","\"01010101111000\""]]]]
 },{}],56:[function(require,module,exports){
-module.exports=[[["import","\"file\""],["import","\"lists\""],["import","\"readline\""],["platform","v1"],["var","TabIndentCount","4"],["var","TabIndent",["invoke","\" \"","repeat","TabIndentCount"]],["def","make-template",{"code":[[["var","Header","\"##[Lithp][1],\""],["var","Url","\"  [1]: https://github.com/andrakis/node-lithp\""],["print","Header",["length","Code"],"\"bytes\""],["print"],["var","Test",["match","Code",["regex",["nl"],"\"g\""]]],["if",["<=",["length",["?",["==",["null"],"Test"],"[]","Test"]],"1"],[["print","\"    \"","Code"]],["else",[["each",["list",["tuple","\"\\\\t\"","TabIndent"]],["scope",{"code":[[["set","Code",["replace","Code",["regex",["index","Tuple","0"],"\"g\""],["index","Tuple","1"]]]]],"_fndef":true,"_fnparams":["Tuple"]}]],["var","Lines",["split","Code",["regex","\"\\r?\\n\\r?\""]]],["each","Lines",["scope",{"code":[[["print",["+","TabIndent","Line"]]]],"_fndef":true,"_fnparams":["Line"]}]]]]],["print"],["print","Url"]]],"_fndef":true,"_fnparams":["Code"]}],["if",["==","false",["get-def","\"FILE\""]],[["readline","\"Code: \"",["scope",{"code":[[["make-template","Code"]]],"_fndef":true,"_fnparams":["Code"]}]]],["else",[["var","File",["+","\"\"",["get-def","\"FILE\""]]],["print","\"Opening file\"","File","\"...\""],["read-file","File",["scope",{"code":[[["if",["!=",["null"],"Err"],[["print","\"Got Err:\"","Err"]],["else",[["var","Content",["to-string","Data"]],["make-template","Content"]]]]]],"_fndef":true,"_fnparams":["Err","Data"]}]]]]]]]
+module.exports=[[["def","m",{"code":[[["var","X",["list","16","13","1","11","8","5","1","3","1","3","1","5","8","11","1","13"]],["var","Y",["list","0","1","1","0","1","0","0","1","0","1","0","0","1","0","1","1"]],["var","I","0"],["var","N","0"],["def","n",{"code":[[["if",["!=","0",["length","A"]],[["set","I",["+","I",["*",["-","1",["*","2",["head","B"]]],["head","A"]]]],["set","Z",["list"]],["set","N",["+","N","1"]],["if",["==","4","N"],[["set","Z",["list","\"|\""]],["set","N","0"]]],["++",["list","I"],"Z",["n",["tail","A"],["tail","B"]]]],["else",[["list"]]]]]],"_fndef":true,"_fnparams":["A","B"]}],["n","X","Y"]]],"_fndef":true,"_fnparams":[]}],["def","m",{"code":[[["var","X",["list","16","13","1","11","8","5","1","3","1","3","1","5","8","11","1","13"]],["var","Y",["list","0","1","1","0","1","0","0","1","0","1","0","0","1","0","1","1"]],["var","I","0"],["var","N","0"],["def","n",{"code":[[["if",["!=","0",["length","A"]],[["set","I",["+","I",["*",["-","1",["*","2",["head","B"]]],["head","A"]]]],["set","Z",["list"]],["set","N",["+","N","1"]],["if",["==","4","N"],[["set","Z",["list","\"|\""]],["set","N","0"]]],["++",["list","I"],"Z",["n",["tail","A"],["tail","B"]]]],["else",[["list"]]]]]],"_fndef":true,"_fnparams":["A","B"]}],["n","X","Y"]]],"_fndef":true,"_fnparams":[]}],["print",["m"]]]]
 },{}],57:[function(require,module,exports){
-module.exports=[[["var","Path",["+",["get-def","__dirname"],"\"/module_lib\""]],["print","\"Path to module-lib:\"","Path"],["import","Path"],["print","\"Add 2+2:\"",["add","2","2"]],["var","Add5",["add","5"]],["print","\"Add 5+2:\"",["call","Add5","2"]],["print","\"Module value:\"",["getMyValue"]],["var","MyValue","1"],["print","\"Call with two:\"",["callWith2",{"code":[[["+","MyValue","Two"]]],"_fndef":true,"_fnparams":["Two"]}]]]]
+module.exports=[[["def","map",{"code":[[["var","Result",["list"]],["var","MapInner",["scope",{"code":[[["set","Result",["++","Result",["call","Callback","Head"]]],["if",["!=","0",["length","Tail"]],[["call","MapInner",["head","Tail"],["tail","Tail"]]]]]],"_fndef":true,"_fnparams":["Head","Tail"]}]],["call","MapInner",["head","List"],["tail","List"]],["Result"]]],"_fndef":true,"_fnparams":["List","Callback"]}],["print",["map",["list","1","2","3"],{"code":[[["+","N","1"]]],"_fndef":true,"_fnparams":["N"]}]],["print",["map",["list","1","2","3"],{"code":[[["*","N","2"]]],"_fndef":true,"_fnparams":["N"]}]]]]
 },{}],58:[function(require,module,exports){
-module.exports=[[["platform","v1"],["def","add",{"code":[[["scope",{"code":[[["+","A","B"]]],"_fndef":true,"_fnparams":["B"]}]]],"_fndef":true,"_fnparams":["A"]}],["def","add",{"code":[[["+","A","B"]]],"_fndef":true,"_fnparams":["A","B"]}],["export","add/1","add/2"],["var","MyValue","1"],["def","getMyValue",{"code":[["MyValue"]],"_fndef":true,"_fnparams":[]}],["var","Two","2"],["def","callWith2",{"code":[[["call","Fn","Two"]]],"_fndef":true,"_fnparams":["Fn"]}],["export","getMyValue/0","callWith2/1"],["def","private_function",{"code":[[["-","A","B"]]],"_fndef":true,"_fnparams":["A","B"]}]]]
+module.exports=[[["import","\"file\""],["import","\"lists\""],["import","\"readline\""],["platform","v1"],["var","TabIndentCount","4"],["var","TabIndent",["invoke","\" \"","repeat","TabIndentCount"]],["def","make-template",{"code":[[["var","Header","\"##[Lithp][1],\""],["var","Url","\"  [1]: https://github.com/andrakis/node-lithp\""],["print","Header",["length","Code"],"\"bytes\""],["print"],["var","Test",["match","Code",["regex",["nl"],"\"g\""]]],["if",["<=",["length",["?",["==",["null"],"Test"],"[]","Test"]],"1"],[["print","\"    \"","Code"]],["else",[["each",["list",["tuple","\"\\\\t\"","TabIndent"]],["scope",{"code":[[["set","Code",["replace","Code",["regex",["index","Tuple","0"],"\"g\""],["index","Tuple","1"]]]]],"_fndef":true,"_fnparams":["Tuple"]}]],["var","Lines",["split","Code",["regex","\"\\r?\\n\\r?\""]]],["each","Lines",["scope",{"code":[[["print",["+","TabIndent","Line"]]]],"_fndef":true,"_fnparams":["Line"]}]]]]],["print"],["print","Url"]]],"_fndef":true,"_fnparams":["Code"]}],["if",["==","false",["get-def","\"FILE\""]],[["readline","\"Code: \"",["scope",{"code":[[["make-template","Code"]]],"_fndef":true,"_fnparams":["Code"]}]]],["else",[["var","File",["+","\"\"",["get-def","\"FILE\""]]],["print","\"Opening file\"","File","\"...\""],["read-file","File",["scope",{"code":[[["if",["!=",["null"],"Err"],[["print","\"Got Err:\"","Err"]],["else",[["var","Content",["to-string","Data"]],["make-template","Content"]]]]]],"_fndef":true,"_fnparams":["Err","Data"]}]]]]]]]
 },{}],59:[function(require,module,exports){
-module.exports=[[["def","f",{"code":[[["if",["<","N","2"],[["?",["!=","0","N"],["*","2","R"],"1"]],[["/",["*",["*",["*",["*",["f",["-","N","2"],"R"],"2"],["pi"]],"R"],"R"],"N"]]]]],"_fndef":true,"_fnparams":["N","R"]}],["print",["f","1","1"]],["print",["f","2","3"]],["print",["f","3","1"]],["print",["f","3","4.5"]],["print",["f","1","9.379"]],["print",["f","0","48"]]]]
+module.exports=[[["var","Path",["+",["get-def","__dirname"],"\"/module_lib\""]],["print","\"Path to module-lib:\"","Path"],["import","Path"],["print","\"Add 2+2:\"",["add","2","2"]],["var","Add5",["add","5"]],["print","\"Add 5+2:\"",["call","Add5","2"]],["print","\"Module value:\"",["getMyValue"]],["var","MyValue","1"],["print","\"Call with two:\"",["callWith2",{"code":[[["+","MyValue","Two"]]],"_fndef":true,"_fnparams":["Two"]}]]]]
 },{}],60:[function(require,module,exports){
-module.exports=[[["def","odd",{"code":[[["var","Split",["split","S",["regex","\"[aeiou]\"","\"i\""]]],["if",["==","1",["&","1",["~",["length","Split"]]]],[["\"odd\""]],["else",[["\"even\""]]]]]],"_fndef":true,"_fnparams":["S"]}],["def","test",{"code":[[["print","\"Test \"",["quote","S"],"\": \"",["odd","S"]]]],"_fndef":true,"_fnparams":["S"]}],["test","\"trees\""],["test","\"brush\""],["test","\"CAts\""],["test","\"Savoie\""],["test","\"rhythm\""]]]
+module.exports=[[["platform","v1"],["def","add",{"code":[[["scope",{"code":[[["+","A","B"]]],"_fndef":true,"_fnparams":["B"]}]]],"_fndef":true,"_fnparams":["A"]}],["def","add",{"code":[[["+","A","B"]]],"_fndef":true,"_fnparams":["A","B"]}],["export","add/1","add/2"],["var","MyValue","1"],["def","getMyValue",{"code":[["MyValue"]],"_fndef":true,"_fnparams":[]}],["var","Two","2"],["def","callWith2",{"code":[[["call","Fn","Two"]]],"_fndef":true,"_fnparams":["Fn"]}],["export","getMyValue/0","callWith2/1"],["def","private_function",{"code":[[["-","A","B"]]],"_fndef":true,"_fnparams":["A","B"]}]]]
 },{}],61:[function(require,module,exports){
-module.exports=[[["import","\"lists\""],["def","f",{"code":[[["each",["seq","1","10"],{"code":[[["print","N"]]],"_fndef":true,"_fnparams":["N"]}]]],"_fndef":true,"_fnparams":[]}],["def","x",{"code":[[["def","y",{"code":[[["print","N"],["if",["<","N","10"],[["y",["+","N","1"]]]]]],"_fndef":true,"_fnparams":["N"]}],["y","1"]]],"_fndef":true,"_fnparams":[]}],["f"]]]
+module.exports=[[["def","f",{"code":[[["if",["<","N","2"],[["?",["!=","0","N"],["*","2","R"],"1"]],[["/",["*",["*",["*",["*",["f",["-","N","2"],"R"],"2"],["pi"]],"R"],"R"],"N"]]]]],"_fndef":true,"_fnparams":["N","R"]}],["print",["f","1","1"]],["print",["f","2","3"]],["print",["f","3","1"]],["print",["f","3","4.5"]],["print",["f","1","9.379"]],["print",["f","0","48"]]]]
 },{}],62:[function(require,module,exports){
-module.exports=[[["def","f",{"code":[[["?",["!=",["null"],["match","S","\"^((.+)\\\\2)+$\""]],"true","false"]]],"_fndef":true,"_fnparams":["S"]}],["print",["f","\"aa\""]],["print",["f","\"aabaaababbbaba\""]],["print",["f","\"aaababbabbabbbababbaabaabaababaaba\""]],["print",["f","\"ba\""]]]]
+module.exports=[[["def","odd",{"code":[[["var","Split",["split","S",["regex","\"[aeiou]\"","\"i\""]]],["if",["==","1",["&","1",["~",["length","Split"]]]],[["\"odd\""]],["else",[["\"even\""]]]]]],"_fndef":true,"_fnparams":["S"]}],["def","test",{"code":[[["print","\"Test \"",["quote","S"],"\": \"",["odd","S"]]]],"_fndef":true,"_fnparams":["S"]}],["test","\"trees\""],["test","\"brush\""],["test","\"CAts\""],["test","\"Savoie\""],["test","\"rhythm\""]]]
 },{}],63:[function(require,module,exports){
-module.exports=[[["platform","v1"],["var","MyDict",["dict",["tuple","a","1"],["tuple","b","2"]]],["print","MyDict"]]]
+module.exports=[[["import","\"lists\""],["def","f",{"code":[[["each",["seq","1","10"],{"code":[[["print","N"]]],"_fndef":true,"_fnparams":["N"]}]]],"_fndef":true,"_fnparams":[]}],["def","x",{"code":[[["def","y",{"code":[[["print","N"],["if",["<","N","10"],[["y",["+","N","1"]]]]]],"_fndef":true,"_fnparams":["N"]}],["y","1"]]],"_fndef":true,"_fnparams":[]}],["f"]]]
 },{}],64:[function(require,module,exports){
-module.exports=[[["def","f",{"code":[[["def","x",{"code":[["invoke","S","repeat","N"]],"_fndef":true,"_fnparams":["S","N"]}],["var","A",["x","\"/\"","5"]],["var","B",["x","\"\\\\\"","5"]],["var","C",["+",["x",["+","A","B"],"6"],["nl"]]],["var","D",["+",["x",["+","B","A"],"6"],["nl"]]],["print",["x",["+",["x","C","4"],["x","D","4"]],"5"]]]],"_fndef":true,"_fnparams":[]}],["f"]]]
+module.exports=[[["def","f",{"code":[[["?",["!=",["null"],["match","S","\"^((.+)\\\\2)+$\""]],"true","false"]]],"_fndef":true,"_fnparams":["S"]}],["print",["f","\"aa\""]],["print",["f","\"aabaaababbbaba\""]],["print",["f","\"aaababbabbabbbababbaabaabaababaaba\""]],["print",["f","\"ba\""]]]]
 },{}],65:[function(require,module,exports){
-module.exports=[[["def","pow",{"code":[[["if",["==","Y","1"],["else",[["*","X",["pow","X",["-","Y","1"]]]]]]]],"_fndef":true,"_fnparams":["X","Y"]}],["var","A","5"],["var","B","100"],["print","\"\"","A","\" to the power of \"","B","\":\"",["pow","A","B"]]]]
+module.exports=[[["platform","v1"],["var","MyDict",["dict",["tuple","a","1"],["tuple","b","2"]]],["print","MyDict"]]]
 },{}],66:[function(require,module,exports){
-module.exports=[[["def","f",{"code":[[["replace","X",["regex","\"([aeiou]+[^aeiou]*){1,2} [^aeiou]*\""],"\"\""]]],"_fndef":true,"_fnparams":["X"]}],["print",["f","\"brad angelina\""]]]]
+module.exports=[[["def","f",{"code":[[["def","x",{"code":[["invoke","S","repeat","N"]],"_fndef":true,"_fnparams":["S","N"]}],["var","A",["x","\"/\"","5"]],["var","B",["x","\"\\\\\"","5"]],["var","C",["+",["x",["+","A","B"],"6"],["nl"]]],["var","D",["+",["x",["+","B","A"],"6"],["nl"]]],["print",["x",["+",["x","C","4"],["x","D","4"]],"5"]]]],"_fndef":true,"_fnparams":[]}],["f"]]]
 },{}],67:[function(require,module,exports){
-module.exports=[[["platform","v1"],["var","Fs",["require","\"fs\""]],["var","SampleFile",["+",["get-def","__dirname"],"\"/../index.js\""]],["var","FsReadFileSync",["dict-get","Fs","\"readFileSync\""]],["print","\"readFileSync:\"",["inspect","FsReadFileSync"]],["print","\"Read index.js:\"",["call","FsReadFileSync","SampleFile"]],["var","FsReadFile",["dict-get","Fs","\"readFile\""]],["print","\"readFile:\"",["inspect","FsReadFile"]],["var","Our_callback",["js-bridge",{"code":[[["if",["!=",["null"],"Err"],[["print","\"Failed to read file, err:  \"","Err"]],["else",[["print","\"Data from file:\""],["print",["invoke","Data","\"toString\""]]]]]]],"_fndef":true,"_fnparams":["Err","Data"]}]],["call","FsReadFile","SampleFile","Our_callback"],["call","FsReadFile","\"non-existant\"","Our_callback"]]]
+module.exports=[[["def","pow",{"code":[[["if",["==","Y","1"],["else",[["*","X",["pow","X",["-","Y","1"]]]]]]]],"_fndef":true,"_fnparams":["X","Y"]}],["var","A","5"],["var","B","100"],["print","\"\"","A","\" to the power of \"","B","\":\"",["pow","A","B"]]]]
 },{}],68:[function(require,module,exports){
-module.exports=[[["def","fac-recursive",{"code":[[["def","fac-r-inner",{"code":[[["if",["==","0","N"],[["Acc"]],["else",[["recurse",["-","N","1"],["*","N","Acc"]]]]]]],"_fndef":true,"_fnparams":["N","Acc"]}],["fac-r-inner","N","1"]]],"_fndef":true,"_fnparams":["N"]}],["print",["fac-recursive","100"]]]]
+module.exports=[[["def","f",{"code":[[["replace","X",["regex","\"([aeiou]+[^aeiou]*){1,2} [^aeiou]*\""],"\"\""]]],"_fndef":true,"_fnparams":["X"]}],["print",["f","\"brad angelina\""]]]]
 },{}],69:[function(require,module,exports){
-module.exports=[[["def","add",{"code":[[["scope",{"code":[[["+","A","B"]]],"_fndef":true,"_fnparams":["B"]}]]],"_fndef":true,"_fnparams":["A"]}],["var","Add5",["add","5"]],["var","Add10",["add","10"]],["var","N","10"],["print","\"Add5 with \"","N","\": \"",["call","Add5","N"]],["print","\"Add10 with \"","N","\": \"",["call","Add10","N"]],["assert",["==","15",["call","Add5","10"]]]]]
+module.exports=[[["platform","v1"],["var","Fs",["require","\"fs\""]],["var","SampleFile",["+",["get-def","__dirname"],"\"/../index.js\""]],["var","FsReadFileSync",["dict-get","Fs","\"readFileSync\""]],["print","\"readFileSync:\"",["inspect","FsReadFileSync"]],["print","\"Read index.js:\"",["call","FsReadFileSync","SampleFile"]],["var","FsReadFile",["dict-get","Fs","\"readFile\""]],["print","\"readFile:\"",["inspect","FsReadFile"]],["var","Our_callback",["js-bridge",{"code":[[["if",["!=",["null"],"Err"],[["print","\"Failed to read file, err:  \"","Err"]],["else",[["print","\"Data from file:\""],["print",["invoke","Data","\"toString\""]]]]]]],"_fndef":true,"_fnparams":["Err","Data"]}]],["call","FsReadFile","SampleFile","Our_callback"],["call","FsReadFile","\"non-existant\"","Our_callback"]]]
 },{}],70:[function(require,module,exports){
-arguments[4][47][0].apply(exports,arguments)
-},{"dup":47}],71:[function(require,module,exports){
-module.exports=[[["print","\"Hello, world!\""],["print","\"1+1:\"",["+","1","1"],"\" Wow!\""],["print","\"Also a test:\"",["*","5","10"]],["print","\"One last test:\"",["/","10","2"]],["var","A","5"],["var","B","6"],["print","\"A+B:\"",["+","A","B"]]]]
+module.exports=[[["def","fac-recursive",{"code":[[["def","fac-r-inner",{"code":[[["if",["==","0","N"],[["Acc"]],["else",[["recurse",["-","N","1"],["*","N","Acc"]]]]]]],"_fndef":true,"_fnparams":["N","Acc"]}],["fac-r-inner","N","1"]]],"_fndef":true,"_fnparams":["N"]}],["print",["fac-recursive","100"]]]]
+},{}],71:[function(require,module,exports){
+module.exports=[[["def","add",{"code":[[["scope",{"code":[[["+","A","B"]]],"_fndef":true,"_fnparams":["B"]}]]],"_fndef":true,"_fnparams":["A"]}],["var","Add5",["add","5"]],["var","Add10",["add","10"]],["var","N","10"],["print","\"Add5 with \"","N","\": \"",["call","Add5","N"]],["print","\"Add10 with \"","N","\": \"",["call","Add10","N"]],["assert",["==","15",["call","Add5","10"]]]]]
 },{}],72:[function(require,module,exports){
-module.exports=[[["import","\"lists\""],["def","s",{"code":[[["var","X",["repeat","\"#\"","N"]],["print","X"],["each",["seq","3","N"],["scope",{"code":[[["print",["+","\"#\"",["repeat","\" \"",["-","N","2"]],"\"#\""]]]],"_fndef":true,"_fnparams":["X"]}]],["print","X"]]],"_fndef":true,"_fnparams":["N"]}],["s","10"]]]
-},{}],73:[function(require,module,exports){
-module.exports=[[["var","A","5"],["var","B","6"],["print","\"A+B:\"",["+","A","B"]],["if",["==","A","B"],[["print","\":)\""],["print","\"The same!\""]],["else",[["print","\":(\""],["print","\"Different\""]]]]]]
+arguments[4][49][0].apply(exports,arguments)
+},{"dup":49}],73:[function(require,module,exports){
+module.exports=[[["print","\"Hello, world!\""],["print","\"1+1:\"",["+","1","1"],"\" Wow!\""],["print","\"Also a test:\"",["*","5","10"]],["print","\"One last test:\"",["/","10","2"]],["var","A","5"],["var","B","6"],["print","\"A+B:\"",["+","A","B"]]]]
 },{}],74:[function(require,module,exports){
-module.exports=[[["def","count-args/*",{"code":[[["print","\"Args length: \"",["length","Args"]]]],"_fndef":true,"_fnparams":["Args"]}],["count-args","foo","bar","yeah"]]]
+module.exports=[[["import","\"lists\""],["def","s",{"code":[[["var","X",["repeat","\"#\"","N"]],["print","X"],["each",["seq","3","N"],["scope",{"code":[[["print",["+","\"#\"",["repeat","\" \"",["-","N","2"]],"\"#\""]]]],"_fndef":true,"_fnparams":["X"]}]],["print","X"]]],"_fndef":true,"_fnparams":["N"]}],["s","10"]]]
 },{}],75:[function(require,module,exports){
-module.exports=[[["def","x",{"code":[[["print",["replace",["repeat","\"_|__\"","175"],["regex","\"(.{70})\"","\"g\""],"\"$1\\n\""]]]],"_fndef":true,"_fnparams":[]}],["x"]]]
+module.exports=[[["var","A","5"],["var","B","6"],["print","\"A+B:\"",["+","A","B"]],["if",["==","A","B"],[["print","\":)\""],["print","\"The same!\""]],["else",[["print","\":(\""],["print","\"Different\""]]]]]]
 },{}],76:[function(require,module,exports){
-module.exports=[[["def","seq2",{"code":[[["var","L",["list"]],["while",[["<","A","B"]],[["set","L",["++","L",["list","A"]]],["set","A",["+","A","1"]]]],"L"]],"_fndef":true,"_fnparams":["A","B"]}],["print",["seq2","1","10"]]]]
+module.exports=[[["def","count-args/*",{"code":[[["print","\"Args length: \"",["length","Args"]]]],"_fndef":true,"_fnparams":["Args"]}],["count-args","foo","bar","yeah"]]]
 },{}],77:[function(require,module,exports){
+module.exports=[[["def","x",{"code":[[["print",["replace",["repeat","\"_|__\"","175"],["regex","\"(.{70})\"","\"g\""],"\"$1\\n\""]]]],"_fndef":true,"_fnparams":[]}],["x"]]]
+},{}],78:[function(require,module,exports){
+module.exports=[[["def","seq2",{"code":[[["var","L",["list"]],["while",[["<","A","B"]],[["set","L",["++","L",["list","A"]]],["set","A",["+","A","1"]]]],"L"]],"_fndef":true,"_fnparams":["A","B"]}],["print",["seq2","1","10"]]]]
+},{}],79:[function(require,module,exports){
 (function (process){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -3540,7 +4271,7 @@ var substr = 'ab'.substr(-1) === 'b'
 ;
 
 }).call(this,require('_process'))
-},{"_process":78}],78:[function(require,module,exports){
+},{"_process":80}],80:[function(require,module,exports){
 // shim for using process in browser
 var process = module.exports = {};
 
@@ -3722,7 +4453,7 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],79:[function(require,module,exports){
+},{}],81:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
   module.exports = function inherits(ctor, superCtor) {
@@ -3747,14 +4478,14 @@ if (typeof Object.create === 'function') {
   }
 }
 
-},{}],80:[function(require,module,exports){
+},{}],82:[function(require,module,exports){
 module.exports = function isBuffer(arg) {
   return arg && typeof arg === 'object'
     && typeof arg.copy === 'function'
     && typeof arg.fill === 'function'
     && typeof arg.readUInt8 === 'function';
 }
-},{}],81:[function(require,module,exports){
+},{}],83:[function(require,module,exports){
 (function (process,global){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -4344,636 +5075,20 @@ function hasOwnProperty(obj, prop) {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./support/isBuffer":80,"_process":78,"inherits":79}],82:[function(require,module,exports){
+},{"./support/isBuffer":82,"_process":80,"inherits":81}],84:[function(require,module,exports){
 module.exports=[
 	[
-		[
-			"var",
-			"Document",
-			[
-				"atom",
-				"nil"
-			]
-		],
-		[
-			"def",
-			"onReady",
-			[
-				"scope",
-				{
-					"code": [
-						[
-							[
-								"set",
-								"Document",
-								[
-									"get",
-									"Doc"
-								]
-							],
-							[
-								"print",
-								"\"Document ready\""
-							]
-						]
-					],
-					"_fndef": true,
-					"_fnparams": [
-						"Doc"
-					]
-				}
-			]
-		],
-		[
-			"def",
-			"getElementById",
-			[
-				"scope",
-				{
-					"code": [
-						[
-							[
-								"doc-apply",
-								"getElementById",
-								[
-									"list",
-									"Id"
-								]
-							]
-						]
-					],
-					"_fndef": true,
-					"_fnparams": [
-						"Id"
-					]
-				}
-			]
-		],
-		[
-			"def",
-			"doc-apply",
-			[
-				"scope",
-				{
-					"code": [
-						[
-							[
-								"js-apply",
-								"Document",
-								[
-									"dict-get",
-									"Document",
-									"Member"
-								],
-								"Args"
-							]
-						]
-					],
-					"_fndef": true,
-					"_fnparams": [
-						"Member",
-						"Args"
-					]
-				}
-			]
-		],
-		[
-			"def",
-			"getDoc",
-			[
-				"scope",
-				{
-					"code": [
-						[
-							[
-								"Document"
-							]
-						]
-					],
-					"_fndef": true,
-					"_fnparams": []
-				}
-			]
-		],
-		[
-			"export-global",
-			"getDoc/0"
-		],
-		[
-			"export-global",
-			"onReady/1"
-		]
-	]
-]
-},{}],83:[function(require,module,exports){
-module.exports=[
-	[
-		[
-			"atom",
-			"test"
-		]
-	]
-]
-},{}],84:[function(require,module,exports){
-module.exports=[
-	[
-		[
-			"print",
-			"\"JQuery behaviour module initializing\""
-		],
-		[
-			"import",
-			"lists"
-		],
 		[
 			"import",
 			"class"
 		],
 		[
-			"var",
-			"JQueryJSObj",
-			[
-				"atom",
-				"nil"
-			]
-		],
-		[
-			"var",
-			"JQueryOnLoadCallbacks",
-			[
-				"list"
-			]
-		],
-		[
-			"def",
-			"onJQuery",
-			[
-				"scope",
-				{
-					"code": [
-						[
-							[
-								"set",
-								"JQueryJSObj",
-								[
-									"get",
-									"JQ"
-								]
-							],
-							[
-								"print",
-								"\"JQuery initialized\""
-							],
-							[
-								"map",
-								"JQueryOnLoadCallbacks",
-								{
-									"code": [
-										[
-											[
-												"call",
-												"CB"
-											]
-										]
-									],
-									"_fndef": true,
-									"_fnparams": [
-										"CB"
-									]
-								}
-							]
-						]
-					],
-					"_fndef": true,
-					"_fnparams": [
-						"JQ"
-					]
-				}
-			]
-		],
-		[
-			"def",
-			"jqueryOnLoad",
-			[
-				"scope",
-				{
-					"code": [
-						[
-							[
-								"set",
-								"JQueryOnLoadCallbacks",
-								[
-									"++",
-									"JQueryOnLoadCallbacks",
-									[
-										"list",
-										"Callback"
-									]
-								]
-							],
-							[
-								"atom",
-								"ok"
-							]
-						]
-					],
-					"_fndef": true,
-					"_fnparams": [
-						"Callback"
-					]
-				}
-			]
-		],
-		[
-			"export-global",
-			"onJQuery/1",
-			"jqueryOnLoad/1"
-		],
-		[
-			"def",
-			"jquery-fn",
-			[
-				"scope",
-				{
-					"code": [
-						[
-							[
-								"dict-get",
-								[
-									"dict-get",
-									"JQueryJSObj",
-									"fn"
-								],
-								"init"
-							]
-						]
-					],
-					"_fndef": true,
-					"_fnparams": []
-				}
-			]
-		],
-		[
-			"def",
-			"jquery-init/*",
-			{
-				"code": [
-					[
-						[
-							"js-apply",
-							[
-								"jquery-fn"
-							],
-							[
-								"jquery-fn"
-							],
-							"Args"
-						]
-					]
-				],
-				"_fndef": true,
-				"_fnparams": [
-					"Args"
-				]
-			}
-		],
-		[
-			"def",
-			"jQueryClass",
-			{
-				"code": [
-					[
-						[
-							"new",
-							"JQueryClass",
-							"JQueryResult"
-						]
-					]
-				],
-				"_fndef": true,
-				"_fnparams": [
-					"JQueryResult"
-				]
-			}
-		],
-		[
-			"def",
-			"jQuery/1",
-			{
-				"code": [
-					[
-						[
-							"jQueryClass",
-							[
-								"jquery-init",
-								"Selector"
-							]
-						]
-					]
-				],
-				"_fndef": true,
-				"_fnparams": [
-					"Selector"
-				]
-			}
-		],
-		[
-			"def",
-			"jQuery/2",
-			{
-				"code": [
-					[
-						[
-							"jQueryClass",
-							[
-								"jquery-init",
-								"Selector",
-								"Context"
-							]
-						]
-					]
-				],
-				"_fndef": true,
-				"_fnparams": [
-					"Selector",
-					"Context"
-				]
-			}
-		],
-		[
-			"def",
-			"jQuery/3",
-			{
-				"code": [
-					[
-						[
-							"jQueryClass",
-							[
-								"jquery-init",
-								"Selector",
-								"Context",
-								"Root"
-							],
-							"a"
-						]
-					]
-				],
-				"_fndef": true,
-				"_fnparams": [
-					"Selector",
-					"Context",
-					"Root"
-				]
-			}
-		],
-		[
-			"export-global",
-			"jQuery/1",
-			"jQuery/2",
-			"jQuery/3"
-		],
-		[
-			"var",
-			"JQueryClass",
-			[
-				"class",
-				"'JQueryClass'",
-				[
-					"tuple",
-					[
-						"class-init"
-					],
-					{
-						"code": [
-							[
-								[
-									"member-set",
-									"Self",
-									"target",
-									"From"
-								]
-							]
-						],
-						"_fndef": true,
-						"_fnparams": [
-							"Self",
-							"From"
-						]
-					}
-				],
-				[
-					"tuple",
-					"getValue",
-					{
-						"code": [
-							[
-								[
-									"member-call",
-									"Self",
-									"call",
-									"val",
-									[
-										"list"
-									]
-								]
-							]
-						],
-						"_fndef": true,
-						"_fnparams": [
-							"Self"
-						]
-					}
-				],
-				[
-					"tuple",
-					"remove",
-					{
-						"code": [
-							[
-								[
-									"member-call",
-									"Self",
-									"call",
-									"remove",
-									[
-										"list"
-									]
-								]
-							]
-						],
-						"_fndef": true,
-						"_fnparams": [
-							"Self"
-						]
-					}
-				],
-				[
-					"tuple",
-					"setValue",
-					{
-						"code": [
-							[
-								[
-									"member-call",
-									"Self",
-									"call",
-									"val",
-									[
-										"list",
-										"Value"
-									]
-								]
-							]
-						],
-						"_fndef": true,
-						"_fnparams": [
-							"Self",
-							"Value"
-						]
-					}
-				],
-				[
-					"tuple",
-					"call",
-					{
-						"code": [
-							[
-								[
-									"new",
-									"JQueryClass",
-									[
-										"member-call",
-										"Self",
-										"invoke",
-										"Member",
-										"Args"
-									]
-								]
-							]
-						],
-						"_fndef": true,
-						"_fnparams": [
-							"Self",
-							"Member",
-							"Args"
-						]
-					}
-				],
-				[
-					"tuple",
-					"invoke",
-					{
-						"code": [
-							[
-								[
-									"js-apply",
-									[
-										"member-get",
-										"Self",
-										"target"
-									],
-									[
-										"member-call",
-										"Self",
-										"getTargetMember",
-										"Member"
-									],
-									"Args"
-								]
-							]
-						],
-						"_fndef": true,
-						"_fnparams": [
-							"Self",
-							"Member",
-							"Args"
-						]
-					}
-				],
-				[
-					"tuple",
-					"invoke-immediate",
-					{
-						"code": [
-							[
-								[
-									"invoke",
-									[
-										"member-get",
-										"Self",
-										"target"
-									],
-									[
-										"list",
-										"Search"
-									]
-								]
-							]
-						],
-						"_fndef": true,
-						"_fnparams": [
-							"Self",
-							"Search"
-						]
-					}
-				],
-				[
-					"tuple",
-					"getTarget",
-					{
-						"code": [
-							[
-								[
-									"member-get",
-									"Self",
-									"target"
-								]
-							]
-						],
-						"_fndef": true,
-						"_fnparams": [
-							"Self"
-						]
-					}
-				],
-				[
-					"tuple",
-					"getTargetMember",
-					{
-						"code": [
-							[
-								[
-									"dict-get",
-									[
-										"member-call",
-										"Self",
-										"getTarget"
-									],
-									"Member"
-								]
-							]
-						],
-						"_fndef": true,
-						"_fnparams": [
-							"Self",
-							"Member"
-						]
-					}
-				]
-			]
-		]
-	]
-]
-},{}],85:[function(require,module,exports){
-module.exports=[
-	[
-		[
 			"import",
-			"\"./webide/html-toolkit\""
+			"\"html-toolkit\""
 		],
 		[
 			"import",
-			"\"./webide/jquery-toolkit\""
+			"\"jquery-toolkit\""
 		],
 		[
 			"jqueryOnLoad",
@@ -4985,6 +5100,60 @@ module.exports=[
 							[
 								"print",
 								"\"Secondary jQuery init\""
+							],
+							[
+								"var",
+								"Body",
+								[
+									"jQuery",
+									"\"body\""
+								]
+							],
+							[
+								"print",
+								"\"Body: \"",
+								"Body"
+							],
+							[
+								"var",
+								"Anchors",
+								[
+									"jQuery",
+									"\"a\"",
+									"Body"
+								]
+							],
+							[
+								"print",
+								"\"Anchors:\"",
+								"Anchors"
+							],
+							[
+								"member-call",
+								"Anchors",
+								"setCss",
+								[
+									"dict",
+									[
+										"tuple",
+										"color",
+										"\"red\""
+									]
+								]
+							],
+							[
+								"var",
+								"B",
+								[
+									"jQuery",
+									"\"<b>TEST</b>\""
+								]
+							],
+							[
+								"member-call",
+								"Body",
+								"append",
+								"B"
 							]
 						]
 					],

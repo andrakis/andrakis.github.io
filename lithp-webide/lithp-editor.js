@@ -47,5 +47,23 @@
 		} catch (e) {
 			console.log(e.stack);
 		}
+		if(instance.Defined(result, "HTML_TOOLKIT") == Lithp.Types.Atom("true")) {
+			try {
+				instance.Invoke(result, "onReady/1", [document])
+			} catch (e) {
+				console.log(e.stack);
+			}
+		}
+		if(instance.Defined(result, "JQUERY_TOOLKIT") == Lithp.Types.Atom("true")) {
+			if(window.jQuery) {
+				console.log("Invoking jQuery behaviour");
+				window.jQuery.noConflict();
+				try {
+					instance.Invoke(result, "onJQuery/1", [window.jQuery])
+				} catch (e) {
+					console.log(e.stack);
+				}
+			}
+		}
 	}
 })();
