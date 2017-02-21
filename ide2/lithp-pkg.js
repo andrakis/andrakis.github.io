@@ -67,7 +67,7 @@ files['webide/webide.ast'] = require('./webide/webide.json');
 module.exports = files;
 
 
-},{"./modules/html-toolkit.json":3,"./modules/html.json":5,"./modules/jquery-toolkit.json":7,"./webide/webide.json":148,"lithp/modules/assert.json":18,"lithp/modules/bignum.json":20,"lithp/modules/buffer.json":22,"lithp/modules/cache.json":24,"lithp/modules/class.json":26,"lithp/modules/file.json":28,"lithp/modules/lists.json":30,"lithp/modules/match.json":32,"lithp/modules/math.json":34,"lithp/modules/pivot.json":36,"lithp/modules/random.json":38,"lithp/modules/readline.json":40,"lithp/modules/repl.json":42,"lithp/modules/stderr.json":44,"lithp/modules/stdlib.json":46,"lithp/modules/stream.json":48,"lithp/modules/strings.json":50,"lithp/modules/switch.json":52,"lithp/modules/symbols.json":54,"lithp/samples/aspect.json":62,"lithp/samples/atoms.json":64,"lithp/samples/bf.json":66,"lithp/samples/bfib.json":68,"lithp/samples/calc.json":70,"lithp/samples/cipher.json":72,"lithp/samples/complex.json":74,"lithp/samples/definitions.json":76,"lithp/samples/eval.json":78,"lithp/samples/ext.json":80,"lithp/samples/factorial.json":82,"lithp/samples/fib.json":84,"lithp/samples/fndefs.json":86,"lithp/samples/forloop.json":88,"lithp/samples/infinite.json":90,"lithp/samples/interlace-strings.json":92,"lithp/samples/inverse.json":94,"lithp/samples/magic.json":96,"lithp/samples/map.json":98,"lithp/samples/md-template.json":100,"lithp/samples/module.json":102,"lithp/samples/module_lib.json":104,"lithp/samples/n-circles.json":106,"lithp/samples/oddword.json":108,"lithp/samples/one_to_ten.json":110,"lithp/samples/pairable.json":112,"lithp/samples/parser-bugs.json":114,"lithp/samples/pillow.json":116,"lithp/samples/pow.json":118,"lithp/samples/progruzzle-colf.json":120,"lithp/samples/readfile.json":122,"lithp/samples/recurse.json":124,"lithp/samples/scope.json":126,"lithp/samples/shorthand.json":128,"lithp/samples/simple.json":130,"lithp/samples/square.json":132,"lithp/samples/subchains.json":134,"lithp/samples/var_args.json":136,"lithp/samples/wall.json":138,"lithp/samples/while.json":140}],2:[function(require,module,exports){
+},{"./modules/html-toolkit.json":3,"./modules/html.json":5,"./modules/jquery-toolkit.json":7,"./webide/webide.json":147,"lithp/modules/assert.json":18,"lithp/modules/bignum.json":20,"lithp/modules/buffer.json":22,"lithp/modules/cache.json":24,"lithp/modules/class.json":26,"lithp/modules/file.json":28,"lithp/modules/lists.json":30,"lithp/modules/match.json":32,"lithp/modules/math.json":34,"lithp/modules/pivot.json":36,"lithp/modules/random.json":38,"lithp/modules/readline.json":40,"lithp/modules/repl.json":42,"lithp/modules/stderr.json":44,"lithp/modules/stdlib.json":46,"lithp/modules/stream.json":48,"lithp/modules/strings.json":50,"lithp/modules/switch.json":52,"lithp/modules/symbols.json":54,"lithp/samples/aspect.json":61,"lithp/samples/atoms.json":63,"lithp/samples/bf.json":65,"lithp/samples/bfib.json":67,"lithp/samples/calc.json":69,"lithp/samples/cipher.json":71,"lithp/samples/complex.json":73,"lithp/samples/definitions.json":75,"lithp/samples/eval.json":77,"lithp/samples/ext.json":79,"lithp/samples/factorial.json":81,"lithp/samples/fib.json":83,"lithp/samples/fndefs.json":85,"lithp/samples/forloop.json":87,"lithp/samples/infinite.json":89,"lithp/samples/interlace-strings.json":91,"lithp/samples/inverse.json":93,"lithp/samples/magic.json":95,"lithp/samples/map.json":97,"lithp/samples/md-template.json":99,"lithp/samples/module.json":101,"lithp/samples/module_lib.json":103,"lithp/samples/n-circles.json":105,"lithp/samples/oddword.json":107,"lithp/samples/one_to_ten.json":109,"lithp/samples/pairable.json":111,"lithp/samples/parser-bugs.json":113,"lithp/samples/pillow.json":115,"lithp/samples/pow.json":117,"lithp/samples/progruzzle-colf.json":119,"lithp/samples/readfile.json":121,"lithp/samples/recurse.json":123,"lithp/samples/scope.json":125,"lithp/samples/shorthand.json":127,"lithp/samples/simple.json":129,"lithp/samples/square.json":131,"lithp/samples/subchains.json":133,"lithp/samples/var_args.json":135,"lithp/samples/wall.json":137,"lithp/samples/while.json":139}],2:[function(require,module,exports){
 (function (global){
 if(typeof window === 'undefined')
 	window = {};
@@ -134,7 +134,7 @@ window.onload = function() {
 };
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./files":1,"./samples":147,"lithp":10,"util":146}],3:[function(require,module,exports){
+},{"./files":1,"./samples":146,"lithp":10,"util":145}],3:[function(require,module,exports){
 module.exports=[[["define","'HTML_TOOLKIT'","true"],["import","lists"],["var","Document",["atom","nil"]],["var","Window",["atom","nil"]],["var","HtmlToolkitOnReady",["list"]],["var","Ready","false"],["def","onReady/*",["scope",{"code":[[["set","Document",["index","Values","0"]],["set","Window",["index","Values","1"]],["set","Ready","true"],["each","HtmlToolkitOnReady",{"code":[[["call","Callback"]]],"_fndef":true,"_fnparams":["Callback"]}]]],"_fndef":true,"_fnparams":["Values"]}]],["export-global","onReady/*"],["def","htmlOnLoad",["scope",{"code":[[["if",["==","false","Ready"],[["set","HtmlToolkitOnReady",["++","HtmlToolkitOnReady",["list","Callback"]]]],["else",[["call","Callback"]]]],["atom","ok"]]],"_fndef":true,"_fnparams":["Callback"]}]],["export-global","htmlOnLoad/1"],["def","getElementById",["scope",{"code":[[["doc-apply","getElementById",["list","Id"]]]],"_fndef":true,"_fnparams":["Id"]}]],["def","prompt",["scope",{"code":[[["var","Result",["invoke","Window","prompt","Question"]],["call","Callback","Result"]]],"_fndef":true,"_fnparams":["Question","Callback"]}]],["export-global","prompt/2"],["def","doc-apply",["scope",{"code":[[["js-apply","Document",["dict-get","Document","Member"],"Args"]]],"_fndef":true,"_fnparams":["Member","Args"]}]],["def","getDoc",["scope",{"code":[[["Document"]]],"_fndef":true,"_fnparams":[]}]],["export-global","getDoc/0"]]]
 },{}],4:[function(require,module,exports){
 module.exports = "% Provides a basic interface to HTML objects in the document.\n% You must invoke onReady/1 with the \"body\" element.\n(\n\t(define 'HTML_TOOLKIT' true)\n\t(import lists)\n\n\t(var Document (atom nil))\n\t(var Window   (atom nil))\n\t(var HtmlToolkitOnReady (list))\n\t(var Ready false)\n\t(def onReady/* (scope #Values :: (\n\t\t(set Document (index Values 0))\n\t\t(set Window   (index Values 1))\n\t\t(set Ready true)\n\t\t(each HtmlToolkitOnReady #Callback :: (\n\t\t\t(call Callback)\n\t\t))\n\t)))\n\n\t(export-global onReady/*)\n\n\t(def htmlOnLoad (scope #Callback :: (\n\t\t(if (== false Ready) (\n\t\t\t(set HtmlToolkitOnReady (++\n\t\t\t\t HtmlToolkitOnReady (list Callback)\n\t\t\t))\n\t\t) (else (\n\t\t\t(call Callback)\n\t\t)))\n\t\t(atom ok)\n\t)))\n\n\t(export-global htmlOnLoad/1)\n\n\t(def getElementById (scope #Id :: (\n\t\t(doc-apply getElementById (list Id))\n\t)))\n\n\t(def prompt (scope #Question,Callback :: (\n\t\t(var Result (invoke Window prompt Question))\n\t\t(call Callback Result)\n\t)))\n\n\t(export-global prompt/2)\n\n\t(def doc-apply (scope #Member,Args :: (\n\t\t(js-apply Document (dict-get Document Member) Args)\n\t)))\n\n\t(def getDoc (scope # :: ((Document))))\n\t(export-global getDoc/0)\n)\n";
@@ -1229,7 +1229,7 @@ exports.setup = function(lithp) {
 lithp = require('./..');
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"../platform/v0/parser":57,"../platform/v1/parser-lib":60,"./..":10,"./types":14,"_process":143,"fs":9,"path":142,"util":146}],12:[function(require,module,exports){
+},{"../platform/v0/parser":57,"../platform/v1/parser-lib":59,"./..":10,"./types":14,"_process":142,"fs":9,"path":141,"util":145}],12:[function(require,module,exports){
 (function (global){
 /**
  * Lithp language interpreter.
@@ -1533,7 +1533,7 @@ Lithp.prototype.invoke_functioncall = function(chain, fndef, params) {
 };
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./types":14,"util":146}],13:[function(require,module,exports){
+},{"./types":14,"util":145}],13:[function(require,module,exports){
 (function (process,global,__dirname){
 /**
  * Lithp, a very small Lisp-like interpreter.
@@ -1715,7 +1715,7 @@ global.Lithp = Lithp;
 require('./interpreter');
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},"/node_modules/lithp/lib")
-},{"../package.json":56,"./builtins":11,"./interpreter":12,"./types":14,"./util":15,"_process":143,"path":142,"util":146}],14:[function(require,module,exports){
+},{"../package.json":56,"./builtins":11,"./interpreter":12,"./types":14,"./util":15,"_process":142,"path":141,"util":145}],14:[function(require,module,exports){
 (function (global){
 /**
  * Provide the basic Lithp structure types used by the interpreter.
@@ -2044,7 +2044,7 @@ function FunctionDefinitionNative (name, params, body) {
 exports.FunctionDefinitionNative = FunctionDefinitionNative;
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"util":146}],15:[function(require,module,exports){
+},{"util":145}],15:[function(require,module,exports){
 (function (global){
 /**
  * Provides some additional utility functions.
@@ -2305,7 +2305,7 @@ module.exports={
     ]
   ],
   "_from": "git+https://github.com/andrakis/node-lithp.git",
-  "_id": "lithp@0.24.2",
+  "_id": "lithp@0.24.6",
   "_inCache": true,
   "_location": "/lithp",
   "_phantomChildren": {},
@@ -2330,8 +2330,8 @@ module.exports={
   "_requiredBy": [
     "/lithp-pkg"
   ],
-  "_resolved": "git+https://github.com/andrakis/node-lithp.git#793fc63ec823e413ff0a59716ad404485a04ed73",
-  "_shasum": "ab5eafa7ef26e9b57d63021ab4f9d3ce937aaff4",
+  "_resolved": "git+https://github.com/andrakis/node-lithp.git#9bb7bc292e8af517a0aeccc35cca6ddecc0dac14",
+  "_shasum": "9a7f407b8ed6fb514f269fc8492ed77ae5f699c5",
   "_shrinkwrap": null,
   "_spec": "lithp@git+https://github.com/andrakis/node-lithp.git",
   "_where": "/home/daedalus/git/lithp-webide/node_modules/lithp-pkg",
@@ -2349,7 +2349,7 @@ module.exports={
   "dependencies": {},
   "description": "A small Lisp-like language with a tiny interpreter",
   "devDependencies": {},
-  "gitHead": "793fc63ec823e413ff0a59716ad404485a04ed73",
+  "gitHead": "9bb7bc292e8af517a0aeccc35cca6ddecc0dac14",
   "homepage": "https://github.com/andrakis/node-lithp#readme",
   "keywords": [
     "lisp",
@@ -2368,7 +2368,7 @@ module.exports={
   "scripts": {
     "postinstall": "if [ ! -L run ]; then ln -s run.js run; fi"
   },
-  "version": "0.24.2"
+  "version": "0.24.6"
 }
 
 },{}],57:[function(require,module,exports){
@@ -2967,10 +2967,7 @@ exports.BootstrapParser = BootstrapParser;
 
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./../../index":10,"util":146}],58:[function(require,module,exports){
-module.exports = " (\n\t% For use with switch/*, a case statement that returns a function that\n\t% is called by switch/*, and if the Value given by switch/* matches,\n\t% {ok, Result} is returned. Otherwise {false} is returned.\n\t(def case #Eq,Result :: (\n\t\t(scope #Value :: (\n\t\t\t(if (== Eq Value) (\n\t\t\t\t(tuple ok Result)\n\t\t\t) (else (\n\t\t\t\t(tuple false)\n\t\t\t)))\n\t\t))\n\t))\n\t(var CaseTrue (case true \"True\"))\n\t(var CaseFalse (case false \"False\"))\n\t(var Value false)\n\t(print \"CaseTrue on \" Value \":\" (invoke (call CaseTrue Value) \"toString\"))\n\t(print \"CaseFalse on \" Value \":\" (invoke (call CaseFalse Value) \"toString\"))\n )\n";
-
-},{}],59:[function(require,module,exports){
+},{"./../../index":10,"util":145}],58:[function(require,module,exports){
 /**
  * Parser V1, Platform V0, switch() implementation.
  *
@@ -3170,7 +3167,7 @@ exports.functions = {
 	"switch": lib_switch
 };
 
-},{"./../../.":10,"util":146}],60:[function(require,module,exports){
+},{"./../../.":10,"util":145}],59:[function(require,module,exports){
 /**
  * Standard library for Parser V1, Platform V0.
  *
@@ -3376,210 +3373,210 @@ function lib_with (chain) {
 	 */
 }
 
-},{"./../../.":10,"./lib-parser-switch":59,"util":146}],61:[function(require,module,exports){
+},{"./../../.":10,"./lib-parser-switch":58,"util":145}],60:[function(require,module,exports){
 module.exports = "#!./run.js\n% Entry point for the Lithp REPL.\n%\n% vim: set syntax=lithp noet ts=4:\n% See syntax file in node_modules/lithp/syntax/vim/lithp.vim\n(\n\t(import \"modules/repl\")\n\n\t(print \"Welcome to Lithp v\" (host-version) \"running on\" (host))\n\t(print \"Type \\\\q exit. Type ? for help.\")\n\n\t(if (== (host) \"Node.js\") (\n\t\t(repl-loop)\n\t) (else (\n\t\t(import html-toolkit)\n\t\t(htmlOnLoad # :: ((repl-loop)))\n\t)))\n)\n";
 
-},{}],62:[function(require,module,exports){
+},{}],61:[function(require,module,exports){
 module.exports=[[["import","\"lists\""],["def","f",{"code":[[["/",["*","A","B","C"],["+","B","C",["-","0","A"]],["+","A","C",["-","0","B"]],["+","A","B",["-","0","C"]]]]],"_fndef":true,"_fnparams":["A","B","C"]}],["print",["f","1","1","1"]],["print",["f","3","4","5"]],["print",["f","42","42","3.14"]],["print",["f","14","6","12"]],["print",["f","6","12","14"]],["print",["f","0.5","0.6","0.7"]]]]
-},{}],63:[function(require,module,exports){
+},{}],62:[function(require,module,exports){
 module.exports = "(\n\t(import \"lists\")\n\t(def f #A,B,C::(\n\t\t(/ (* A B C)\n\t\t   (+ B C (- 0 A))\n\t\t   (+ A C (- 0 B))\n\t\t   (+ A B (- 0 C))\n\t\t)\n\t))\n\t(print (f 1   1   1))    % Output: 1\n\t(print (f 3   4   5))    % Output: 1.25\n\t(print (f 42  42  3.14)) % Output: 6.9476062266936145\n\t(print (f 14  6   12))   % Output: 1.575\n\t(print (f 6   12  14))   % Output: 1.575\n\t(print (f 0.5 0.6 0.7))  % Output: 1.09375\n)\n";
 
-},{}],64:[function(require,module,exports){
+},{}],63:[function(require,module,exports){
 module.exports=[[["def","get-fn-by-name",{"code":[[["var","R1",["+","Name","\"/\""]],["var","Ref",["+","R1","Arity"]],["get",["to-string","Ref"]]]],"_fndef":true,"_fnparams":["Name","Arity"]}],["'print'","\"+ is\"",["get-fn-by-name","+","*"]],["call",["get-fn-by-name","\"print\"","*"],"\"Testing\""]]]
-},{}],65:[function(require,module,exports){
+},{}],64:[function(require,module,exports){
 module.exports = "% Test calling functions using quoted atoms, and also\n% grabbing a currently defined function for use with\n% call/*.\n(\n\t(def get-fn-by-name #Name,Arity :: (\n\t\t% BUGGED, parsed incorrectly: (var Ref (+ (Name (+ \"/\" Arity))))\n\t\t%         Seems to get an OpChain instead of the result of (+ \"/\" Arity)\n\t\t(var R1 (+ Name \"/\"))\n\t\t(var Ref (+ R1 Arity))\n\t\t(get (to-string Ref))\n\t))\n\t('print' \"+ is\" (get-fn-by-name + *))\n\t(call (get-fn-by-name \"print\" *) \"Testing\")\n)";
 
-},{}],66:[function(require,module,exports){
+},{}],65:[function(require,module,exports){
 module.exports=[[["import","\"file\""],["import","\"switch\""],["invoke",["stdin"],"setRawMode","1"],["def","readkey",{"code":[[["invoke",["stdin"],"resume"],["invoke",["stdin"],"on","data",["js-bridge",{"code":[[["invoke",["stdin"],"pause"],["call","Callback","Data"]]],"_fndef":true,"_fnparams":["Data"]}]]]],"_fndef":true,"_fnparams":["Callback"]}],["def","inc",{"code":[[["+","V","1"]]],"_fndef":true,"_fnparams":["V"]}],["def","dec",{"code":[[["-","V","1"]]],"_fndef":true,"_fnparams":["V"]}],["def","prog",{"code":[[["index","BfProg","X"]]],"_fndef":true,"_fnparams":["X"]}],["def","bracket-open",{"code":[[["var","BracketOpenInner",["scope",{"code":[[["var","Y",["-",["length","BfProg"],"Ip"]],["if",["<","X","Y"],[["var","Ch",["prog",["+","Ip","X"]],["if",["==","Ch","\"]\""],[["call","BracketOpenInner",["dec","OpenBraces"],["inc","X"]]],["else",[["if",["==","Ch","\"]\""],[["call","BracketOpenInner",["inc","OpenBraces"],["inc","X"]]],["else",[["if",["==","0","OpenBrces"],[["if",["==",["stack-peek"],"Ip"],[["stack-pop"]],["else",[["call","BracketOpenInner","OpenBraces",["inc","X"]]]]]]]]]]]]]]]]]],"_fndef":true,"_fnparams":["OpenBraces","X"]}]],["call","BracketOpenInner","1","1"]]],"_fndef":true,"_fnparams":[]}],["def","stack-push",{"code":[[["invoke","Stack","push","N"]]],"_fndef":true,"_fnparams":["N"]}],["def","stack-pop",{"code":[[["invoke","Stack","pop"]]],"_fndef":true,"_fnparams":[]}],["def","stack-peek",{"code":[[["?",[">",["length","Stack"],"0"],["index","Stack",["-",["length","Stack"],"1"]],"nil"]]],"_fndef":true,"_fnparams":[]}],["def","mem",{"code":[[["var","V",["dict-get","Mem","Ptr"]],["?",["==","V",["undefined"]],"0","V"]]],"_fndef":true,"_fnparams":["Ptr"]}],["var","Source","\"+<<---[[<+>->++++>---<<]>++]<<<++.<+++.<..<-.<<++.<-.>>>.<.>>.>-.<<<<+.\""],["var","Stack",["list"]],["var","BfProg",["split","Source","\"\""]],["var","Mem",["dict"]],["var","Ptr","0"],["var","Ip","0"],["var","Len",["length","BfProg"]],["var","CasePtrInc",["case","\">\"",["scope",{"code":[[["set","Ptr",["inc","Ptr"]]]],"_fndef":true,"_fnparams":[]}]]],["var","CasePtrDec",["case","\"<\"",["scope",{"code":[[["set","Ptr",["dec","Ptr"]]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseMemInc",["case","\"+\"",["scope",{"code":[[["var","I",["mem","Ptr"]],["dict-set","Mem","Ptr",["inc","I"]]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseMemDec",["case","\"-\"",["scope",{"code":[[["var","I",["mem","Ptr"]],["dict-set","Mem","Ptr",["dec","I"]]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseWrite",["case","\".\"",["scope",{"code":[[["var","I",["mem","Ptr"]],["print","I"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseRead",["case","\",\"",["scope",{"code":[[["readkey",["scope",{"code":[[["dict-set","Mem","Ptr",["index","Key","0"]]]],"_fndef":true,"_fnparams":["Key"]}]]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseBracketOpen",["case","\"[\"",["scope",{"code":[[["if",["==","0",["mem","Ptr"]],[["bracket-open"]],["else",[["stack-push","Ip"]]]]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseBracketClose",["case","\"]\"",["scope",{"code":[[["if",["==","0",["mem","Ptr"]],[["stack-pop"]],["else",[["set","Ip",["stack-peek"]]]]]]],"_fndef":true,"_fnparams":[]}]]],["var","SwitchCases",["list","CasePtrInc","CasePtrDec","CaseMemInc","CaseMemDec","CaseWrite","CaseRead","CaseBracketOpen","CaseBracketClose"]],["def","execute-contents",{"code":[[["set","BfProg",["get","FileData"]],["set","Len",["length","BfProg"]],["set","Ip","0"],["set","Ptr","0"],["print","\"Loaded \"","Len","\" bytes\""],["execution-loop"]]],"_fndef":true,"_fnparams":["FileData"]}],["var","ExecutionCond",{"code":[[["<","Ip","Len"]]],"_fndef":true,"_fnparams":[]}],["var","ExecutionAction",{"code":[[[["switch",["prog","Ip"],"SwitchCases"],["set","Ip",["inc","Ip"]]]]],"_fndef":true,"_fnparams":[]}],["def","execution-loop",{"code":[[["while","ExecutionCond","ExecutionAction"]]],"_fndef":true,"_fnparams":[]}],["if",["!=","false",["get-def","'FILE'"]],[["var","File",["+","\"\"",["get-def","'FILE'"]]],["read-file","File",["scope",{"code":[[["if",["==",["null"],"Err"],[["print","File","\" loaded, starting execution\""],["execute-contents","Data"]]]]],"_fndef":true,"_fnparams":["Err","Data"]}]]],["else",[["execution-loop"]]]]]]
-},{}],67:[function(require,module,exports){
+},{}],66:[function(require,module,exports){
 module.exports = "(\n\t(import \"file\")\n\t(import \"switch\")\n\n\t(invoke (stdin) setRawMode 1)\n\n\t(def readkey #Callback :: (\n\t\t(invoke (stdin) resume)\n\t\t(invoke (stdin) on data (js-bridge #Data :: (\n\t\t\t(invoke (stdin) pause)\n\t\t\t(call Callback Data)\n\t\t)))\n\t))\n\t(def inc #V :: ((+ V 1)))\n\t(def dec #V :: ((- V 1)))\n\n\t(def prog #X :: ((index BfProg X)))\n\t(def bracket-open # :: (\n\t\t(var BracketOpenInner (scope #OpenBraces,X :: (\n\t\t\t(var Y (- (length BfProg) Ip))\n\t\t\t(if (< X Y) (\n\t\t\t\t(var Ch (prog (+ Ip X))\n\t\t\t\t(if (== Ch \"]\") (\n\t\t\t\t\t(call BracketOpenInner (dec OpenBraces) (inc X))\n\t\t\t\t) (else (\n\t\t\t\t\t(if (== Ch \"]\") (\n\t\t\t\t\t\t(call BracketOpenInner (inc OpenBraces) (inc X))\n\t\t\t\t\t) (else (\n\t\t\t\t\t\t(if (== 0 OpenBrces) (\n\t\t\t\t\t\t\t(if (== (stack-peek) Ip) (\n\t\t\t\t\t\t\t\t(stack-pop)\n\t\t\t\t\t\t\t) (else (\n\t\t\t\t\t\t\t\t(call BracketOpenInner OpenBraces (inc X))\n\t\t\t\t\t\t\t)))\n\t\t\t\t\t\t))\n\t\t\t\t\t)))\n\t\t\t\t)))\n\t\t\t)))\n\t\t)))\n\t\t(call BracketOpenInner 1 1)\n\t))\n\t(def stack-push #N :: (\n\t\t(invoke Stack push N)\n\t))\n\t(def stack-pop # :: (\n\t\t(invoke Stack pop)\n\t))\n\t(def stack-peek # :: (\n\t\t(? (> (length Stack) 0) (index Stack (- (length Stack) 1)) nil)\n\t))\n\t(def mem #Ptr :: (\n\t\t(var V (dict-get Mem Ptr))\n\t\t(? (== V (undefined)) 0 V)\n\t))\n\n\t%(var Source \"++++++++[->-[->-[->-[-]<]<]<]>++++++++[<++++++++++>-]<[>+>+<<-]>-.>-----.>\")\n\t(var Source \"+<<---[[<+>->++++>---<<]>++]<<<++.<+++.<..<-.<<++.<-.>>>.<.>>.>-.<<<<+.\")\n\t(var Stack (list))\n\t(var BfProg (split Source \"\"))\n\t(var Mem (dict))\n\t(var Ptr 0)\n\t(var Ip 0)\n\t(var Len (length BfProg))\n\t(var CasePtrInc (case \">\" (scope #::((set Ptr (inc Ptr))))))\n\t(var CasePtrDec (case \"<\" (scope #::((set Ptr (dec Ptr))))))\n\t(var CaseMemInc (case \"+\" (scope #::(\n\t\t(var I (mem Ptr))\n\t\t(dict-set Mem Ptr (inc I))\n\t))))\n\t(var CaseMemDec (case \"-\" (scope #::(\n\t\t(var I (mem Ptr))\n\t\t(dict-set Mem Ptr (dec I))\n\t))))\n\t(var CaseWrite (case \".\" (scope #::(\n\t\t(var I (mem Ptr))\n\t\t(print I)\n\t))))\n\t(var CaseRead (case \",\" (scope #::(\n\t\t(readkey (scope #Key :: (\n\t\t\t(dict-set Mem Ptr (index Key 0))\n\t\t)))\n\t))))\n\t(var CaseBracketOpen (case \"[\" (scope #::(\n\t\t(if (== 0 (mem Ptr)) (\n\t\t\t(bracket-open)\n\t\t) (else (\n\t\t\t(stack-push Ip)\n\t\t)))\n\t))))\n\t(var CaseBracketClose (case \"]\" (scope #::(\n\t\t(if (== 0 (mem Ptr)) (\n\t\t\t(stack-pop)\n\t\t) (else (\n\t\t\t(set Ip (stack-peek))\n\t\t)))\n\t))))\n\t(var SwitchCases (list CasePtrInc CasePtrDec CaseMemInc CaseMemDec\n\t                       CaseWrite CaseRead CaseBracketOpen CaseBracketClose))\n\n\t(def execute-contents #FileData :: (\n\t\t(set BfProg (get FileData))\n\t\t(set Len (length BfProg))\n\t\t(set Ip 0)\n\t\t(set Ptr 0)\n\t\t(print \"Loaded \" Len \" bytes\")\n\t\t(execution-loop)\n\t))\n\n\t(var ExecutionCond #::((< Ip Len)))\n\t(var ExecutionAction #::((\n\t\t(switch (prog Ip) SwitchCases)\n\t\t(set Ip (inc Ip))\n\t)))\n\t(def execution-loop #::(\n\t\t(while ExecutionCond ExecutionAction)\n\t))\n\n\t(if (!= false (get-def 'FILE')) (\n\t\t(var File (+ \"\" (get-def 'FILE')))\n\t\t(read-file File (scope #Err,Data :: (\n\t\t\t(if (== (null) Err) (\n\t\t\t\t(print File \" loaded, starting execution\")\n\t\t\t\t(execute-contents Data)\n\t\t\t))\n\t\t)))\n\t) (else (\n\t\t(execution-loop)\n\t)))\n)\n";
 
-},{}],68:[function(require,module,exports){
+},{}],67:[function(require,module,exports){
 module.exports=[[["import","\"bignum\""],["import","\"lists\""],["var","FL",["dict"]],["var","Base","16"],["def","b",{"code":[[["bignum","N"]]],"_fndef":true,"_fnparams":["N"]}],["def","s",{"code":[[["to-string","N","Base"]]],"_fndef":true,"_fnparams":["N"]}],["def","fib",{"code":[[["if",["b<=","N",["b","2"]],[["b","1"]],[["+",["fibFL",["b-","N",["b","2"]]],["fibFL",["b-","N",["b","1"]]]]]]]],"_fndef":true,"_fnparams":["N"]}],["def","fibFL",{"code":[[["if",["dict-present","FL",["s","N"]],[["dict-get","FL",["s","N"]]],[["var","I",["fib","N"]],["set","FL",["dict-set","FL",["s","N"],"I"]],["I"]]]]],"_fndef":true,"_fnparams":["N"]}],["def","fib-orial",{"code":[[["bprod",["map",["seq","1","N"],["scope",{"code":[[["fib",["b","I"]]]],"_fndef":true,"_fnparams":["I"]}]]]]],"_fndef":true,"_fnparams":["N"]}],["each",["seq","2","20"],["scope",{"code":[[["print",["s",["fib-orial","N"]]]]],"_fndef":true,"_fnparams":["N"]}]]]]
-},{}],69:[function(require,module,exports){
+},{}],68:[function(require,module,exports){
 module.exports = "(\n\t(import \"bignum\")\n\t(import \"lists\")\n\t(var FL (dict))\n\t(var Base 16)\n\t(def b #N::((bignum N)))\n\t(def s #N::((to-string N Base)))\n\t(def fib #N::(\n\t\t(if (b<= N (b 2)) (\n\t\t\t(b 1)\n\t\t) (\n\t\t\t(+ (fibFL (b- N (b 2))) (fibFL (b- N (b 1))))\n\t\t))\n\t))\n\t(def fibFL #N::((if (dict-present FL (s N)) ((dict-get FL (s N))) ((var I (fib N))(set FL (dict-set FL (s N) I))(I)))))\n\t(def fib-orial #N::((bprod (map (seq 1 N) (scope #I::((fib (b I))))))))\n\t(each (seq 2 20) (scope #N :: ((print (s (fib-orial N))))))\n\t%(print (fib-orial (b 5)))\n)\n";
 
-},{}],70:[function(require,module,exports){
+},{}],69:[function(require,module,exports){
 module.exports=[[["import","lists"],["import","math"],["import","readline"],["import","switch"],["import","stderr"],["var","Acc","0"],["def","=",{"code":[["Value"]],"_fndef":true,"_fnparams":["Ignored","Value"]}],["def","v",{"code":[["Acc"]],"_fndef":true,"_fnparams":[]}],["def","p",{"code":[[["print",["format-acc"]],["v"]]],"_fndef":true,"_fnparams":[]}],["def","f",{"code":[[["floor","Acc"]]],"_fndef":true,"_fnparams":[]}],["def","c",{"code":[[["ceil","Acc"]]],"_fndef":true,"_fnparams":[]}],["def","e",{"code":[[["exit"]]],"_fndef":true,"_fnparams":[]}],["def","acc-op",["scope",{"code":[[["var","Code",["+","\"(\"","Op","\" Acc \"","Value","\")\""]],["stderr-write",["+","\"Code: \"","Code","\"\\n\""]],["eval","Code"]]],"_fndef":true,"_fnparams":["Op","Value"]}]],["var","Commands",["dict",["tuple","\"c\"","\"Ceil of Acc\""],["tuple","\"f\"","\"Floor of Acc\""],["tuple","\"h\"","\"Display this help\""],["tuple","\"?\"","\"Display this help\""],["tuple","\"e\"","\"Exit\""],["tuple","\"p\"","\"Print Acc\""],["tuple","\"v\"","\"Current value of Acc\""],["tuple","\"=\"","\"Set Acc to given value\""],["tuple","\"H\"","\"Set hex mode output\""],["tuple","\"D\"","\"Set decimal mode output\""],["tuple","\"B\"","\"Set binary mode output\""]]],["var","AccFormat","\"D\""],["def","format-acc",{"code":[[["format-acc","AccFormat"]]],"_fndef":true,"_fnparams":[]}],["var","FormatAccCaseHex",["case","\"H\"",["scope",{"code":[[["+","\"0x\"",["to-string","Acc","16"]]]],"_fndef":true,"_fnparams":[]}]]],["var","FormatAccCaseDecimal",["case","\"D\"",["scope",{"code":[[["get","Acc"]]],"_fndef":true,"_fnparams":[]}]]],["var","FormatAccCaseBinary",["case","\"B\"",["scope",{"code":[[["+","\"B\"",["to-string","Acc","2"]]]],"_fndef":true,"_fnparams":[]}]]],["var","FormatAccCaseList",["list","FormatAccCaseHex","FormatAccCaseDecimal","FormatAccCaseBinary"]],["def","format-acc",{"code":[[["switch","Format","FormatAccCaseList"]]],"_fndef":true,"_fnparams":["Format"]}],["def","set-acc-format",{"code":[[["set","AccFormat",["get","Format"]],["v"]]],"_fndef":true,"_fnparams":["Format"]}],["var","BuiltinsAvailable",["dict",["tuple","1",["list","abs","acos","acosh","asin","asinh","atan","atanh","cbrt","ceil","clz32","cos","cosh","floor","hypot","log","log10","log1p","log2","sign","sin","sinh","aqrt","tan","tanh"]],["tuple","2",["list","min","max","round","pow","imul","exp","expm1","fround","round"]]]],["def","show-help",{"code":[[["print","\"Available commands:\""],["each",["dict-keys","Commands"],{"code":[[["print","\"    \"","Command","\" -> \"",["index","Commands","Command"]]]],"_fndef":true,"_fnparams":["Command"]}],["print","\"Syntax: op value value value\""],["print","\"    eg: = 1\""],["print","\"      : + 2 2 3 v (sinh (pi))\""],["print","\"      : = 33.548739357257745\""],["print","\"Available builtins:\""],["print",["join",["map",["dict-keys",["dict-get","BuiltinsAvailable","1"]],{"code":[[["+","\"(\"",["dict-get",["dict-get","BuiltinsAvailable","1"],"Name"],"\" N)\""]]],"_fndef":true,"_fnparams":["Name"]}],"\", \""]],["print",["join",["map",["dict-keys",["dict-get","BuiltinsAvailable","2"]],{"code":[[["+","\"(\"",["dict-get",["dict-get","BuiltinsAvailable","2"],"Name"],"\" A B)\""]]],"_fndef":true,"_fnparams":["Name"]}],"\", \""]],["get","Acc"]]],"_fndef":true,"_fnparams":[]}],["var","CasePrint",["case","\"p\"",["scope",{"code":[[["p"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseQuit",["case","\"q\"",["scope",{"code":[[["e"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseCurrent",["case","\"v\"",["scope",{"code":[[["v"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseFloor",["case","\"f\"",["scope",{"code":[[["f"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseCeil",["case","\"c\"",["scope",{"code":[[["c"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseHex",["case","\"H\"",["scope",{"code":[[["set-acc-format","\"H\""]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseDecimal",["case","\"D\"",["scope",{"code":[[["set-acc-format","\"D\""]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseBinary",["case","\"B\"",["scope",{"code":[[["set-acc-format","\"B\""]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseHelp1",["case","\"h\"",["scope",{"code":[[["show-help"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseHelp2",["case","\"?\"",["scope",{"code":[[["show-help"]]],"_fndef":true,"_fnparams":[]}]]],["var","CaseDefault",["default",["scope",{"code":[[["print","\"Unknown command\""],["get","Acc"]]],"_fndef":true,"_fnparams":["Given"]}]]],["var","CaseList",["list","CasePrint","CaseQuit","CaseCurrent","CaseFloor","CaseCeil","CaseHex","CaseDecimal","CaseBinary","CaseHelp1","CaseHelp2","CaseDefault"]],["def","parse",{"code":[[["var","Matches",["match","Entry","\"([-=+*/!@#$%^&<>a-z]+) (.*)$\""]],["if",["==",["null"],"Matches"],[["switch","Entry","CaseList"]],["else",[["var","Tail",["index","Matches","2"]],["set","Tail",["replace","Tail",["regex","\"(?:^|\\\\s)([a-z]+)(?=\\\\s|$)\"","\"g\""],["js-bridge",{"code":[[["+","\"(\"",["trim","Value"],"\") \""]]],"_fndef":true,"_fnparams":["Value"]}]]],["try",[["acc-op",["index","Matches","1"],"Tail"]],{"code":[[["stderr-write",["+","\"Failed to parse: \"",["to-string","E"],"\"\\n\""]],["c"]]],"_fndef":true,"_fnparams":["E"]}]]]]]],"_fndef":true,"_fnparams":["Entry"]}],["def","input-loop",{"code":[[["readline",["+",["format-acc"],"\">\""],["scope",{"code":[[["set","Acc",["parse","Value"]],["input-loop"]]],"_fndef":true,"_fnparams":["Value"]}]]]],"_fndef":true,"_fnparams":[]}],["if",["==",["host"],"\"Node.js\""],[["input-loop"]],["else",[["import","html-toolkit"],["htmlOnLoad",{"code":[[["input-loop"]]],"_fndef":true,"_fnparams":[]}]]]]]]
-},{}],71:[function(require,module,exports){
+},{}],70:[function(require,module,exports){
 module.exports = "% Simple Accumulative Calculator\n%\n%\n(\n\t(import lists)\n\t(import math)\n\t(import readline)\n\t(import switch)\n\n\t(import stderr)\n\n\t(var Acc 0)\n\n\t(def = #Ignored,Value :: (Value))\n\t(def v # :: (Acc))\n\t(def p # :: ((print (format-acc))(v)))\n\t(def f # :: ((floor Acc)))\n\t(def c # :: ((ceil Acc)))\n\t(def e # :: ((exit)))\n\t(def acc-op (scope #Op,Value :: (\n\t\t(var Code (+ \"(\" Op \" Acc \" Value \")\"))\n\t\t(stderr-write (+ \"Code: \" Code \"\\n\"))\n\t\t(eval Code)\n\t)))\n\n\t(var Commands (dict\n\t\t(tuple \"c\" \"Ceil of Acc\")\n\t\t(tuple \"f\" \"Floor of Acc\")\n\t\t(tuple \"h\" \"Display this help\")\n\t\t(tuple \"?\" \"Display this help\")\n\t\t(tuple \"e\" \"Exit\")\n\t\t(tuple \"p\" \"Print Acc\")\n\t\t(tuple \"v\" \"Current value of Acc\")\n\t\t(tuple \"=\" \"Set Acc to given value\")\n\t\t(tuple \"H\" \"Set hex mode output\")\n\t\t(tuple \"D\" \"Set decimal mode output\")\n\t\t(tuple \"B\" \"Set binary mode output\")\n\t))\n\n\t(var AccFormat \"D\")\n\t(def format-acc # :: ((format-acc AccFormat)))\n\t(var FormatAccCaseHex     (case \"H\" (scope # :: ((+ \"0x\" (to-string Acc 16))))))\n\t(var FormatAccCaseDecimal (case \"D\" (scope # :: ((get Acc)))))\n\t(var FormatAccCaseBinary  (case \"B\" (scope # :: ((+ \"B\" (to-string Acc 2))))))\n\t(var FormatAccCaseList (list FormatAccCaseHex FormatAccCaseDecimal FormatAccCaseBinary))\n\t(def format-acc #Format :: (\n\t\t(switch Format FormatAccCaseList)\n\t))\n\t(def set-acc-format #Format :: (\n\t\t(set AccFormat (get Format))\n\t\t(v)\n\t))\n\n\t(var BuiltinsAvailable (dict\n\t\t(tuple 1 (list abs acos acosh asin asinh atan atanh cbrt ceil clz32\n\t\t               cos cosh floor hypot log log10\n\t\t               log1p log2 sign sin sinh aqrt tan tanh))\n\t\t(tuple 2 (list min max round pow imul exp expm1 fround round))\n\t))\n\t(def show-help # :: (\n\t\t(print \"Available commands:\")\n\t\t(each (dict-keys Commands) #Command :: (\n\t\t\t(print \"    \" Command \" -> \" (index Commands Command))\n\t\t))\n\t\t(print \"Syntax: op value value value\")\n\t\t(print \"    eg: = 1\")\n\t\t(print \"      : + 2 2 3 v (sinh (pi))\")\n\t\t(print \"      : = 33.548739357257745\")\n\t\t(print \"Available builtins:\")\n\t\t(print (join (map (dict-keys (dict-get BuiltinsAvailable 1)) #Name :: (\n\t\t\t(+ \"(\" (dict-get (dict-get BuiltinsAvailable 1) Name) \" N)\"))) \", \"\n\t\t))\n\t\t(print (join (map (dict-keys (dict-get BuiltinsAvailable 2)) #Name :: (\n\t\t\t(+ \"(\" (dict-get (dict-get BuiltinsAvailable 2) Name) \" A B)\"))) \", \"\n\t\t))\n\t\t(get Acc)\n\t))\n\n\t(var CasePrint   (case \"p\" (scope # :: ((p)))))\n\t(var CaseQuit    (case \"q\" (scope # :: ((e)))))\n\t(var CaseCurrent (case \"v\" (scope # :: ((v)))))\n\t(var CaseFloor   (case \"f\" (scope # :: ((f)))))\n\t(var CaseCeil    (case \"c\" (scope # :: ((c)))))\n\t(var CaseHex     (case \"H\" (scope # :: ((set-acc-format \"H\")))))\n\t(var CaseDecimal (case \"D\" (scope # :: ((set-acc-format \"D\")))))\n\t(var CaseBinary  (case \"B\" (scope # :: ((set-acc-format \"B\")))))\n\t(var CaseHelp1   (case \"h\" (scope # :: ((show-help)))))\n\t(var CaseHelp2   (case \"?\" (scope # :: ((show-help)))))\n\t(var CaseDefault (default  (scope #Given :: ((print \"Unknown command\")(get Acc)))))\n\t(var CaseList    (list CasePrint CaseQuit    CaseCurrent CaseFloor CaseCeil\n\t                       CaseHex   CaseDecimal CaseBinary\n\t                       CaseHelp1 CaseHelp2   CaseDefault))\n\n\t(def parse #Entry :: (\n\t\t(var Matches (match Entry \"([-=+*/!@#$%^&<>a-z]+) (.*)$\"))\n\t\t(if (== (null) Matches) (\n\t\t\t(switch Entry CaseList)\n\t\t) (else (\n\t\t\t(var Tail (index Matches 2))\n\t\t\t(set Tail (replace Tail (regex \"(?:^|\\\\s)([a-z]+)(?=\\\\s|$)\" \"g\") (js-bridge #Value :: (\n\t\t\t\t(+ \"(\" (trim Value) \") \")\n\t\t\t))))\n\t\t\t(try (\n\t\t\t\t(acc-op (index Matches 1) Tail)\n\t\t\t) #E :: (\n\t\t\t\t(stderr-write (+ \"Failed to parse: \" (to-string E) \"\\n\"))\n\t\t\t\t(c)\n\t\t\t))\n\t\t)))\n\t))\n\n\t(def input-loop # :: (\n\t\t(readline (+ (format-acc) \">\") (scope #Value :: (\n\t\t\t(set Acc (parse Value))\n\t\t\t(input-loop)\n\t\t)))\n\t))\n\n\t(if (== (host) \"Node.js\") (\n\t\t(input-loop)\n\t) (else (\n\t\t(import html-toolkit)\n\t\t(htmlOnLoad # :: ((input-loop)))\n\t)))\n)\n";
 
-},{}],72:[function(require,module,exports){
+},{}],71:[function(require,module,exports){
 module.exports=[[["import","\"lists\""],["def","c",{"code":[[["def","r",{"code":[[["map",["seq","1","N"],{"code":[["chr",["parse-int",["*",["rand"],"10000"]]]],"_fndef":true,"_fnparams":[]}]]],"_fndef":true,"_fnparams":[]}],["join",["map",["split","S","\"\""],{"code":[[["list","C"]]],"_fndef":true,"_fnparams":["C"]}]]],["print",["c","\"The treasure is here\"","2"]]],"_fndef":true,"_fnparams":["S","N"]}]]]
-},{}],73:[function(require,module,exports){
+},{}],72:[function(require,module,exports){
 module.exports = "(\n\t(import \"lists\")\n\t(def c #S,N::(\n\t\t(def r #::((map (seq 1 N) #::(chr (parse-int (* (rand) 10000))))))\n\t\t%(replace S (regex \".\" \"g\") (js-bridge #C::((join (++ (r) C) \"\"))))\n\t\t(join (map (split S \"\") #C :: ((list C))) \n\t))\n\t(print (c \"The treasure is here\" 2))\n)\n";
 
-},{}],74:[function(require,module,exports){
+},{}],73:[function(require,module,exports){
 module.exports=[[["var","A","1"],["var","B",["+","A","1"]],["var","C",["+","B","1"]],["print","\"A:\"","A","\"B:\"","B","\"C:\"","C"],["if",["==","A",["-","C","2"]],[["print","\"Well now\""],["if",["==","B",["-","C","1"]],[["print","\"All is well\""]],["else",[["print","\"Oh\""]]]]],["else",[["print","\"Oh, ok\""]]]]]]
-},{}],75:[function(require,module,exports){
+},{}],74:[function(require,module,exports){
 module.exports = "% This is a test of nested if and print states to check control flow.\n(\n\t(var A 1)\n\t(var B (+ A 1))\n\t(var C (+ B 1))\n\t(print \"A:\" A \"B:\" B \"C:\" C)\n\t(if (== A (- C 2)) (\n\t\t(print \"Well now\")\n\t\t(if (== B (- C 1)) (\n\t\t\t(print \"All is well\")\n\t\t) (else (\n\t\t\t(print \"Oh\")\n\t\t)))\n\t) (else (\n\t\t(print \"Oh, ok\")\n\t)))\n)\n";
 
-},{}],76:[function(require,module,exports){
+},{}],75:[function(require,module,exports){
 module.exports=[[["print","\"Definitions:\"",["definitions"]],["define","test","true"],["print","\"Definitions:\"",["definitions"]],["if",["defined","test"],[["print","\"'test' is defined\""]],["else",[["print","\"'test' is not defined!\""]]]],["print","\"Value of 'test':\"",["get-def","test"]],["if",["defined","'DEBUG'"],[["print","\"DEBUG mode is on\""]],["else",[["print","\"DEBUG mode is not on.\""]]]],["var","MySecretValue","\"A secret value\""],["var","Fn",{"code":[["MySecretValue"]],"_fndef":true,"_fnparams":[]}],["print","\"Call one: \"",["call","Fn"]],["define","get-secret-value","Fn"],["print","\"Call two: \"",["call",["get-def","get-secret-value"]]]]]
-},{}],77:[function(require,module,exports){
+},{}],76:[function(require,module,exports){
 module.exports = "% Definitions example\n%\n% Definitions allow one to set keys to value in a top level chain definition\n% dictionary, check if keys are set, get the value of a definition, and get\n% all current definitions.\n% The interpreter and runtime will set various predefined values to give code\n% information about what environment it is running in and what platform\n% libraries have been loaded.\n(\n\t(print \"Definitions:\" (definitions))\n\t(define test true)\n\t(print \"Definitions:\" (definitions))\n\t(if (defined test) (\n\t\t(print \"'test' is defined\")\n\t) (else (\n\t\t(print \"'test' is not defined!\")\n\t)))\n\t(print \"Value of 'test':\" (get-def test))\n\n\t(if (defined 'DEBUG') (\n\t\t(print \"DEBUG mode is on\")\n\t) (else (\n\t\t(print \"DEBUG mode is not on.\")\n\t)))\n\n\t% Assign a callable function to a definition. This is callable by any\n\t% other Lithp function, and is useful for modules that want to provide\n\t% forms of control flow to scripts.\n\t% Modules in general would export functions to the top level chain,\n\t% similar to how the dictionary works.\n\t(var MySecretValue \"A secret value\")\n\t(var Fn # :: (MySecretValue))\n\t(print \"Call one: \" (call Fn))\n\t(define get-secret-value Fn)\n\t(print \"Call two: \" (call (get-def get-secret-value)))\n)";
 
-},{}],78:[function(require,module,exports){
+},{}],77:[function(require,module,exports){
 module.exports=[[["def","quote",{"code":[["+",["chr","34"],["get","S"],["chr","34"]]],"_fndef":true,"_fnparams":["S"]}],["var","Str",["+","\"((print \"",["quote","\"Hello world\""],"\"))\""]],["var","Str2",["+","\"((print M) M)\""]],["print","Str"],["eval","Str"],["eval","Str2",["tuple","\"M\"","\"Hello world\""]],["var","S","\"Hello World\""],["eval","\"((print S))\""],["var","Add",["eval",["+","\"((def x #A,B::((+ A B)))(get x/2))\""]]],["print",["call","Add","1","2"]]]]
-},{}],79:[function(require,module,exports){
+},{}],78:[function(require,module,exports){
 module.exports = "(\n\t(def quote #S :: (+ (chr 34) (get S) (chr 34)))\n\t(var Str (+ \"((print \" (quote \"Hello world\") \"))\"))\n\t(var Str2 (+ \"((print M) M)\"))\n\t(print Str)\n\t(eval Str)\n\t(eval Str2 (tuple \"M\" \"Hello world\"))\n\t(var S \"Hello World\")\n\t(eval \"((print S))\")\n\t(var Add (eval (+ \"((def x #A,B::((+ A B)))(get x/2))\")))\n\t(print (call Add 1 2))\n)\n";
 
-},{}],80:[function(require,module,exports){
+},{}],79:[function(require,module,exports){
 module.exports=[[["platform","ext"],["print","\"Test count: \"",["count-params","1","2","3"]]]]
-},{}],81:[function(require,module,exports){
+},{}],80:[function(require,module,exports){
 module.exports = "% Demonstrates using extension platforms.\n%\n% Extension platforms add new builtin functions in JavaScript.\n% See the example extension in ext/index.js\n(\n\t% This loads the file ext/index.js as a platform library.\n\t% You could specify other names or paths, but if they contain\n\t% uppercase letters you should quote the name.\n\t(platform ext)\n\t% (platform \"ext\")   % equivalent to above\n\t(print \"Test count: \" (count-params 1 2 3))\n)\n";
 
-},{}],82:[function(require,module,exports){
+},{}],81:[function(require,module,exports){
 module.exports=[[["def","fac",{"code":[[["if",["==","0","N"],[["1"]],[["else",[["*","N",["fac",["-","N","1"]]]]]]]]],"_fndef":true,"_fnparams":["N"]}],["var","Test","10"],["print","\"factorial of \"","Test","\": \"",["fac","Test"]]]]
-},{}],83:[function(require,module,exports){
+},{}],82:[function(require,module,exports){
 module.exports = " % Factorial example. Calculates the factorial of Test.\n(\n\t(def fac #N :: (\n\t\t(if (== 0 N) (\n\t\t\t(1)\n\t\t) ((else (\n\t\t\t(* N (fac (- N 1)))\n\t\t))))\n\t))\n\t(var Test 10)\n\t(print \"factorial of \" Test \": \" (fac Test))\n)\n";
 
-},{}],84:[function(require,module,exports){
+},{}],83:[function(require,module,exports){
 module.exports=[[["import","\"lists\""],["var","FL",["dict"]],["def","fib",{"code":[[["if",["<","N","2"],["1"],[["+",["fibFL",["-","N","2"]],["fibFL",["-","N","1"]]]]]]],"_fndef":true,"_fnparams":["N"]}],["def","fibFL",{"code":[[["if",["dict-present","FL","N"],[["dict-get","FL","N"]],[["var","I",["fib","N"]],["set","FL",["dict-set","FL","N","I"]],["I"]]]]],"_fndef":true,"_fnparams":["N"]}],["def","fib-orial",{"code":[[["prod",["map",["seq","1","N"],["scope",{"code":[[["fib","I"]]],"_fndef":true,"_fnparams":["I"]}]]]]],"_fndef":true,"_fnparams":["N"]}],["each",["seq","2","20"],["scope",{"code":[[["print",["fib-orial","N"]]]],"_fndef":true,"_fnparams":["N"]}]]]]
-},{}],85:[function(require,module,exports){
+},{}],84:[function(require,module,exports){
 module.exports = "(\n\t(import \"lists\")\n\t(var FL (dict))\n\t(def fib #N::((if (< N 2) (1) ((+ (fibFL (- N 2)) (fibFL (- N 1)))))))\n\t%(def fib #N::((if (< N 2) (1) ((+ (fib (- N 1)) (fib (- N 2)))))))\n\t(def fibFL #N::((if (dict-present FL N) ((dict-get FL N)) ((var I (fib N))(set FL (dict-set FL N I))(I)))))\n\t(def fib-orial #N::((prod (map (seq 1 N) (scope #I::((fib I)))))))\n\t(each (seq 2 20) (scope #N :: ((print (fib-orial N)))))\n\t%(print (fib-orial 2))\n)\n";
 
-},{}],86:[function(require,module,exports){
+},{}],85:[function(require,module,exports){
 module.exports=[[["import","lists"],["import","symbols"],["var","Operators",["list","+","-","/","*"]],["var","A","5"],["var","B","10"],["each","Operators",["scope",{"code":[[["print",["+","A","\" \"","Op","\" \"","B","\" = \"",["call-fn","Op","A","B"]]]]],"_fndef":true,"_fnparams":["Op"]}]]]]
-},{}],87:[function(require,module,exports){
+},{}],86:[function(require,module,exports){
 module.exports = "(\n\t(import lists)\n\t(import symbols)\n\n\t(var Operators (list + - / *))\n\t(var A 5)\n\t(var B 10)\n\t(each Operators (scope #Op :: (\n\t\t(print (+ A \" \" Op \" \" B \" = \" (call-fn Op A B)))\n\t)))\n)\n";
 
-},{}],88:[function(require,module,exports){
+},{}],87:[function(require,module,exports){
 module.exports=[[["def","for",{"code":[[["var","Index","0"],["var","ForInner",["scope",{"code":[[["print","\"Running callback for \"","Index","\" on \"","Head"],["call","Callback","Head","Index"],["set","Index",["+","1","Index"]],["if",["!=","0",["length","Tail"]],[["call","ForInner",["head","Tail"],["tail","Tail"]]]]]],"_fndef":true,"_fnparams":["Head","Tail"]}]],["call","ForInner",["head","List"],["tail","List"]]]],"_fndef":true,"_fnparams":["List","Callback"]}],["for",["list","1","2","3"],{"code":[[["print","\"Element at index \"","Index","\": \"","Element"]]],"_fndef":true,"_fnparams":["Element","Index"]}]]]
-},{}],89:[function(require,module,exports){
+},{}],88:[function(require,module,exports){
 module.exports = "% A for loop example.\n% This functionality will be moved to a module at some point.\n(\n\t(def for #List,Callback :: (\n\t\t(var Index 0)\n\t\t(var ForInner (scope #Head,Tail :: (\n\t\t\t(print \"Running callback for \" Index \" on \" Head)\n\t\t\t(call Callback Head Index)\n\t\t\t(set Index (+ 1 Index))\n\t\t\t(if (!= 0 (length Tail)) (\n\t\t\t\t(call ForInner (head Tail) (tail Tail))\n\t\t\t))\n\t\t)))\n\t\t(call ForInner (head List) (tail List))\n\t))\n\t(for (list 1 2 3) #Element,Index :: (\n\t\t(print \"Element at index \" Index \": \" Element)\n\t))\n)\n";
 
-},{}],90:[function(require,module,exports){
+},{}],89:[function(require,module,exports){
 module.exports=[[["platform","ext"],["invoke",["stdin"],"resume"]]]
-},{}],91:[function(require,module,exports){
+},{}],90:[function(require,module,exports){
 module.exports = "((platform ext)(invoke (stdin) resume))\n";
 
-},{}],92:[function(require,module,exports){
+},{}],91:[function(require,module,exports){
 module.exports=[[["def","f",{"code":[[["invoke","P","\"map\"",["js-bridge",{"code":[["replace","W",["regex","\".\"","\"g\""],["js-bridge",{"code":[["index",["index","P",["&",["+","I","J"],"1"]],"J"]],"_fndef":true,"_fnparams":["C","J"]}]]],"_fndef":true,"_fnparams":["W","I"]}]]]],"_fndef":true,"_fnparams":["P"]}],["def","f",{"code":[[["invoke","P","\"map\"",["js-bridge",{"code":[["replace","W",["regex","\".\"","\"g\""],["js-bridge",{"code":[["index",["index","P",["&",["+","I","J"],"1"]],"J"]],"_fndef":true,"_fnparams":["C","J"]}]]],"_fndef":true,"_fnparams":["W","I"]}]]]],"_fndef":true,"_fnparams":["P"]}],["print",["f",["list","\"Hello,\"","\"world!\""]]]]]
-},{}],93:[function(require,module,exports){
+},{}],92:[function(require,module,exports){
 module.exports = "(\n\t(def f #P :: (\n\t\t(invoke P \"map\" (js-bridge #W,I ::\n\t\t\t(replace W (regex \".\" \"g\") (js-bridge #C,J ::\n\t\t\t\t(index (index P (& (+ I J) 1)) J)\n\t\t\t))\n\t\t))\n\t))\n\t(def f #P::((invoke P \"map\" (js-bridge #W,I::(replace W (regex \".\" \"g\") (js-bridge #C,J::(index (index P (& (+ I J) 1)) J)))))))\n\t(print (f (list \"Hello,\" \"world!\")))\n)\n";
 
-},{}],94:[function(require,module,exports){
+},{}],93:[function(require,module,exports){
 module.exports=[[["def","i",{"code":[[["replace","S",["regex","\"\\\\d\"","\"g\""],["js-bridge",{"code":[[["^","X","1"]]],"_fndef":true,"_fnparams":["X"]}]]]],"_fndef":true,"_fnparams":["S"]}],["print",["i","\"01010101111000\""]]]]
-},{}],95:[function(require,module,exports){
+},{}],94:[function(require,module,exports){
 module.exports = "(\n\t(def i #S::((replace S (regex \"\\\\d\" \"g\") (js-bridge #X::((^ X 1))))))\n\t(print (i \"01010101111000\"))\n)\n";
 
-},{}],96:[function(require,module,exports){
+},{}],95:[function(require,module,exports){
 module.exports=[[["def","m",{"code":[[["var","X",["list","16","13","1","11","8","5","1","3","1","3","1","5","8","11","1","13"]],["var","Y",["list","0","1","1","0","1","0","0","1","0","1","0","0","1","0","1","1"]],["var","I","0"],["var","N","0"],["def","n",{"code":[[["if",["!=","0",["length","A"]],[["set","I",["+","I",["*",["-","1",["*","2",["head","B"]]],["head","A"]]]],["set","Z",["list"]],["set","N",["+","N","1"]],["if",["==","4","N"],[["set","Z",["list","\"|\""]],["set","N","0"]]],["++",["list","I"],"Z",["n",["tail","A"],["tail","B"]]]],["else",[["list"]]]]]],"_fndef":true,"_fnparams":["A","B"]}],["n","X","Y"]]],"_fndef":true,"_fnparams":[]}],["def","m",{"code":[[["var","X",["list","16","13","1","11","8","5","1","3","1","3","1","5","8","11","1","13"]],["var","Y",["list","0","1","1","0","1","0","0","1","0","1","0","0","1","0","1","1"]],["var","I","0"],["var","N","0"],["def","n",{"code":[[["if",["!=","0",["length","A"]],[["set","I",["+","I",["*",["-","1",["*","2",["head","B"]]],["head","A"]]]],["set","Z",["list"]],["set","N",["+","N","1"]],["if",["==","4","N"],[["set","Z",["list","\"|\""]],["set","N","0"]]],["++",["list","I"],"Z",["n",["tail","A"],["tail","B"]]]],["else",[["list"]]]]]],"_fndef":true,"_fnparams":["A","B"]}],["n","X","Y"]]],"_fndef":true,"_fnparams":[]}],["print",["m"]]]]
-},{}],97:[function(require,module,exports){
+},{}],96:[function(require,module,exports){
 module.exports = "(\n\t(def m # :: (\n\t\t(var X (list 16 13 1 11 8 5 1 3 1 3 1 5 8 11 1 13))\n\t\t(var Y (list  0  1 1 0  1 0 0 1 0 1 0 0 1  0 1  1))\n\t\t(var I 0) (var N 0) (def n #A,B :: (\n\t\t\t(if (!= 0 (length A)) (\n\t\t\t\t(set I (+ I (* (- 1 (* 2 (head B))) (head A))))\n\t\t\t\t(set Z (list)) (set N (+ N 1))\n\t\t\t\t(if (== 4 N) ((set Z (list \"|\")) (set N 0)))\n\t\t\t\t(++ (list I) Z (n (tail A) (tail B)))\n\t\t\t) (else ((list))))\n\t\t)) (n X Y)\n\t))\n\t(def m #::((var X (list 16 13 1 11 8 5 1 3 1 3 1 5 8 11 1 13)) (var Y (list 0 1 1 0 1 0 0 1 0 1 0 0 1 0 1 1)) (var I 0) (var N 0) (def n #A,B :: ((if (!= 0 (length A)) ((set I (+ I (* (- 1 (* 2 (head B))) (head A)))) (set Z (list)) (set N (+ N 1)) (if (== 4 N) ((set Z (list \"|\")) (set N 0))) (++ (list I) Z (n (tail A) (tail B)))) (else ((list)))))) (n X Y)))\n\t(print (m))\n)\n";
 
-},{}],98:[function(require,module,exports){
+},{}],97:[function(require,module,exports){
 module.exports=[[["def","map",{"code":[[["var","Result",["list"]],["var","MapInner",["scope",{"code":[[["set","Result",["++","Result",["call","Callback","Head"]]],["if",["!=","0",["length","Tail"]],[["call","MapInner",["head","Tail"],["tail","Tail"]]]]]],"_fndef":true,"_fnparams":["Head","Tail"]}]],["call","MapInner",["head","List"],["tail","List"]],["Result"]]],"_fndef":true,"_fnparams":["List","Callback"]}],["print",["map",["list","1","2","3"],{"code":[[["+","N","1"]]],"_fndef":true,"_fnparams":["N"]}]],["print",["map",["list","1","2","3"],{"code":[[["*","N","2"]]],"_fndef":true,"_fnparams":["N"]}]]]]
-},{}],99:[function(require,module,exports){
+},{}],98:[function(require,module,exports){
 module.exports = "% Map a list with a callback.\n% This functionality will be moved to a module at some point.\n(\n\t(def map #List,Callback :: (\n\t\t(var Result (list))\n\t\t(var MapInner (scope #Head,Tail :: (\n\t\t\t(set Result (++ Result (call Callback Head)))\n\t\t\t(if (!= 0 (length Tail)) (\n\t\t\t\t(call MapInner (head Tail) (tail Tail))\n\t\t\t))\n\t\t)))\n\t\t(call MapInner (head List) (tail List))\n\t\t(Result)\n\t))\n\t(print (map (list 1 2 3) #N :: ((+ N 1))))\n\t(print (map (list 1 2 3) #N :: ((* N 2))))\n)";
 
-},{}],100:[function(require,module,exports){
+},{}],99:[function(require,module,exports){
 module.exports=[[["import","\"file\""],["import","\"lists\""],["import","\"readline\""],["var","TabIndentCount","4"],["var","TabIndent",["invoke","\" \"","repeat","TabIndentCount"]],["def","make-template",{"code":[[["var","Header","\"##[Lithp][1],\""],["var","Url","\"  [1]: https://github.com/andrakis/node-lithp\""],["print","Header",["length","Code"],"\"bytes\""],["print"],["var","Test",["match","Code",["regex",["nl"],"\"g\""]]],["if",["<=",["length",["?",["==",["null"],"Test"],"[]","Test"]],"1"],[["print","\"    \"","Code"]],["else",[["each",["list",["tuple","\"\\\\t\"","TabIndent"]],["scope",{"code":[[["set","Code",["replace","Code",["regex",["index","Tuple","0"],"\"g\""],["index","Tuple","1"]]]]],"_fndef":true,"_fnparams":["Tuple"]}]],["var","Lines",["split","Code",["regex","\"\\r?\\n\\r?\""]]],["each","Lines",["scope",{"code":[[["print",["+","TabIndent","Line"]]]],"_fndef":true,"_fnparams":["Line"]}]]]]],["print"],["print","Url"]]],"_fndef":true,"_fnparams":["Code"]}],["if",["==","false",["get-def","\"FILE\""]],[["readline","\"Code: \"",["scope",{"code":[[["make-template","Code"]]],"_fndef":true,"_fnparams":["Code"]}]]],["else",[["var","File",["+","\"\"",["get-def","\"FILE\""]]],["print","\"Opening file\"","File","\"...\""],["read-file","File",["scope",{"code":[[["if",["!=",["null"],"Err"],[["print","\"Got Err:\"","Err"]],["else",[["var","Content",["to-string","Data"]],["make-template","Content"]]]]]],"_fndef":true,"_fnparams":["Err","Data"]}]]]]]]]
-},{}],101:[function(require,module,exports){
+},{}],100:[function(require,module,exports){
 module.exports = "#!/home/freestyle/git/node-lithp/run\n% Markdown Template\n(\n\t(import \"file\")\n\t(import \"lists\")\n\t(import \"readline\")\n\n\t(var TabIndentCount 4)\n\t(var TabIndent (invoke \" \" repeat TabIndentCount))\n\n\t(def make-template #Code :: (\n\t\t(var Header \"##[Lithp][1],\")\n\t\t(var Url    \"  [1]: https://github.com/andrakis/node-lithp\")\n\t\t(print Header (length Code) \"bytes\")\n\t\t(print)\n\t\t(var Test (match Code (regex (nl) \"g\")))\n\t\t(if (<= (length (? (== (null) Test) [] Test)) 1) (\n\t\t\t(print \"    \" Code)\n\t\t) (else (\n\t\t\t(each (list (tuple \"\\\\t\" TabIndent)) (scope #Tuple :: (\n\t\t\t\t(set Code (replace Code (regex (index Tuple 0) \"g\") (index Tuple 1)))\n\t\t\t)))\n\t\t\t(var Lines (split Code (regex \"\\r?\\n\\r?\")))\n\t\t\t(each Lines (scope #Line :: ((print (+ TabIndent Line)))))\n\t\t)))\n\t\t(print)\n\t\t(print Url)\n\t))\n\n\t(if (== false (get-def \"FILE\")) (\n\t\t(readline \"Code: \" (scope #Code :: (\n\t\t\t(make-template Code)\n\t\t)))\n\t) (else (\n\t\t(var File (+ \"\" (get-def \"FILE\")))\n\t\t(print \"Opening file\" File \"...\")\n\t\t(read-file File (scope #Err,Data :: (\n\t\t\t(if (!= (null) Err) (\n\t\t\t\t(print \"Got Err:\" Err)\n\t\t\t) (else (\n\t\t\t\t(var Content (to-string Data))\n\t\t\t\t(make-template Content)\n\t\t\t)))\n\t\t)))\n\t)))\n)\n";
 
-},{}],102:[function(require,module,exports){
+},{}],101:[function(require,module,exports){
 module.exports=[[["var","Path",["+",["get-def","__dirname"],"\"/module_lib\""]],["print","\"Path to module-lib:\"","Path"],["try",[["import","Path"]],["catch",{"code":[[["import","\"samples/module_lib\""]]],"_fndef":true,"_fnparams":[]}]],["print","\"Add 2+2:\"",["add","2","2"]],["var","Add5",["add","5"]],["print","\"Add 5+2:\"",["call","Add5","2"]],["print","\"Module value:\"",["getMyValue"]],["var","MyValue","1"],["print","\"Call with two:\"",["callWith2",{"code":[[["+","MyValue","Two"]]],"_fndef":true,"_fnparams":["Two"]}]]]]
-},{}],103:[function(require,module,exports){
+},{}],102:[function(require,module,exports){
 module.exports = "% Test importing a module into the current closure.\n(\n\t% Calculate correct path to the module, module_lib.\n\t% The .lithp extension is not required.\n\t(var Path (+ (get-def __dirname) \"/module_lib\"))\n\t(print \"Path to module-lib:\" Path)\n\n\t% This brings all exported module functions into the current scope.\n\t(try (\n\t\t(import Path)\n\t) (catch # :: (\n\t\t(import \"samples/module_lib\")\n\t)))\n\n\t% Call a module function.\n\t(print \"Add 2+2:\" (add 2 2))\n\n\t% Use a local variable to demonstrate module scoping.\n\t(var Add5 (add 5))\n\t(print \"Add 5+2:\" (call Add5 2))\n\n\t% Call a module function that returns a module local variable value to\n\t% demonstrate module scoping further.\n\t(print \"Module value:\" (getMyValue))\n\n\t% Call a function by providing a callback. This callback retains access\n\t% to the current script scope, allowing it to refer to currently defined\n\t% variables and functions.\n\t(var MyValue 1)\n\t(print \"Call with two:\" (callWith2 #Two :: ((+ MyValue Two))))\n\n\t% This function is defined in the module, but not exported.\n\t% Uncommenting the following line would cause the script to crash:\n\t%(private_function 4 2)\n)\n";
 
-},{}],104:[function(require,module,exports){
+},{}],103:[function(require,module,exports){
 module.exports=[[["def","add",{"code":[[["scope",{"code":[[["+","A","B"]]],"_fndef":true,"_fnparams":["B"]}]]],"_fndef":true,"_fnparams":["A"]}],["def","add",{"code":[[["+","A","B"]]],"_fndef":true,"_fnparams":["A","B"]}],["export","add/1","add/2"],["var","MyValue","1"],["def","getMyValue",{"code":[["MyValue"]],"_fndef":true,"_fnparams":[]}],["var","Two","2"],["def","callWith2",{"code":[[["call","Fn","Two"]]],"_fndef":true,"_fnparams":["Fn"]}],["export","getMyValue/0","callWith2/1"],["def","private_function",{"code":[[["-","A","B"]]],"_fndef":true,"_fnparams":["A","B"]}]]]
-},{}],105:[function(require,module,exports){
+},{}],104:[function(require,module,exports){
 module.exports = "% This is an example module, designed to be used with module.lithp.\n(\n\t% Define some functions to export\n\t(def add #A :: (\n\t\t(scope #B :: ((+ A B)))\n\t))\n\t(def add #A,B :: ((+ A B)))\n\n\t% Export desired functions\n\t(export add/1 add/2)\n\n\t% Define a local variable to demonstrate correct scoping.\n\t(var MyValue 1)\n\t(def getMyValue # :: (MyValue))\n\n\t% This example takes a function, and adds a local variable to it.\n\t% The file module.lithp demonstrates that variables correctly\n\t% resolve.\n\t(var Two 2)\n\t(def callWith2 #Fn :: ((call Fn Two)))\n\n\t% Export our two scoping functions.\n\t(export getMyValue/0 callWith2/1)\n\n\t% Note that any function not exported will not be available to\n\t% the module importing. Only functions specified to export will\n\t% be exported.\n\t(def private_function #A,B :: ((- A B)))\n)\n";
 
-},{}],106:[function(require,module,exports){
+},{}],105:[function(require,module,exports){
 module.exports=[[["def","f",{"code":[[["if",["<","N","2"],[["?",["!=","0","N"],["*","2","R"],"1"]],[["/",["*",["*",["*",["*",["f",["-","N","2"],"R"],"2"],["pi"]],"R"],"R"],"N"]]]]],"_fndef":true,"_fnparams":["N","R"]}],["print",["f","1","1"]],["print",["f","2","3"]],["print",["f","3","1"]],["print",["f","3","4.5"]],["print",["f","1","9.379"]],["print",["f","0","48"]]]]
-},{}],107:[function(require,module,exports){
+},{}],106:[function(require,module,exports){
 module.exports = "(\n\t(def f #N,R::((if (< N 2) ((? (!= 0 N) (* 2 R) 1)) ((/ (* (* (* (* (f (- N 2) R) 2) (pi)) R) R) N)))))\n\t(print (f 1 1))\n\t(print (f 2 3))\n\t(print (f 3 1))\n\t(print (f 3 4.5))\n\t(print (f 1 9.379))\n\t(print (f 0 48))\n)\n";
 
-},{}],108:[function(require,module,exports){
+},{}],107:[function(require,module,exports){
 module.exports=[[["def","odd",{"code":[[["var","Split",["split","S",["regex","\"[aeiou]\"","\"i\""]]],["if",["==","1",["&","1",["~",["length","Split"]]]],[["\"odd\""]],["else",[["\"even\""]]]]]],"_fndef":true,"_fnparams":["S"]}],["def","test",{"code":[[["print","\"Test \"",["quote","S"],"\": \"",["odd","S"]]]],"_fndef":true,"_fnparams":["S"]}],["test","\"trees\""],["test","\"brush\""],["test","\"CAts\""],["test","\"Savoie\""],["test","\"rhythm\""]]]
-},{}],109:[function(require,module,exports){
+},{}],108:[function(require,module,exports){
 module.exports = "% A valid solution to a Programming Puzzle and Code Golf post:\n% http://codegolf.stackexchange.com/questions/93906/is-it-an-odd-word\n%\n% However, it is ineligible for competing, since the majority of the\n% functionality required was implemented after the challenge was posted.\n% In fact, at the time the challenge was posted, no parser existed.\n% Approximately 10 days later the parser was finished and parsing this\n% file correctly.\n(\n\t% Golfed:\n\t% (def odd #S::((if (== 1 (& 1 (~ (length (split S (regex \"[aeiou]\" \"i\"))))))(\"odd\")(\"even\"))))\n\t% Ungolfed:\n\t(def odd #S::(\n\t\t(var Split (split S (regex \"[aeiou]\" \"i\")))\n\t\t(if (== 1 (& 1 (~ (length Split)))) (\n\t\t\t(\"odd\")\n\t\t) (else (\n\t\t\t(\"even\")))\n\t\t)\n\t))\n\t(def test #S :: (\n\t\t(print \"Test \" (quote S) \": \" (odd S))\n\t))\n\t(test \"trees\")    % even\n\t(test \"brush\")    % odd\n\t(test \"CAts\")     % odd\n\t(test \"Savoie\")   % even\n\t(test \"rhythm\")   % even\n)\n\n";
 
-},{}],110:[function(require,module,exports){
+},{}],109:[function(require,module,exports){
 module.exports=[[["import","\"lists\""],["def","f",{"code":[[["each",["seq","1","10"],{"code":[[["print","N"]]],"_fndef":true,"_fnparams":["N"]}]]],"_fndef":true,"_fnparams":[]}],["def","x",{"code":[[["def","y",{"code":[[["print","N"],["if",["<","N","10"],[["y",["+","N","1"]]]]]],"_fndef":true,"_fnparams":["N"]}],["y","1"]]],"_fndef":true,"_fnparams":[]}],["f"]]]
-},{}],111:[function(require,module,exports){
+},{}],110:[function(require,module,exports){
 module.exports = "(\n\t(import \"lists\")(def f #::((each (seq 1 10) #N::((print N)))))\n\t(def x #::((def y #N::((print N)(if (< N 10) ((y (+ N 1))))))(y 1)))\n\t(f)\n)\n";
 
-},{}],112:[function(require,module,exports){
+},{}],111:[function(require,module,exports){
 module.exports=[[["def","f",{"code":[[["?",["!=",["null"],["match","S","\"^((.+)\\\\2)+$\""]],"true","false"]]],"_fndef":true,"_fnparams":["S"]}],["print",["f","\"aa\""]],["print",["f","\"aabaaababbbaba\""]],["print",["f","\"aaababbabbabbbababbaabaabaababaaba\""]],["print",["f","\"ba\""]]]]
-},{}],113:[function(require,module,exports){
+},{}],112:[function(require,module,exports){
 module.exports = "(\n\t(def f #S::((? (!= (null) (match S \"^((.+)\\\\2)+$\")) true false)))\n\t(print (f \"aa\"))\n\t(print (f \"aabaaababbbaba\"))\n\t(print (f \"aaababbabbabbbababbaabaabaababaaba\"))\n\t(print (f \"ba\"))\n)\n";
 
-},{}],114:[function(require,module,exports){
+},{}],113:[function(require,module,exports){
 module.exports=[[["var","MyDict",["dict",["tuple","a","1"],["tuple","b","2"]]],["print","MyDict"]]]
-},{}],115:[function(require,module,exports){
+},{}],114:[function(require,module,exports){
 module.exports = "(\n\t(var MyDict (dict\n\t\t(tuple a 1)\n\t\t(tuple b 2)\n\t))\n\t(print MyDict)\n)\n";
 
-},{}],116:[function(require,module,exports){
+},{}],115:[function(require,module,exports){
 module.exports=[[["def","f",{"code":[[["def","x",{"code":[["invoke","S","repeat","N"]],"_fndef":true,"_fnparams":["S","N"]}],["var","A",["x","\"/\"","5"]],["var","B",["x","\"\\\\\"","5"]],["var","C",["+",["x",["+","A","B"],"6"],["nl"]]],["var","D",["+",["x",["+","B","A"],"6"],["nl"]]],["print",["x",["+",["x","C","4"],["x","D","4"]],"5"]]]],"_fndef":true,"_fnparams":[]}],["f"]]]
-},{}],117:[function(require,module,exports){
+},{}],116:[function(require,module,exports){
 module.exports = "(\n\t(def f #::((def x #S,N::(invoke S repeat N))(var A(x \"/\" 5))(var B(x \"\\\\\" 5))(var C(+(x(+ A B) 6)(nl)))(var D(+(x(+ B A) 6)(nl)))(print(x(+(x C 4)(x D 4)) 5))))\n\t(f)\n)\n";
 
-},{}],118:[function(require,module,exports){
+},{}],117:[function(require,module,exports){
 module.exports=[[["def","pow",{"code":[[["if",["==","Y","1"],["else",[["*","X",["pow","X",["-","Y","1"]]]]]]]],"_fndef":true,"_fnparams":["X","Y"]}],["var","A","5"],["var","B","100"],["print","\"\"","A","\" to the power of \"","B","\":\"",["pow","A","B"]]]]
-},{}],119:[function(require,module,exports){
+},{}],118:[function(require,module,exports){
 module.exports = "% Demonstrate a power function\n(\n\t(def pow #X,Y :: (\n\t\t(if (== Y 1)\n\t\t\tX\n\t\t(else (\n\t\t\t(* X (pow X (- Y 1)))\n\t\t)))\n\t))\n\t(var A 5)\n\t(var B 100)\n\t(print \"\" A \" to the power of \" B \":\" (pow A B))\n)\n";
 
-},{}],120:[function(require,module,exports){
+},{}],119:[function(require,module,exports){
 module.exports=[[["def","f",{"code":[[["replace","X",["regex","\"([aeiou]+[^aeiou]*){1,2} [^aeiou]*\""],"\"\""]]],"_fndef":true,"_fnparams":["X"]}],["print",["f","\"brad angelina\""]]]]
-},{}],121:[function(require,module,exports){
+},{}],120:[function(require,module,exports){
 module.exports = "% A valid solution to the programming puzzle:\n%  http://codegolf.stackexchange.com/questions/94534/progruzzle-colf\n(\n\t(def f #X::((replace X (regex \"([aeiou]+[^aeiou]*){1,2} [^aeiou]*\") \"\")))\n\t(print (f \"brad angelina\"))\n)\n";
 
-},{}],122:[function(require,module,exports){
+},{}],121:[function(require,module,exports){
 module.exports=[[["platform","v1"],["var","Fs",["require","\"fs\""]],["var","SampleFile",["+",["get-def","__dirname"],"\"/../index.js\""]],["var","FsReadFileSync",["dict-get","Fs","\"readFileSync\""]],["print","\"readFileSync:\"",["inspect","FsReadFileSync"]],["print","\"Read index.js:\"",["call","FsReadFileSync","SampleFile"]],["var","FsReadFile",["dict-get","Fs","\"readFile\""]],["print","\"readFile:\"",["inspect","FsReadFile"]],["var","Our_callback",["js-bridge",{"code":[[["if",["!=",["null"],"Err"],[["print","\"Failed to read file, err:  \"","Err"]],["else",[["print","\"Data from file:\""],["print",["invoke","Data","\"toString\""]]]]]]],"_fndef":true,"_fnparams":["Err","Data"]}]],["call","FsReadFile","SampleFile","Our_callback"],["call","FsReadFile","\"non-existant\"","Our_callback"]]]
-},{}],123:[function(require,module,exports){
+},{}],122:[function(require,module,exports){
 module.exports = "% Demonstrate reading a file using node builtins\n%\n(\n\t% The require/1 function requires Platform V1 functionality.\n\t% This will load it if not already loaded with the '-v1' flag.\n\t(platform v1)\n\t(var Fs (require \"fs\"))\n\n\t% Use the definitions table to get the path to the example file we will use.\n\t(var SampleFile (+ (get-def __dirname) \"/../index.js\"))\n\n\t% Use the readFileSync method directly\n\t(var FsReadFileSync (dict-get Fs \"readFileSync\"))\n\t(print \"readFileSync:\" (inspect FsReadFileSync))\n\t% You can call FsReadFileSync using call/* (a standard builtin.)\n\t(print \"Read index.js:\" (call FsReadFileSync SampleFile))\n\n\t% Now test using a callback and readFile\n\t(var FsReadFile (dict-get Fs \"readFile\"))\n\t(print \"readFile:\" (inspect FsReadFile))\n\n\t% js-bridge returns a native JavaScript function that, when called, invokes\n\t% the lithp interpreter with the given function definition, and sets all\n\t% provided parametes. Allows you to provide callbacks to JavaScript\n\t% functions as used below.\n\t(var Our_callback (js-bridge #Err,Data :: (\n\t\t(if (!= (null) Err) (\n\t\t\t(print \"Failed to read file, err:  \" Err)\n\t\t) (else (\n\t\t\t(print \"Data from file:\")\n\t\t\t(print (invoke Data \"toString\"))\n\t\t)))\n\t)))\n\t% You can call FsReadFile using call/* (a standard builtin.)\n\t(call FsReadFile SampleFile Our_callback)\n\t(call FsReadFile \"non-existant\" Our_callback)\n)\n\n";
 
-},{}],124:[function(require,module,exports){
+},{}],123:[function(require,module,exports){
 module.exports=[[["def","fac-recursive",{"code":[[["def","fac-r-inner",{"code":[[["if",["==","0","N"],[["Acc"]],["else",[["recurse",["-","N","1"],["*","N","Acc"]]]]]]],"_fndef":true,"_fnparams":["N","Acc"]}],["fac-r-inner","N","1"]]],"_fndef":true,"_fnparams":["N"]}],["print",["fac-recursive","100"]]]]
-},{}],125:[function(require,module,exports){
+},{}],124:[function(require,module,exports){
 module.exports = "% Sample: recurse\n%\n% Purpose: Demonstrate tail recursion via the recurse/* builtin.\n%\n% Notes:   You must provide the function name of the function you\n%          wish to recurse. Presently this cannot be detected.\n%\n%          Also note that the stack depth remains constant when run\n%          with the debug flag (-d).\n(\n\t(def fac-recursive #N :: (\n\t\t(def fac-r-inner #N,Acc :: (\n\t\t\t(if (== 0 N) (\n\t\t\t\t(Acc)\n\t\t\t) (else (\n\t\t\t\t(recurse (- N 1) (* N Acc))\n\t\t\t)))\n\t\t))\n\t\t(fac-r-inner N 1)\n\t))\n\n\t(print (fac-recursive 100))\n)\n";
 
-},{}],126:[function(require,module,exports){
+},{}],125:[function(require,module,exports){
 module.exports=[[["def","add",{"code":[[["scope",{"code":[[["+","A","B"]]],"_fndef":true,"_fnparams":["B"]}]]],"_fndef":true,"_fnparams":["A"]}],["var","Add5",["add","5"]],["var","Add10",["add","10"]],["var","N","10"],["print","\"Add5 with \"","N","\": \"",["call","Add5","N"]],["print","\"Add10 with \"","N","\": \"",["call","Add10","N"]],["assert",["==","15",["call","Add5","10"]]]]]
-},{}],127:[function(require,module,exports){
+},{}],126:[function(require,module,exports){
 module.exports = "% Tests variable scoping.\n% Allows returned anonymous functions (which can be called) to retain access\n% to parameters it had when it was called.\n% Each call generates a new unique scope, parented to the scope that\n% contained the parameters. This is provides functionality similar to how\n% JavaScript closures work.\n(\n\t% add/1 is a function that returns a scoped FunctionDefinition also of airty\n\t% that can be called to add the two numbers together.\n\t(def add #A :: (\n\t\t% scope/1 is a library function that ties the given anonymous function\n\t\t% to the call scope it was called in, allowing variables to be retained.\n\t\t(scope #B :: ((+ A B)))\n\t))\n\t(var Add5 (add 5))\n\t(var Add10 (add 10))\n\t(var N 10)\n\t(print \"Add5 with \" N \": \" (call Add5 N))\n\t(print \"Add10 with \" N \": \" (call Add10 N))\n\t(assert (== 15 (call Add5 10)))\n)\n";
 
-},{}],128:[function(require,module,exports){
-arguments[4][82][0].apply(exports,arguments)
-},{"dup":82}],129:[function(require,module,exports){
+},{}],127:[function(require,module,exports){
+arguments[4][81][0].apply(exports,arguments)
+},{"dup":81}],128:[function(require,module,exports){
 module.exports = "% Test shorthand expressions, that is with a minimum amount of spaces.\n(\n\t(def fac #N::((if(== 0 N)((1))((else((* N(fac(- N 1)))))))))\n\t(var Test 10)\n\t(print \"factorial of \" Test \": \" (fac Test))\n)\n";
 
-},{}],130:[function(require,module,exports){
+},{}],129:[function(require,module,exports){
 module.exports=[[["print","\"Hello, world!\""],["print","\"1+1:\"",["+","1","1"],"\" Wow!\""],["print","\"Also a test:\"",["*","5","10"]],["print","\"One last test:\"",["/","10","2"]],["var","A","5"],["var","B","6"],["print","\"A+B:\"",["+","A","B"]]]]
-},{}],131:[function(require,module,exports){
+},{}],130:[function(require,module,exports){
 module.exports = "(\n    % Print a simple message\n    (print  \"Hello, world!\")\n\t% Print some more messages using simple function calls\n    (print \"1+1:\" (+ 1 1) \" Wow!\")\n    (print \"Also a test:\" (* 5 10))\n\t(print \"One last test:\" (/ 10 2))\n\t% Print the result of a calculation of two variables\n\t(var A 5)\n\t(var B 6)\n\t(print \"A+B:\" (+ A B))\n)\n";
 
-},{}],132:[function(require,module,exports){
+},{}],131:[function(require,module,exports){
 module.exports=[[["import","\"lists\""],["def","s",{"code":[[["var","X",["repeat","\"#\"","N"]],["print","X"],["each",["seq","3","N"],["scope",{"code":[[["print",["+","\"#\"",["repeat","\" \"",["-","N","2"]],"\"#\""]]]],"_fndef":true,"_fnparams":["X"]}]],["print","X"]]],"_fndef":true,"_fnparams":["N"]}],["s","10"]]]
-},{}],133:[function(require,module,exports){
+},{}],132:[function(require,module,exports){
 module.exports = "(\n\t(import \"lists\")\n\t(def s #N::((var X (repeat \"#\" N))(print X)(each (seq 3 N) (scope #X::((print (+ \"#\" (repeat \" \" (- N 2)) \"#\")))))(print X)))\n\t(s 10)\n)\n";
 
-},{}],134:[function(require,module,exports){
+},{}],133:[function(require,module,exports){
 module.exports=[[["var","A","5"],["var","B","6"],["print","\"A+B:\"",["+","A","B"]],["if",["==","A","B"],[["print","\":)\""],["print","\"The same!\""]],["else",[["print","\":(\""],["print","\"Different\""]]]]]]
-},{}],135:[function(require,module,exports){
+},{}],134:[function(require,module,exports){
 module.exports = "% Simple subchain test. Subchains are passed to the if/3 function and evaluated\n% if the test is Atom('true').\n(\n\t(var A 5)\n\t(var B 6)\n\t(print \"A+B:\" (+ A B))\n\t(if (== A B) (\n\t\t(print \":)\")\n\t\t(print \"The same!\")\n\t) (else (\n\t\t(print \":(\")\n\t\t(print \"Different\")\n\t)))\n)\n";
 
-},{}],136:[function(require,module,exports){
+},{}],135:[function(require,module,exports){
 module.exports=[[["def","count-args/*",{"code":[[["print","\"Args length: \"",["length","Args"]]]],"_fndef":true,"_fnparams":["Args"]}],["count-args","foo","bar","yeah"]]]
-},{}],137:[function(require,module,exports){
+},{}],136:[function(require,module,exports){
 module.exports = "% Test functions with unlimited arguments\n(\n\t(def count-args/* #Args :: (\n\t\t(print \"Args length: \" (length Args))\n\t))\n\t(count-args foo bar yeah)\n)\n";
 
-},{}],138:[function(require,module,exports){
+},{}],137:[function(require,module,exports){
 module.exports=[[["def","x",{"code":[[["print",["replace",["repeat","\"_|__\"","175"],["regex","\"(.{70})\"","\"g\""],"\"$1\\n\""]]]],"_fndef":true,"_fnparams":[]}],["x"]]]
-},{}],139:[function(require,module,exports){
+},{}],138:[function(require,module,exports){
 module.exports = "(\n\t(def x #::((print (replace (repeat \"_|__\" 175) (regex \"(.{70})\" \"g\") \"$1\\n\"))))\n\t(x)\n)\n";
 
-},{}],140:[function(require,module,exports){
+},{}],139:[function(require,module,exports){
 module.exports=[[["def","seq2",{"code":[[["var","L",["list"]],["while",[["<","A","B"]],[["set","L",["++","L",["list","A"]]],["set","A",["+","A","1"]]]],"L"]],"_fndef":true,"_fnparams":["A","B"]}],["print",["seq2","1","10"]]]]
-},{}],141:[function(require,module,exports){
+},{}],140:[function(require,module,exports){
 module.exports = "(\n\t% Updated seq\n\t(def seq2 #A,B :: (\n\t\t(var L (list))\n\t\t(while ((< A B)) (\n\t\t\t(set L (++ L (list A)))\n\t\t\t(set A (+ A 1))\n\t\t))\n\t\tL\n\t))\n\t(print (seq2 1 10))\n)\n";
 
-},{}],142:[function(require,module,exports){
+},{}],141:[function(require,module,exports){
 (function (process){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -3807,7 +3804,7 @@ var substr = 'ab'.substr(-1) === 'b'
 ;
 
 }).call(this,require('_process'))
-},{"_process":143}],143:[function(require,module,exports){
+},{"_process":142}],142:[function(require,module,exports){
 // shim for using process in browser
 var process = module.exports = {};
 
@@ -3989,7 +3986,7 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],144:[function(require,module,exports){
+},{}],143:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
   module.exports = function inherits(ctor, superCtor) {
@@ -4014,14 +4011,14 @@ if (typeof Object.create === 'function') {
   }
 }
 
-},{}],145:[function(require,module,exports){
+},{}],144:[function(require,module,exports){
 module.exports = function isBuffer(arg) {
   return arg && typeof arg === 'object'
     && typeof arg.copy === 'function'
     && typeof arg.fill === 'function'
     && typeof arg.readUInt8 === 'function';
 }
-},{}],146:[function(require,module,exports){
+},{}],145:[function(require,module,exports){
 (function (process,global){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -4611,11 +4608,10 @@ function hasOwnProperty(obj, prop) {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./support/isBuffer":145,"_process":143,"inherits":144}],147:[function(require,module,exports){
+},{"./support/isBuffer":144,"_process":142,"inherits":143}],146:[function(require,module,exports){
 // samples.js, generated from genfiles.sh
 var files = {};
 files['repl.lithp'] = require('./lithp/repl.lithp');
-files['platform/v1/l_src/lib_switch_case.lithp'] = require('./lithp/platform/v1/l_src/lib_switch_case.lithp');
 files['macro-test.lithp'] = require('./lithp/macro-test.lithp');
 files['modules/pivot.lithp'] = require('./lithp/modules/pivot.lithp');
 files['modules/cache.lithp'] = require('./lithp/modules/cache.lithp');
@@ -4684,9 +4680,9 @@ files['webide/webide.lithp'] = require('./webide/./webide.lithp');
 module.exports = files;
 
 
-},{"./lithp/macro-test.lithp":16,"./lithp/macro.lithp":17,"./lithp/modules/assert.lithp":19,"./lithp/modules/bignum.lithp":21,"./lithp/modules/buffer.lithp":23,"./lithp/modules/cache.lithp":25,"./lithp/modules/class.lithp":27,"./lithp/modules/file.lithp":29,"./lithp/modules/lists.lithp":31,"./lithp/modules/match.lithp":33,"./lithp/modules/math.lithp":35,"./lithp/modules/pivot.lithp":37,"./lithp/modules/random.lithp":39,"./lithp/modules/readline.lithp":41,"./lithp/modules/repl.lithp":43,"./lithp/modules/stderr.lithp":45,"./lithp/modules/stdlib.lithp":47,"./lithp/modules/stream.lithp":49,"./lithp/modules/strings.lithp":51,"./lithp/modules/switch.lithp":53,"./lithp/modules/symbols.lithp":55,"./lithp/platform/v1/l_src/lib_switch_case.lithp":58,"./lithp/repl.lithp":61,"./lithp/samples/aspect.lithp":63,"./lithp/samples/atoms.lithp":65,"./lithp/samples/bf.lithp":67,"./lithp/samples/bfib.lithp":69,"./lithp/samples/calc.lithp":71,"./lithp/samples/cipher.lithp":73,"./lithp/samples/complex.lithp":75,"./lithp/samples/definitions.lithp":77,"./lithp/samples/eval.lithp":79,"./lithp/samples/ext.lithp":81,"./lithp/samples/factorial.lithp":83,"./lithp/samples/fib.lithp":85,"./lithp/samples/fndefs.lithp":87,"./lithp/samples/forloop.lithp":89,"./lithp/samples/infinite.lithp":91,"./lithp/samples/interlace-strings.lithp":93,"./lithp/samples/inverse.lithp":95,"./lithp/samples/magic.lithp":97,"./lithp/samples/map.lithp":99,"./lithp/samples/md-template.lithp":101,"./lithp/samples/module.lithp":103,"./lithp/samples/module_lib.lithp":105,"./lithp/samples/n-circles.lithp":107,"./lithp/samples/oddword.lithp":109,"./lithp/samples/one_to_ten.lithp":111,"./lithp/samples/pairable.lithp":113,"./lithp/samples/parser-bugs.lithp":115,"./lithp/samples/pillow.lithp":117,"./lithp/samples/pow.lithp":119,"./lithp/samples/progruzzle-colf.lithp":121,"./lithp/samples/readfile.lithp":123,"./lithp/samples/recurse.lithp":125,"./lithp/samples/scope.lithp":127,"./lithp/samples/shorthand.lithp":129,"./lithp/samples/simple.lithp":131,"./lithp/samples/square.lithp":133,"./lithp/samples/subchains.lithp":135,"./lithp/samples/var_args.lithp":137,"./lithp/samples/wall.lithp":139,"./lithp/samples/while.lithp":141,"./modules/./html-toolkit.lithp":4,"./modules/./html.lithp":6,"./modules/./jquery-toolkit.lithp":8,"./webide/./webide.lithp":149}],148:[function(require,module,exports){
+},{"./lithp/macro-test.lithp":16,"./lithp/macro.lithp":17,"./lithp/modules/assert.lithp":19,"./lithp/modules/bignum.lithp":21,"./lithp/modules/buffer.lithp":23,"./lithp/modules/cache.lithp":25,"./lithp/modules/class.lithp":27,"./lithp/modules/file.lithp":29,"./lithp/modules/lists.lithp":31,"./lithp/modules/match.lithp":33,"./lithp/modules/math.lithp":35,"./lithp/modules/pivot.lithp":37,"./lithp/modules/random.lithp":39,"./lithp/modules/readline.lithp":41,"./lithp/modules/repl.lithp":43,"./lithp/modules/stderr.lithp":45,"./lithp/modules/stdlib.lithp":47,"./lithp/modules/stream.lithp":49,"./lithp/modules/strings.lithp":51,"./lithp/modules/switch.lithp":53,"./lithp/modules/symbols.lithp":55,"./lithp/repl.lithp":60,"./lithp/samples/aspect.lithp":62,"./lithp/samples/atoms.lithp":64,"./lithp/samples/bf.lithp":66,"./lithp/samples/bfib.lithp":68,"./lithp/samples/calc.lithp":70,"./lithp/samples/cipher.lithp":72,"./lithp/samples/complex.lithp":74,"./lithp/samples/definitions.lithp":76,"./lithp/samples/eval.lithp":78,"./lithp/samples/ext.lithp":80,"./lithp/samples/factorial.lithp":82,"./lithp/samples/fib.lithp":84,"./lithp/samples/fndefs.lithp":86,"./lithp/samples/forloop.lithp":88,"./lithp/samples/infinite.lithp":90,"./lithp/samples/interlace-strings.lithp":92,"./lithp/samples/inverse.lithp":94,"./lithp/samples/magic.lithp":96,"./lithp/samples/map.lithp":98,"./lithp/samples/md-template.lithp":100,"./lithp/samples/module.lithp":102,"./lithp/samples/module_lib.lithp":104,"./lithp/samples/n-circles.lithp":106,"./lithp/samples/oddword.lithp":108,"./lithp/samples/one_to_ten.lithp":110,"./lithp/samples/pairable.lithp":112,"./lithp/samples/parser-bugs.lithp":114,"./lithp/samples/pillow.lithp":116,"./lithp/samples/pow.lithp":118,"./lithp/samples/progruzzle-colf.lithp":120,"./lithp/samples/readfile.lithp":122,"./lithp/samples/recurse.lithp":124,"./lithp/samples/scope.lithp":126,"./lithp/samples/shorthand.lithp":128,"./lithp/samples/simple.lithp":130,"./lithp/samples/square.lithp":132,"./lithp/samples/subchains.lithp":134,"./lithp/samples/var_args.lithp":136,"./lithp/samples/wall.lithp":138,"./lithp/samples/while.lithp":140,"./modules/./html-toolkit.lithp":4,"./modules/./html.lithp":6,"./modules/./jquery-toolkit.lithp":8,"./webide/./webide.lithp":148}],147:[function(require,module,exports){
 module.exports=[[["import","class"]]]
-},{}],149:[function(require,module,exports){
+},{}],148:[function(require,module,exports){
 module.exports = "% Provides an interface to the WebIDE document.\n(\n\t(import class)\n%\t(import \"html-toolkit\")\n%\t(import \"jquery-toolkit\")\n%\n%\t(jqueryOnLoad (scope # :: (\n%\t\t(print \"Secondary jQuery init\")\n%\t\t(var Body (jQuery \"body\"))\n%\t\t(print \"Body: \" Body)\n%\t\t(var Anchors (jQuery \"a\" Body))\n%\t\t(print \"Anchors:\" Anchors)\n%\t\t(member-call Anchors setCss (dict (tuple color \"red\")))\n%\t\t(var B (jQuery \"<b>TEST</b>\"))\n%\t\t(member-call Body append B)\n%\t)))\n)\n";
 
-},{}]},{},[2,147]);
+},{}]},{},[2,146]);
