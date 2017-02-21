@@ -5,16 +5,85 @@
 <meta content="en-us" http-equiv="Content-Language" />
 <meta content="text/html; charset=utf-8" http-equiv="Content-Type" />
 <title>This is the file explorer</title>
+<script src="types.js" type="text/javascript"></script>
 <script src="frame-shared.js" type="text/javascript"></script>
 <script src="jquery-3.1.1.js" type="text/javascript"></script>
 <script src="jstree/jstree.min.js" type="text/javascript"></script>
+<script src="base64.js" type="text/javascript"></script>
+<script src="lithp-pkg.js" type="text/javascript"></script>
 
 <script type="text/javascript">
+	var yourFiles = "- Your Files";
+	var lithpFiles= "Lithp Files";
+
+	var fileTree = {};
+	fileTree[yourFiles] = {
+		"unnamed.lithp": "unnamed.lithp"
+	};
+	fileTree[lithpFiles] = {};
+	var files = global._lithp.fileSampleCache;
+
 	$(function () {
-		// data-jstree='{ "opened" : true }'
-		$('#filetree').jstree();
+		for(var name in files) {
+			parts = name.split('/');
+			var dest = fileTree[lithpFiles];
+			for(var i = 0; i < parts.length - 1; i++) {
+				var current = parts[i];
+				if(dest[current] === undefined)
+					dest[current] = {};
+				dest = dest[current];
+				//console.log(" ".repeat(i * 2) + current);
+			}
+			dest[parts[parts.length - 1]] = name;
+		}
+		function buildTree (files, dest) {
+			for(var name in files) {
+				if(typeof files[name] == 'string')
+					$(dest).append("<li data-path='" + files[name] + "'>" + name + "</li>");
+				else {
+					var li = $("<li>" + name + "</li>");
+					var ul = (buildTree(files[name], $("<ul>")));
+					li.append(ul);
+					$(dest).append(li);
+				}
+			}
+			return dest;
+		}
+		var ul = buildTree(fileTree, $("<ul/>"));
+		$('#filetree').append(ul);
+		$('#filetree').jstree({
+			plugins: ['sort'],
+			sort: function(a, b) {
+				var a1 = this.get_node(a);
+				var b1 = this.get_node(b);
+				return (a1.text > b1.text) ? 1 : -1;
+			}
+		});
 		$('#filetree').jstree().open_all();
+		$('#filetree').bind('dblclick.jstree', function(evt) {
+			var node = $(evt.target).closest("li");
+			var data = node.attr('data-path');
+			if(files[data]) {
+				window.parent.postMessage(MsgFileChanged(data, files[data]), "*");
+			}
+		});
+		window.parent.postMessage(MsgFrameReady("files"), "*");
 	});
+	window.onmessage = function(msg) {
+		var data = msg.data;
+		switch(data.type) {
+			case msgFileUpdated:
+				files[data.name] = data.content;
+				console.log("File updated: " + data.name);
+				break;
+			case msgStartUpdatePermalink:
+				var link = Base64.encode(files["unnamed.lithp"]);
+				window.parent.postMessage(MsgGotUpdatePermalink(link), "*");
+			default:
+				console.log("(files) unknown message: " + data.type);
+				break;
+		}
+	};
 </script>
 <link href="jstree/themes/default/style.min.css" rel="stylesheet" type="text/css" />
 </head>
@@ -22,40 +91,6 @@
 <body style="background-color:darkgray;">
 
 <div id="filetree">
-	<ul>
-		<li>Lithp Source Code
-			<ul>
-				<li>modules
-					<ul>
-						<li>lists.lithp</li>
-						<li>random.lithp</li>
-					</ul>
-				</li>
-				<li>samples
-					<ul>
-						<li>fib.lithp</li>
-					</ul>
-				</li>
-				<li>repl.lithp</li>
-			</ul>
-		</li>
-		<li>
-			Samples
-			<ul>
-				<li>fib.lithp</li>
-			</ul>
-		</li>
-		<li>Your files
-			<ul>
-				<li>config
-					<ul>
-						<li>editor.json</li>
-					</ul>
-				</li>
-				<li>unnamed.lithp</li>
-			</ul>
-		</li>
-	</ul>
 </div>
 
 </body>
