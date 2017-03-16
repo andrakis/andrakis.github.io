@@ -20,6 +20,7 @@ files['modules/random.ast'] = require('lithp/modules/random.json');
 files['modules/stderr.ast'] = require('lithp/modules/stderr.json');
 files['modules/bignum.ast'] = require('lithp/modules/bignum.json');
 files['modules/readline.ast'] = require('lithp/modules/readline.json');
+files['package.ast'] = require('lithp/package.json');
 files['samples/pillow.ast'] = require('lithp/samples/pillow.json');
 files['samples/readfile.ast'] = require('lithp/samples/readfile.json');
 files['samples/complex.ast'] = require('lithp/samples/complex.json');
@@ -63,11 +64,13 @@ files['samples/wall.ast'] = require('lithp/samples/wall.json');
 files['modules/jquery-toolkit.ast'] = require('./modules/jquery-toolkit.json');
 files['modules/html-toolkit.ast'] = require('./modules/html-toolkit.json');
 files['modules/html.ast'] = require('./modules/html.json');
+files['webide/palette.ast'] = require('./webide/palette.json');
 files['webide/webide.ast'] = require('./webide/webide.json');
+files['webide/package.ast'] = require('./webide/package.json');
 module.exports = files;
 
 
-},{"./modules/html-toolkit.json":3,"./modules/html.json":5,"./modules/jquery-toolkit.json":7,"./webide/webide.json":147,"lithp/modules/assert.json":18,"lithp/modules/bignum.json":20,"lithp/modules/buffer.json":22,"lithp/modules/cache.json":24,"lithp/modules/class.json":26,"lithp/modules/file.json":28,"lithp/modules/lists.json":30,"lithp/modules/match.json":32,"lithp/modules/math.json":34,"lithp/modules/pivot.json":36,"lithp/modules/random.json":38,"lithp/modules/readline.json":40,"lithp/modules/repl.json":42,"lithp/modules/stderr.json":44,"lithp/modules/stdlib.json":46,"lithp/modules/stream.json":48,"lithp/modules/strings.json":50,"lithp/modules/switch.json":52,"lithp/modules/symbols.json":54,"lithp/samples/aspect.json":61,"lithp/samples/atoms.json":63,"lithp/samples/bf.json":65,"lithp/samples/bfib.json":67,"lithp/samples/calc.json":69,"lithp/samples/cipher.json":71,"lithp/samples/complex.json":73,"lithp/samples/definitions.json":75,"lithp/samples/eval.json":77,"lithp/samples/ext.json":79,"lithp/samples/factorial.json":81,"lithp/samples/fib.json":83,"lithp/samples/fndefs.json":85,"lithp/samples/forloop.json":87,"lithp/samples/infinite.json":89,"lithp/samples/interlace-strings.json":91,"lithp/samples/inverse.json":93,"lithp/samples/magic.json":95,"lithp/samples/map.json":97,"lithp/samples/md-template.json":99,"lithp/samples/module.json":101,"lithp/samples/module_lib.json":103,"lithp/samples/n-circles.json":105,"lithp/samples/oddword.json":107,"lithp/samples/one_to_ten.json":109,"lithp/samples/pairable.json":111,"lithp/samples/parser-bugs.json":113,"lithp/samples/pillow.json":115,"lithp/samples/pow.json":117,"lithp/samples/progruzzle-colf.json":119,"lithp/samples/readfile.json":121,"lithp/samples/recurse.json":123,"lithp/samples/scope.json":125,"lithp/samples/shorthand.json":127,"lithp/samples/simple.json":129,"lithp/samples/square.json":131,"lithp/samples/subchains.json":133,"lithp/samples/var_args.json":135,"lithp/samples/wall.json":137,"lithp/samples/while.json":139}],2:[function(require,module,exports){
+},{"./modules/html-toolkit.json":3,"./modules/html.json":5,"./modules/jquery-toolkit.json":7,"./webide/package.json":147,"./webide/palette.json":148,"./webide/webide.json":150,"lithp/modules/assert.json":18,"lithp/modules/bignum.json":20,"lithp/modules/buffer.json":22,"lithp/modules/cache.json":24,"lithp/modules/class.json":26,"lithp/modules/file.json":28,"lithp/modules/lists.json":30,"lithp/modules/match.json":32,"lithp/modules/math.json":34,"lithp/modules/pivot.json":36,"lithp/modules/random.json":38,"lithp/modules/readline.json":40,"lithp/modules/repl.json":42,"lithp/modules/stderr.json":44,"lithp/modules/stdlib.json":46,"lithp/modules/stream.json":48,"lithp/modules/strings.json":50,"lithp/modules/switch.json":52,"lithp/modules/symbols.json":54,"lithp/package.json":56,"lithp/samples/aspect.json":61,"lithp/samples/atoms.json":63,"lithp/samples/bf.json":65,"lithp/samples/bfib.json":67,"lithp/samples/calc.json":69,"lithp/samples/cipher.json":71,"lithp/samples/complex.json":73,"lithp/samples/definitions.json":75,"lithp/samples/eval.json":77,"lithp/samples/ext.json":79,"lithp/samples/factorial.json":81,"lithp/samples/fib.json":83,"lithp/samples/fndefs.json":85,"lithp/samples/forloop.json":87,"lithp/samples/infinite.json":89,"lithp/samples/interlace-strings.json":91,"lithp/samples/inverse.json":93,"lithp/samples/magic.json":95,"lithp/samples/map.json":97,"lithp/samples/md-template.json":99,"lithp/samples/module.json":101,"lithp/samples/module_lib.json":103,"lithp/samples/n-circles.json":105,"lithp/samples/oddword.json":107,"lithp/samples/one_to_ten.json":109,"lithp/samples/pairable.json":111,"lithp/samples/parser-bugs.json":113,"lithp/samples/pillow.json":115,"lithp/samples/pow.json":117,"lithp/samples/progruzzle-colf.json":119,"lithp/samples/readfile.json":121,"lithp/samples/recurse.json":123,"lithp/samples/scope.json":125,"lithp/samples/shorthand.json":127,"lithp/samples/simple.json":129,"lithp/samples/square.json":131,"lithp/samples/subchains.json":133,"lithp/samples/var_args.json":135,"lithp/samples/wall.json":137,"lithp/samples/while.json":139}],2:[function(require,module,exports){
 (function (global){
 if(typeof window === 'undefined')
 	window = {};
@@ -135,9 +138,9 @@ window.onload = function() {
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{"./files":1,"./samples":146,"lithp":10,"util":145}],3:[function(require,module,exports){
-module.exports=[[["define","'HTML_TOOLKIT'","true"],["import","lists"],["var","Document",["atom","nil"]],["var","Window",["atom","nil"]],["var","HtmlToolkitOnReady",["list"]],["var","Ready","false"],["def","onReady/*",["scope",{"code":[[["set","Document",["index","Values","0"]],["set","Window",["index","Values","1"]],["set","Ready","true"],["each","HtmlToolkitOnReady",{"code":[[["call","Callback"]]],"_fndef":true,"_fnparams":["Callback"]}]]],"_fndef":true,"_fnparams":["Values"]}]],["export-global","onReady/*"],["def","htmlOnLoad",["scope",{"code":[[["if",["==","false","Ready"],[["set","HtmlToolkitOnReady",["++","HtmlToolkitOnReady",["list","Callback"]]]],["else",[["call","Callback"]]]],["atom","ok"]]],"_fndef":true,"_fnparams":["Callback"]}]],["export-global","htmlOnLoad/1"],["def","getElementById",["scope",{"code":[[["doc-apply","getElementById",["list","Id"]]]],"_fndef":true,"_fnparams":["Id"]}]],["def","prompt",["scope",{"code":[[["var","Result",["invoke","Window","prompt","Question"]],["call","Callback","Result"]]],"_fndef":true,"_fnparams":["Question","Callback"]}]],["export-global","prompt/2"],["def","doc-apply",["scope",{"code":[[["js-apply","Document",["dict-get","Document","Member"],"Args"]]],"_fndef":true,"_fnparams":["Member","Args"]}]],["def","getDoc",["scope",{"code":[[["Document"]]],"_fndef":true,"_fnparams":[]}]],["export-global","getDoc/0"]]]
+module.exports=[[["define","'HTML_TOOLKIT'","true"],["import","lists"],["var","Document",["atom","nil"]],["var","Window",["atom","nil"]],["var","HtmlToolkitOnReady",["list"]],["var","Ready","false"],["def","onReady/*",["scope",{"code":[[["set","Document",["index","Values","0"]],["set","Window",["index","Values","1"]],["set","Ready","true"],["each","HtmlToolkitOnReady",{"code":[[["call","Callback"]]],"_fndef":true,"_fnparams":["Callback"]}]]],"_fndef":true,"_fnparams":["Values"]}]],["export-global","onReady/*"],["def","htmlOnLoad",["scope",{"code":[[["if",["==","false","Ready"],[["set","HtmlToolkitOnReady",["++","HtmlToolkitOnReady",["list","Callback"]]]],["else",[["call","Callback"]]]],["atom","ok"]]],"_fndef":true,"_fnparams":["Callback"]}]],["export-global","htmlOnLoad/1"],["def","getElementById",["scope",{"code":[[["doc-apply","getElementById",["list","Id"]]]],"_fndef":true,"_fnparams":["Id"]}]],["def","prompt",["scope",{"code":[[["var","Result",["invoke","Window","prompt","Question"]],["call","Callback","Result"]]],"_fndef":true,"_fnparams":["Question","Callback"]}]],["export-global","prompt/2"],["def","doc-apply",["scope",{"code":[[["js-apply","Document",["dict-get","Document","Member"],"Args"]]],"_fndef":true,"_fnparams":["Member","Args"]}]],["def","getDoc",["scope",{"code":[[["Document"]]],"_fndef":true,"_fnparams":[]}]],["export-global","getDoc/0"],["def","getWindow",["scope",{"code":[[["Window"]]],"_fndef":true,"_fnparams":[]}]],["export-global","getWindow/0"],["def","postParentMessage",{"code":[[["var","Window",["getWindow"]],["js-apply","Window",["dict-get","Window","\"LithpPostMessage\""],["list","Message"]]]],"_fndef":true,"_fnparams":["Message"]}],["export-global","postParentMessage/1"]]]
 },{}],4:[function(require,module,exports){
-module.exports = "% Provides a basic interface to HTML objects in the document.\n% You must invoke onReady/1 with the \"body\" element.\n(\n\t(define 'HTML_TOOLKIT' true)\n\t(import lists)\n\n\t(var Document (atom nil))\n\t(var Window   (atom nil))\n\t(var HtmlToolkitOnReady (list))\n\t(var Ready false)\n\t(def onReady/* (scope #Values :: (\n\t\t(set Document (index Values 0))\n\t\t(set Window   (index Values 1))\n\t\t(set Ready true)\n\t\t(each HtmlToolkitOnReady #Callback :: (\n\t\t\t(call Callback)\n\t\t))\n\t)))\n\n\t(export-global onReady/*)\n\n\t(def htmlOnLoad (scope #Callback :: (\n\t\t(if (== false Ready) (\n\t\t\t(set HtmlToolkitOnReady (++\n\t\t\t\t HtmlToolkitOnReady (list Callback)\n\t\t\t))\n\t\t) (else (\n\t\t\t(call Callback)\n\t\t)))\n\t\t(atom ok)\n\t)))\n\n\t(export-global htmlOnLoad/1)\n\n\t(def getElementById (scope #Id :: (\n\t\t(doc-apply getElementById (list Id))\n\t)))\n\n\t(def prompt (scope #Question,Callback :: (\n\t\t(var Result (invoke Window prompt Question))\n\t\t(call Callback Result)\n\t)))\n\n\t(export-global prompt/2)\n\n\t(def doc-apply (scope #Member,Args :: (\n\t\t(js-apply Document (dict-get Document Member) Args)\n\t)))\n\n\t(def getDoc (scope # :: ((Document))))\n\t(export-global getDoc/0)\n)\n";
+module.exports = "% Provides a basic interface to HTML objects in the document.\n% You must invoke onReady/1 with the \"body\" element.\n(\n\t(define 'HTML_TOOLKIT' true)\n\t(import lists)\n\n\t(var Document (atom nil))\n\t(var Window   (atom nil))\n\t(var HtmlToolkitOnReady (list))\n\t(var Ready false)\n\t(def onReady/* (scope #Values :: (\n\t\t(set Document (index Values 0))\n\t\t(set Window   (index Values 1))\n\t\t(set Ready true)\n\t\t(each HtmlToolkitOnReady #Callback :: (\n\t\t\t(call Callback)\n\t\t))\n\t)))\n\n\t(export-global onReady/*)\n\n\t(def htmlOnLoad (scope #Callback :: (\n\t\t(if (== false Ready) (\n\t\t\t(set HtmlToolkitOnReady (++\n\t\t\t\t HtmlToolkitOnReady (list Callback)\n\t\t\t))\n\t\t) (else (\n\t\t\t(call Callback)\n\t\t)))\n\t\t(atom ok)\n\t)))\n\n\t(export-global htmlOnLoad/1)\n\n\t(def getElementById (scope #Id :: (\n\t\t(doc-apply getElementById (list Id))\n\t)))\n\n\t(def prompt (scope #Question,Callback :: (\n\t\t(var Result (invoke Window prompt Question))\n\t\t(call Callback Result)\n\t)))\n\n\t(export-global prompt/2)\n\n\t(def doc-apply (scope #Member,Args :: (\n\t\t(js-apply Document (dict-get Document Member) Args)\n\t)))\n\n\t(def getDoc (scope # :: ((Document))))\n\t(export-global getDoc/0)\n\n\t(def getWindow (scope # :: ((Window))))\n\t(export-global getWindow/0)\n\n\t(def postParentMessage #Message :: (\n\t\t(var Window (getWindow))\n\t\t(js-apply Window (dict-get Window \"LithpPostMessage\") (list Message))\n\t))\n\t(export-global postParentMessage/1)\n)\n";
 
 },{}],5:[function(require,module,exports){
 module.exports=[[["atom","test"]]]
@@ -145,9 +148,9 @@ module.exports=[[["atom","test"]]]
 module.exports = "(\n\t(atom test)\n)\n";
 
 },{}],7:[function(require,module,exports){
-module.exports=[[["import","lists"],["import","class"],["define","'JQUERY_TOOLKIT'","true"],["var","JQueryJSObj",["atom","nil"]],["var","JQueryOnLoadCallbacks",["list"]],["def","onJQuery",["scope",{"code":[[["set","JQueryJSObj",["get","JQ"]],["each","JQueryOnLoadCallbacks",{"code":[[["call","CB"]]],"_fndef":true,"_fnparams":["CB"]}]]],"_fndef":true,"_fnparams":["JQ"]}]],["def","jqueryOnLoad",["scope",{"code":[[["set","JQueryOnLoadCallbacks",["++","JQueryOnLoadCallbacks",["list","Callback"]]],["atom","ok"]]],"_fndef":true,"_fnparams":["Callback"]}]],["export-global","onJQuery/1","jqueryOnLoad/1"],["def","jQuery/1",{"code":[[["jQueryClass",["jquery-init","Selector"]]]],"_fndef":true,"_fnparams":["Selector"]}],["def","jQuery/2",{"code":[[["jQueryClass",["jquery-init","Selector",["unclass","Context"]]]]],"_fndef":true,"_fnparams":["Selector","Context"]}],["def","jQuery/3",{"code":[[["jQueryClass",["jquery-init","Selector",["unclass","Context"],"Root"]]]],"_fndef":true,"_fnparams":["Selector","Context","Root"]}],["export-global","jQuery/1","jQuery/2","jQuery/3"],["def","jquery-init/*",{"code":[[["js-invoke","JQueryJSObj","Args"]]],"_fndef":true,"_fnparams":["Args"]}],["def","jQueryClass",{"code":[[["new","JQueryClass","JQueryResult"]]],"_fndef":true,"_fnparams":["JQueryResult"]}],["def","unclass",{"code":[[["if",["==","dict",["typeof","JQ"]],[["member-call","JQ","getTarget"]],["else",[["JQ"]]]]]],"_fndef":true,"_fnparams":["JQ"]}],["var","JQueryClass",["class","'JQueryClass'",["tuple",["class-init"],{"code":[[["member-set","Self","target","From"]]],"_fndef":true,"_fnparams":["Self","From"]}],["tuple","append",{"code":[[["member-call","Self","call","append",["list",["unclass","Obj"]]]]],"_fndef":true,"_fnparams":["Self","Obj"]}],["tuple","getCss",{"code":[[["member-call","Self","call","css",["list"]]]],"_fndef":true,"_fnparams":["Self"]}],["tuple","getValue",{"code":[[["member-call","Self","call","val",["list"]]]],"_fndef":true,"_fnparams":["Self"]}],["tuple","remove",{"code":[[["member-call","Self","call","remove",["list"]]]],"_fndef":true,"_fnparams":["Self"]}],["tuple","setCss",{"code":[[["member-call","Self","call","css",["list","Css"]]]],"_fndef":true,"_fnparams":["Self","Css"]}],["tuple","setValue",{"code":[[["member-call","Self","call","val",["list","Value"]]]],"_fndef":true,"_fnparams":["Self","Value"]}],["tuple","call",{"code":[[["new","JQueryClass",["member-call","Self","invoke","Member","Args"]]]],"_fndef":true,"_fnparams":["Self","Member","Args"]}],["tuple","invoke",{"code":[[["js-apply",["member-get","Self","target"],["member-call","Self","getTargetMember","Member"],"Args"]]],"_fndef":true,"_fnparams":["Self","Member","Args"]}],["tuple","invoke-immediate",{"code":[[["invoke",["member-get","Self","target"],["list","Search"]]]],"_fndef":true,"_fnparams":["Self","Search"]}],["tuple","getTarget",{"code":[[["member-get","Self","target"]]],"_fndef":true,"_fnparams":["Self"]}],["tuple","getTargetMember",{"code":[[["dict-get",["member-call","Self","getTarget"],"Member"]]],"_fndef":true,"_fnparams":["Self","Member"]}]]]]]
+module.exports=[[["import","lists"],["import","class"],["define","'JQUERY_TOOLKIT'","true"],["var","JQueryJSObj",["atom","nil"]],["var","JQueryOnLoadCallbacks",["list"]],["def","onJQuery",["scope",{"code":[[["set","JQueryJSObj",["get","JQ"]],["each","JQueryOnLoadCallbacks",{"code":[[["call","CB"]]],"_fndef":true,"_fnparams":["CB"]}]]],"_fndef":true,"_fnparams":["JQ"]}]],["def","jqueryOnLoad",["scope",{"code":[[["set","JQueryOnLoadCallbacks",["++","JQueryOnLoadCallbacks",["list","Callback"]]],["atom","ok"]]],"_fndef":true,"_fnparams":["Callback"]}]],["export-global","onJQuery/1","jqueryOnLoad/1"],["def","jQuery/1",{"code":[[["jQueryClass",["jquery-init","Selector"]]]],"_fndef":true,"_fnparams":["Selector"]}],["def","jQuery/2",{"code":[[["jQueryClass",["jquery-init","Selector",["unclass","Context"]]]]],"_fndef":true,"_fnparams":["Selector","Context"]}],["def","jQuery/3",{"code":[[["jQueryClass",["jquery-init","Selector",["unclass","Context"],"Root"]]]],"_fndef":true,"_fnparams":["Selector","Context","Root"]}],["export-global","jQuery/1","jQuery/2","jQuery/3"],["def","jquery-init/*",{"code":[[["js-invoke","JQueryJSObj","Args"]]],"_fndef":true,"_fnparams":["Args"]}],["def","jQueryClass",{"code":[[["new","JQueryClass","JQueryResult"]]],"_fndef":true,"_fnparams":["JQueryResult"]}],["def","unclass",{"code":[[["if",["==","dict",["typeof","JQ"]],[["member-call","JQ","getTarget"]],["else",[["JQ"]]]]]],"_fndef":true,"_fnparams":["JQ"]}],["var","JQueryClass",["class","'JQueryClass'",["tuple",["class-init"],{"code":[[["member-set","Self","target","From"]]],"_fndef":true,"_fnparams":["Self","From"]}],["tuple","append",{"code":[[["member-call","Self","call","append",["list",["unclass","Obj"]]]]],"_fndef":true,"_fnparams":["Self","Obj"]}],["tuple","bind",{"code":[[["member-call","Self","call","bind",["list","Event",["js-bridge","Handler"]]]]],"_fndef":true,"_fnparams":["Self","Event","Handler"]}],["tuple","getCss",{"code":[[["member-call","Self","invoke","css",["list"]]]],"_fndef":true,"_fnparams":["Self"]}],["tuple","getValue",{"code":[[["member-call","Self","invoke","val",["list"]]]],"_fndef":true,"_fnparams":["Self"]}],["tuple","remove",{"code":[[["member-call","Self","call","remove",["list"]]]],"_fndef":true,"_fnparams":["Self"]}],["tuple","setCss",{"code":[[["member-call","Self","call","css",["list","Css"]]]],"_fndef":true,"_fnparams":["Self","Css"]}],["tuple","setValue",{"code":[[["member-call","Self","call","val",["list","Value"]]]],"_fndef":true,"_fnparams":["Self","Value"]}],["tuple","call",{"code":[[["new","JQueryClass",["member-call","Self","invoke","Member","Args"]]]],"_fndef":true,"_fnparams":["Self","Member","Args"]}],["tuple","invoke",{"code":[[["js-apply",["member-get","Self","target"],["member-call","Self","getTargetMember","Member"],"Args"]]],"_fndef":true,"_fnparams":["Self","Member","Args"]}],["tuple","invoke-immediate",{"code":[[["invoke",["member-get","Self","target"],["list","Search"]]]],"_fndef":true,"_fnparams":["Self","Search"]}],["tuple","getTarget",{"code":[[["member-get","Self","target"]]],"_fndef":true,"_fnparams":["Self"]}],["tuple","getTargetMember",{"code":[[["dict-get",["member-call","Self","getTarget"],"Member"]]],"_fndef":true,"_fnparams":["Self","Member"]}]]]]]
 },{}],8:[function(require,module,exports){
-module.exports = "% Provides an interface to the jQuery object.\n(\n\t(import lists)\n\t(import class)\n\n\t(define 'JQUERY_TOOLKIT' true)\n\n\t(var JQueryJSObj (atom nil))\n\t(var JQueryOnLoadCallbacks (list))\n\n\t% Called by the JavaScript editor when code is run\n\t(def onJQuery (scope #JQ :: (\n\t\t(set JQueryJSObj (get JQ))\n\t\t(each JQueryOnLoadCallbacks #CB :: (\n\t\t\t(call CB)\n\t\t))\n\t)))\n\n\t% Used to add a callback when the above function is called.\n\t% Essentially, this is your $(function() { }) callback.\n\t(def jqueryOnLoad (scope #Callback :: (\n\t\t(set JQueryOnLoadCallbacks (++ JQueryOnLoadCallbacks (list Callback)))\n\t\t(atom ok)\n\t)))\n\n\t(export-global onJQuery/1 jqueryOnLoad/1)\n\n\t% Public API\n\t(def jQuery/1 #Selector :: (\n\t\t(jQueryClass (jquery-init Selector))\n\t))\n\t(def jQuery/2 #Selector,Context :: (\n\t\t(jQueryClass (jquery-init Selector (unclass Context)))\n\t))\n\t(def jQuery/3 #Selector,Context,Root :: (\n\t\t(jQueryClass (jquery-init Selector (unclass Context) Root))\n\t))\n\n\t(export-global jQuery/1 jQuery/2 jQuery/3)\n\n\t% Internal API\n\t(def jquery-init/* #Args :: (\n\t\t(js-invoke JQueryJSObj Args)\n\t))\n\n\t(def jQueryClass #JQueryResult :: (\n\t\t(new JQueryClass JQueryResult)\n\t))\n\n\t% Grabs the jQuery object from the class, if it is a class.\n\t(def unclass #JQ :: (\n\t\t(if (== dict (typeof JQ)) (\n\t\t\t(member-call JQ getTarget)\n\t\t) (else ((JQ))))\n\t))\n\n\t% The JQuery class\n\t(var JQueryClass (class 'JQueryClass'\n\t\t(tuple (class-init) #Self,From :: (\n\t\t\t(member-set Self target From)\n\t\t))\n\n\t\t% Public API\n\t\t(tuple append #Self,Obj :: (\n\t\t    (member-call Self call append (list (unclass Obj)))\n\t\t))\n\t\t(tuple getCss #Self :: (\n\t\t\t(member-call Self call css (list))\n\t\t))\n\t\t(tuple getValue #Self :: (\n\t\t\t(member-call Self call val (list))\n\t\t))\n\t\t(tuple remove #Self :: (\n\t\t\t(member-call Self call remove (list))\n\t\t))\n\t\t(tuple setCss #Self,Css :: (\n\t\t\t(member-call Self call css (list Css))\n\t\t))\n\t\t(tuple setValue #Self,Value :: (\n\t\t\t(member-call Self call val (list Value))\n\t\t))\n\n\t\t% Internal use\n\t\t(tuple call #Self,Member,Args :: (\n\t\t\t(new JQueryClass (member-call Self invoke Member Args))\n\t\t))\n\t\t(tuple invoke #Self,Member,Args :: (\n\t\t\t(js-apply (member-get Self target) (member-call Self getTargetMember Member) Args)\n\t\t))\n\t\t(tuple invoke-immediate #Self,Search :: (\n\t\t\t(invoke (member-get Self target) (list Search))\n\t\t))\n\t\t(tuple getTarget #Self :: (\n\t\t\t(member-get Self target)\n\t\t))\n\t\t(tuple getTargetMember #Self,Member :: (\n\t\t\t(dict-get (member-call Self getTarget) Member)\n\t\t))\n\t))\n)\n";
+module.exports = "% Provides an interface to the jQuery object.\n(\n\t(import lists)\n\t(import class)\n\n\t(define 'JQUERY_TOOLKIT' true)\n\n\t(var JQueryJSObj (atom nil))\n\t(var JQueryOnLoadCallbacks (list))\n\n\t% Called by the JavaScript editor when code is run\n\t(def onJQuery (scope #JQ :: (\n\t\t(set JQueryJSObj (get JQ))\n\t\t(each JQueryOnLoadCallbacks #CB :: (\n\t\t\t(call CB)\n\t\t))\n\t)))\n\n\t% Used to add a callback when the above function is called.\n\t% Essentially, this is your $(function() { }) callback.\n\t(def jqueryOnLoad (scope #Callback :: (\n\t\t(set JQueryOnLoadCallbacks (++ JQueryOnLoadCallbacks (list Callback)))\n\t\t(atom ok)\n\t)))\n\n\t(export-global onJQuery/1 jqueryOnLoad/1)\n\n\t% Public API\n\t(def jQuery/1 #Selector :: (\n\t\t(jQueryClass (jquery-init Selector))\n\t))\n\t(def jQuery/2 #Selector,Context :: (\n\t\t(jQueryClass (jquery-init Selector (unclass Context)))\n\t))\n\t(def jQuery/3 #Selector,Context,Root :: (\n\t\t(jQueryClass (jquery-init Selector (unclass Context) Root))\n\t))\n\n\t(export-global jQuery/1 jQuery/2 jQuery/3)\n\n\t% Internal API\n\t(def jquery-init/* #Args :: (\n\t\t(js-invoke JQueryJSObj Args)\n\t))\n\n\t(def jQueryClass #JQueryResult :: (\n\t\t(new JQueryClass JQueryResult)\n\t))\n\n\t% Grabs the jQuery object from the class, if it is a class.\n\t(def unclass #JQ :: (\n\t\t(if (== dict (typeof JQ)) (\n\t\t\t(member-call JQ getTarget)\n\t\t) (else ((JQ))))\n\t))\n\n\t% The JQuery class\n\t(var JQueryClass (class 'JQueryClass'\n\t\t(tuple (class-init) #Self,From :: (\n\t\t\t(member-set Self target From)\n\t\t))\n\n\t\t% Public API\n\t\t(tuple append #Self,Obj :: (\n\t\t    (member-call Self call append (list (unclass Obj)))\n\t\t))\n\t\t(tuple bind #Self,Event,Handler :: (\n\t\t\t(member-call Self call bind (list Event (js-bridge Handler)))\n\t\t))\n\t\t(tuple getCss #Self :: (\n\t\t\t(member-call Self invoke css (list))\n\t\t))\n\t\t(tuple getValue #Self :: (\n\t\t\t(member-call Self invoke val (list))\n\t\t))\n\t\t(tuple remove #Self :: (\n\t\t\t(member-call Self call remove (list))\n\t\t))\n\t\t(tuple setCss #Self,Css :: (\n\t\t\t(member-call Self call css (list Css))\n\t\t))\n\t\t(tuple setValue #Self,Value :: (\n\t\t\t(member-call Self call val (list Value))\n\t\t))\n\n\t\t% Internal use\n\t\t(tuple call #Self,Member,Args :: (\n\t\t\t(new JQueryClass (member-call Self invoke Member Args))\n\t\t))\n\t\t(tuple invoke #Self,Member,Args :: (\n\t\t\t(js-apply (member-get Self target) (member-call Self getTargetMember Member) Args)\n\t\t))\n\t\t(tuple invoke-immediate #Self,Search :: (\n\t\t\t(invoke (member-get Self target) (list Search))\n\t\t))\n\t\t(tuple getTarget #Self :: (\n\t\t\t(member-get Self target)\n\t\t))\n\t\t(tuple getTargetMember #Self,Member :: (\n\t\t\t(dict-get (member-call Self getTarget) Member)\n\t\t))\n\t))\n)\n";
 
 },{}],9:[function(require,module,exports){
 
@@ -1283,35 +1286,41 @@ Lithp.prototype.run = function(chain) {
 	var value = Atom("nil");
 	//lithp_debug(chain);
 	//lithp_debug("Resuming chain from pos: " + chain.pos);
+	var prev_depth = this.depth;
 	while(chain.next()) {
 		var i = chain.get();
-		switch(i.constructor) {
-			case OpChain:
-				//lithp_debug("(run: current closure: ", i.closure.closure);
-				//lithp_debug("(      parent closure: ", i.closure.parent);
-				value = this.run(new OpChain(chain, i.ops));
-				break;
-			case FunctionCall:
-				//console.log("chain.get got: ", i);
-				value = this._do_functioncall(chain, i);
-				//lithp_debug("(run: got value from fn call: ", value);
-				if(value && value.constructor === OpChain && value.immediate == true) {
-					// Invoke this chain immediately
-					//lithp_debug("(run: invoking immediately");
-					value = this.run(new OpChain(chain, value.ops));
-					//lithp_debug("(run: got value from immediate fn call: ", value);
-				}
-				break;
-			case LiteralValue:
-				value = i.value;
-				break;
-			case FunctionDefinition:
-			case FunctionDefinitionNative:
-				value = i;
-				break;
-			default:
-				debug("ERROR: Unkown operation: " + i.constructor);
-				break;
+		try {
+			switch(i.constructor) {
+				case OpChain:
+					//lithp_debug("(run: current closure: ", i.closure.closure);
+					//lithp_debug("(      parent closure: ", i.closure.parent);
+					value = this.run(new OpChain(chain, i.ops));
+					break;
+				case FunctionCall:
+					//console.log("chain.get got: ", i);
+					value = this._do_functioncall(chain, i);
+					//lithp_debug("(run: got value from fn call: ", value);
+					if(value && value.constructor === OpChain && value.immediate == true) {
+						// Invoke this chain immediately
+						//lithp_debug("(run: invoking immediately");
+						value = this.run(new OpChain(chain, value.ops));
+						//lithp_debug("(run: got value from immediate fn call: ", value);
+					}
+					break;
+				case LiteralValue:
+					value = i.value;
+					break;
+				case FunctionDefinition:
+				case FunctionDefinitionNative:
+					value = i;
+					break;
+				default:
+					debug("ERROR: Unkown operation: " + i.constructor);
+					break;
+			}
+		} catch (e) {
+			this.depth = prev_depth;
+			throw e;
 		}
 	}
 	//lithp_debug("Final value: " + value + " (" + ((value && value.type) ? value.type : typeof value) + ")");
@@ -1347,9 +1356,16 @@ Lithp.prototype._do_functioncall = function(chain, i) {
 	// Get the real values of all parameters. This may recursively invoke
 	// this function to satisfy calls.
 	var self = this;
-	var params = i.fn_params.map(function (P) {
-		return self.get_param_value(chain, P);
-	});
+	var prev_depth = this.depth;
+	var params;
+	try {
+		params = i.fn_params.map(function (P) {
+			return self.get_param_value(chain, P);
+		});
+	} catch (e) {
+		this.depth = prev_depth;
+		throw e;
+	}
 	//lithp_debug("Final params: ", inspect(params));
 	//lithp_debug("Requesting invoke for: ", i);
 	//lithp_debug("Found fndef: ", fndef);
@@ -1470,6 +1486,7 @@ Lithp.prototype.invoke_functioncall = function(chain, fndef, params) {
 	}
 	var arity = fndef.arity;
 	var val;
+	var prev_depth = this.depth;
 	this.depth++;
 	if(fndef.constructor === FunctionDefinitionNative) {
 		//lithp_debug("Calling FunctionDefinitionNative");
@@ -1487,7 +1504,12 @@ Lithp.prototype.invoke_functioncall = function(chain, fndef, params) {
 			// argument.
 			params = [params];
 		}
-		val = fndef.fn_body.apply(this, params.concat(chain));
+		try {
+			val = fndef.fn_body.apply(this, params.concat(chain));
+		} catch (e) {
+			this.depth = prev_depth;
+			throw e;
+		}
 		//lithp_debug("Value returned (native) : ", val);
 	} else if (fndef.constructor === FunctionDefinition) {
 		// Call a function. Creates a new OpChain from the given
@@ -4677,12 +4699,51 @@ files['modules/jquery-toolkit.lithp'] = require('./modules/./jquery-toolkit.lith
 files['modules/html.lithp'] = require('./modules/./html.lithp');
 files['modules/html-toolkit.lithp'] = require('./modules/./html-toolkit.lithp');
 files['webide/webide.lithp'] = require('./webide/./webide.lithp');
+files['webide/palette.lithp'] = require('./webide/./palette.lithp');
 module.exports = files;
 
 
-},{"./lithp/macro-test.lithp":16,"./lithp/macro.lithp":17,"./lithp/modules/assert.lithp":19,"./lithp/modules/bignum.lithp":21,"./lithp/modules/buffer.lithp":23,"./lithp/modules/cache.lithp":25,"./lithp/modules/class.lithp":27,"./lithp/modules/file.lithp":29,"./lithp/modules/lists.lithp":31,"./lithp/modules/match.lithp":33,"./lithp/modules/math.lithp":35,"./lithp/modules/pivot.lithp":37,"./lithp/modules/random.lithp":39,"./lithp/modules/readline.lithp":41,"./lithp/modules/repl.lithp":43,"./lithp/modules/stderr.lithp":45,"./lithp/modules/stdlib.lithp":47,"./lithp/modules/stream.lithp":49,"./lithp/modules/strings.lithp":51,"./lithp/modules/switch.lithp":53,"./lithp/modules/symbols.lithp":55,"./lithp/repl.lithp":60,"./lithp/samples/aspect.lithp":62,"./lithp/samples/atoms.lithp":64,"./lithp/samples/bf.lithp":66,"./lithp/samples/bfib.lithp":68,"./lithp/samples/calc.lithp":70,"./lithp/samples/cipher.lithp":72,"./lithp/samples/complex.lithp":74,"./lithp/samples/definitions.lithp":76,"./lithp/samples/eval.lithp":78,"./lithp/samples/ext.lithp":80,"./lithp/samples/factorial.lithp":82,"./lithp/samples/fib.lithp":84,"./lithp/samples/fndefs.lithp":86,"./lithp/samples/forloop.lithp":88,"./lithp/samples/infinite.lithp":90,"./lithp/samples/interlace-strings.lithp":92,"./lithp/samples/inverse.lithp":94,"./lithp/samples/magic.lithp":96,"./lithp/samples/map.lithp":98,"./lithp/samples/md-template.lithp":100,"./lithp/samples/module.lithp":102,"./lithp/samples/module_lib.lithp":104,"./lithp/samples/n-circles.lithp":106,"./lithp/samples/oddword.lithp":108,"./lithp/samples/one_to_ten.lithp":110,"./lithp/samples/pairable.lithp":112,"./lithp/samples/parser-bugs.lithp":114,"./lithp/samples/pillow.lithp":116,"./lithp/samples/pow.lithp":118,"./lithp/samples/progruzzle-colf.lithp":120,"./lithp/samples/readfile.lithp":122,"./lithp/samples/recurse.lithp":124,"./lithp/samples/scope.lithp":126,"./lithp/samples/shorthand.lithp":128,"./lithp/samples/simple.lithp":130,"./lithp/samples/square.lithp":132,"./lithp/samples/subchains.lithp":134,"./lithp/samples/var_args.lithp":136,"./lithp/samples/wall.lithp":138,"./lithp/samples/while.lithp":140,"./modules/./html-toolkit.lithp":4,"./modules/./html.lithp":6,"./modules/./jquery-toolkit.lithp":8,"./webide/./webide.lithp":148}],147:[function(require,module,exports){
-module.exports=[[["import","class"]]]
+},{"./lithp/macro-test.lithp":16,"./lithp/macro.lithp":17,"./lithp/modules/assert.lithp":19,"./lithp/modules/bignum.lithp":21,"./lithp/modules/buffer.lithp":23,"./lithp/modules/cache.lithp":25,"./lithp/modules/class.lithp":27,"./lithp/modules/file.lithp":29,"./lithp/modules/lists.lithp":31,"./lithp/modules/match.lithp":33,"./lithp/modules/math.lithp":35,"./lithp/modules/pivot.lithp":37,"./lithp/modules/random.lithp":39,"./lithp/modules/readline.lithp":41,"./lithp/modules/repl.lithp":43,"./lithp/modules/stderr.lithp":45,"./lithp/modules/stdlib.lithp":47,"./lithp/modules/stream.lithp":49,"./lithp/modules/strings.lithp":51,"./lithp/modules/switch.lithp":53,"./lithp/modules/symbols.lithp":55,"./lithp/repl.lithp":60,"./lithp/samples/aspect.lithp":62,"./lithp/samples/atoms.lithp":64,"./lithp/samples/bf.lithp":66,"./lithp/samples/bfib.lithp":68,"./lithp/samples/calc.lithp":70,"./lithp/samples/cipher.lithp":72,"./lithp/samples/complex.lithp":74,"./lithp/samples/definitions.lithp":76,"./lithp/samples/eval.lithp":78,"./lithp/samples/ext.lithp":80,"./lithp/samples/factorial.lithp":82,"./lithp/samples/fib.lithp":84,"./lithp/samples/fndefs.lithp":86,"./lithp/samples/forloop.lithp":88,"./lithp/samples/infinite.lithp":90,"./lithp/samples/interlace-strings.lithp":92,"./lithp/samples/inverse.lithp":94,"./lithp/samples/magic.lithp":96,"./lithp/samples/map.lithp":98,"./lithp/samples/md-template.lithp":100,"./lithp/samples/module.lithp":102,"./lithp/samples/module_lib.lithp":104,"./lithp/samples/n-circles.lithp":106,"./lithp/samples/oddword.lithp":108,"./lithp/samples/one_to_ten.lithp":110,"./lithp/samples/pairable.lithp":112,"./lithp/samples/parser-bugs.lithp":114,"./lithp/samples/pillow.lithp":116,"./lithp/samples/pow.lithp":118,"./lithp/samples/progruzzle-colf.lithp":120,"./lithp/samples/readfile.lithp":122,"./lithp/samples/recurse.lithp":124,"./lithp/samples/scope.lithp":126,"./lithp/samples/shorthand.lithp":128,"./lithp/samples/simple.lithp":130,"./lithp/samples/square.lithp":132,"./lithp/samples/subchains.lithp":134,"./lithp/samples/var_args.lithp":136,"./lithp/samples/wall.lithp":138,"./lithp/samples/while.lithp":140,"./modules/./html-toolkit.lithp":4,"./modules/./html.lithp":6,"./modules/./jquery-toolkit.lithp":8,"./webide/./palette.lithp":149,"./webide/./webide.lithp":151}],147:[function(require,module,exports){
+module.exports={
+  "name": "lithp-webide",
+  "version": "0.6.0",
+  "description": "An web-based IDE for Lithp",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/andrakis/lithp-webide.git"
+  },
+  "keywords": [
+    "lithp",
+    "ide"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "lithp-pkg": "git+https://github.com/andrakis/lithp-pkg.git",
+    "stringify": "^5.1.0"
+  },
+  "stringify": {
+    "appliesTo": {
+      "includeExtensions": [
+        ".lithp"
+      ]
+    },
+    "minify": false
+  }
+}
+
 },{}],148:[function(require,module,exports){
+module.exports=[[["import","html-toolkit"],["import","jquery-toolkit"],["def","msgEditorStateKeybindings",{"code":[[["\"msgEditorStateKeybindings\""]]],"_fndef":true,"_fnparams":[]}],["def","msgSetEditorState",{"code":[[["dict",["tuple","type","\"msgSetEditorState\""],["tuple","stateName","StateName"],["tuple","stateValue","StateValue"]]]],"_fndef":true,"_fnparams":["StateName","StateValue"]}],["export-global","msgSetEditorState/2","msgEditorStateKeybindings/0"],["jqueryOnLoad",{"code":[[["print","\"Palette: registering behaviours\""],["var","WidgetKeybinding",["jQuery","\"select#keybinding\""]],["member-call","WidgetKeybinding","bind","\"change\"",["scope",{"code":[[["var","Value",["member-call","WidgetKeybinding","getValue"]],["postParentMessage",["msgSetEditorState",["msgEditorStateKeybindings"],"Value"]]]],"_fndef":true,"_fnparams":[]}]]]],"_fndef":true,"_fnparams":[]}]]]
+},{}],149:[function(require,module,exports){
+module.exports = "% Web IDE 2 module: Palette\n%\n% Handles the editor palette sidebar.\n%\n(\n\t(import html-toolkit)\n\t(import jquery-toolkit)\n\n\t(def msgEditorStateKeybindings # :: ((\"msgEditorStateKeybindings\")))\n\t(def msgSetEditorState #StateName,StateValue :: (\n\t\t(dict\n\t\t\t(tuple type \"msgSetEditorState\")\n\t\t\t(tuple stateName StateName)\n\t\t\t(tuple stateValue StateValue)\n\t\t)\n\t))\n\t(export-global msgSetEditorState/2 msgEditorStateKeybindings/0)\n\n\t(jqueryOnLoad # :: (\n\t\t(print \"Palette: registering behaviours\")\n\t\t(var WidgetKeybinding (jQuery \"select#keybinding\"))\n\t\t(member-call WidgetKeybinding bind \"change\" (scope # :: (\n\t\t\t(var Value (member-call WidgetKeybinding getValue))\n\t\t\t(postParentMessage (msgSetEditorState (msgEditorStateKeybindings) Value))\n\t\t)))\n\t))\n)\n";
+
+},{}],150:[function(require,module,exports){
+module.exports=[[["import","class"]]]
+},{}],151:[function(require,module,exports){
 module.exports = "% Provides an interface to the WebIDE document.\n(\n\t(import class)\n%\t(import \"html-toolkit\")\n%\t(import \"jquery-toolkit\")\n%\n%\t(jqueryOnLoad (scope # :: (\n%\t\t(print \"Secondary jQuery init\")\n%\t\t(var Body (jQuery \"body\"))\n%\t\t(print \"Body: \" Body)\n%\t\t(var Anchors (jQuery \"a\" Body))\n%\t\t(print \"Anchors:\" Anchors)\n%\t\t(member-call Anchors setCss (dict (tuple color \"red\")))\n%\t\t(var B (jQuery \"<b>TEST</b>\"))\n%\t\t(member-call Body append B)\n%\t)))\n)\n";
 
 },{}]},{},[2,146]);
