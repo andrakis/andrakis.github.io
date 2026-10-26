@@ -1,1 +1,7 @@
 theme: jekyll-theme-slate
+
+# c4/ is c4's c4m.js page, from c4's make pages (libjs/pages.sh). Jekyll
+# leaves out names starting with _, so Rise of the Triad's headers are
+# named here.
+include:
+  - "_*.h"
