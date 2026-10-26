@@ -1,0 +1,4631 @@
+///
+// C4 Kernel Experiment (C4KE)
+//
+// A multitasking kernel with a primitive emergency shell.
+//
+// Invocation: make run                                   # Simple invocation (runs under c4m)
+//             make run-alt                               # Run with -a flag to c4m, fixes a timing issue
+//             make run-c4                                # Run under c4 (slow)
+//             make c4rs && ./c4m load-c4r.c -- c4ke.c4r  # Use compiled .c4r file
+//             ./c4 c4m.c load-c4r.c c4ke.c               # Run from c4 (slow) without loader
+//             ./c4 c4m.c load-c4r.c -- c4ke              # Run from c4 (slow) loader and compiled .c4r file
+//             ./c4m load-c4r.c c4ke.c                    # Run from c4m without using loader
+//             ./c4m load-c4r.c -- c4ke                   # Run from c4m using loader and compiled .c4r file
+//
+// You can specificy a number of different command-line options. Try --help for a listing.
+//
+// The kernel can be run inside itself:
+//
+//             eshell>
+//             toggle psf                                 # Enable ps listing while running below commands
+//             c4ke                                       # Run as a normal process (takes over from running kernel)
+//             c4m load-c4r.c -- c4ke                     # Run under a c4m interpreter
+//             c4 c4m.c load-c4r.c -- c4ke                # Run under a c4m interpreter within c4
+//
+// Kernel extensions (src/c4ke/extensions/, #included at the end of this file; absent when
+// c4m compiles this file from source, since c4m has no preprocessor):
+//  - c4ke_ipc.c  - InterProcess Communication by signals
+//  - c4ke_plus.c - Support for advanced features of c4plus (placeholder; no c4plus host)
+//  - c4ke_pm.c   - Protected mode, when built with -DCONFIG_ENABLE_PM=1 on a c4m with C4I_PROT
+//  - c4ke_dos.c  - The C4DOS hand-over: seeds the RAM filesystem from the DOS RAM disk
+//  - c4ke_mbox.c - Message frames: the c4bb host mailbox and per-task inboxes
+// See src/c4ke/extensions/README.md.
+//
+// See include/u0.h for the user mode interface to the kernel. u0.h is used for most programs
+// compiled to run under C4KE.
+//
+// This kernel focuses on being as simple as possible. Features such as filesystems are implemented
+// in microservices (see c4ke.vfs.c) rather than being part of the kernel. There are two main reasons:
+//  - Keep the kernel simple and small.
+//  - Keep it compatible with c4m. C4CC supports many more features than c4m, and services can take
+//    advantage of these improvements.
+//
+// Message passing: c4ke_mbox.c gives each task an inbox (OP_MSG_SEND/RECV), connects the
+// c4bb host mailbox (OP_MBOX_*), and OP_MBOX_AWAIT waits for either with a timeout;
+// include/c4ke_mbox.h is the user side.
+//
+// This program compiles but does nothing useful under GCC.
+// This GCC-compatibility is provided so that IDE's can syntax check the file.
+// The resulting file can be run, but cannot task schedule so the kernel immediately shuts down.
+//
+// Task switching is accomplished in two ways:
+//   * Co-operative: schedule(), using a custom opcode that invokes a
+//     trap handler, which saves registers and returnpc to the task, loads up the
+//     new values from the target task, and "returns" to the newly loaded task.
+//   * A cycle-based interrupt that calls an interrupt handler, which switches task automatically.
+//
+// Tasks contain, among many other things, the register values needed to return to
+// the task later. There is no virtual machine or other abstraction, each task is
+// C4 code running in C4m. By having access to the registers during a trap, we can
+// change what code is running in C4m.
+//
+// This means that tasks cannot exit by themselves, as their stack is still
+// being used at the point of call to exit() or returning from main.
+// Instead, the idle task (task_idle) cleans up tasks that have finished, as
+// their stack is no longer active.
+//
+// Programs are compiled to .c4r files, the "C4 Relocatable" executable.
+// These executables are not interpreted, merely loaded and called directly
+// from the code that loaded it, as any other C function would be.
+//
+// Keyboard input is line-based: C4 offers only libc's read, with no
+// arrow keys or other navigation. A plain blocking read stops the whole
+// kernel until Enter (eshell still reads that way). c4sh, the default
+// shell, instead opens /dev/stdin with O_NONBLOCK and sleeps between
+// polls, so other tasks keep running while it waits for a line.
+//
+// The shell can run programs in the background using the & symbol, just like
+// linux. Otherwise, a program will run in the foreground until it is done.
+// When backgrounding a task in this way, control will switch back to the shell
+// and as above this will pause the entire kernel. Hitting enter will call
+// schedule() and allow other tasks to run, until they call schedule() or are
+// pre-emptively interrupted by the cycle interrupt.
+//
+//
+// Job control:
+//  - The command 'fg' returns focus to the last started command, if possible.
+//    TODO: You cannot currently use 'fg x' to foreground job x.
+//  - The command 'kill x' sends a SIGTERM signal to the given process id.
+//
+// Shell notes:
+// Any .c4r file can be run, and you do not need to specify the .c4r part of the
+// file, it will be appended automatically.
+// Example:
+//   c4ke eshell>
+//   c4 -s c4m.c &
+//
+// Note that buffers cannot be flushed, so the shell must present the input
+// prompt on a new line.
+//
+// The kernel shuts down once the init process exits.
+//
+// TODO:
+// - Implement stack trace
+//   -> can simulate LEV then check if TLEV, simulate it if necessary
+//   -> can use tasks c4r structure, then fall back to loaded modules (TODO) or
+//      using the kernels (TODO)
+// Not doing:
+// - Load balance: use a percentage of the cycle interrupt interval based on number
+//   of used process slots.
+// Sometimes still an issue:
+// - Find cause of random segfault. Sometimes the kernel will crash, especially
+//   under high load (eg, 100 processes running.)
+//   - is c4m trap overwriting currently pushed arguments? it must be, as top is causing a crash
+//     when interrupted by the cycle interrupt.
+//   - TRAP_SEGV and TRAP_OPV were added to try to narrow down the cause of the crash.
+//     -> c4m has specific checks that slow down execution to provide these additional traps.
+//     -> Sometimes the segfault happens outside of these checks and the kernel crashes.
+//   - OpenRISC 1000: segfaulting due to bad argc value (several million!)
+//   - The best the kernel can do right now is terminate the faulting process, but
+//     stack traces would help narrow down where the issue is.
+//
+// 2025 / 04 / 27 - Implemented basic protected mode support.
+// 2024 / 10 / 04 - Implemented kernel extensions.
+// 2024 / 09 / 09 - Fixed kernel idle sleep time, uses correct value. Also fixed
+//                  c4m to actually use usleep().
+// 2024 / 07 / 07 - Removed ethereal mode, kernel now waits on init process pid.
+// 2024 / 07 / 06 - Reworked kernel to use init process, shutdown once complete.
+// 2024 / 07 / 05 - Added support for waiting on a pid.
+// 2024 / 07 / 04 - Reformat .c4r to place symbols at very end; don't load symbols
+//                  by default.
+// 2024 / 04 / 01 - Added signal handling.
+// 2023 / 11 / 20 - Added critical path functions to avoid interrupts when
+//                  updating kernel structures.
+// 2023 / 11 / 19 - Added sleep, STATE_WAITING for sleep.
+// 2023 / 11 / 18 - Added timekeeping via /proc/uptime or proper time calls.
+// 2023 / 11 / 12 - Added cycle timekeeping.
+
+
+// #define NO_INLINE 0
+
+#ifndef C4KE
+#define C4KE 1
+#define C4_SIGNALS 1
+#include "c4.h"
+#include "c4m.h"
+// The c4bb mailbox helpers (guest side): inert on every host without the
+// C4I_MBOX bit, which is what mb_init checks first. Here, above the scheduler,
+// because extensions/c4ke_mbox.c needs them and c4 has no prototypes.
+#include "c4bb_mbox.h"
+// The two board capabilities this kernel asks about, DEFINED HERE and
+// not reached through include/c4bb_info.h.
+//
+// c4ke.c is compiled FROM SOURCE by c4m at run time -- that is the
+// whole of innerbench's default mode, `c4m load-c4r.c src/c4ke/c4ke.c`
+// -- and c4m has no preprocessor. It skips '#' lines, so an #include
+// here brings in nothing and every function behind it is undefined. The
+// symptom is not a missing symbol either: c4m says
+//
+//   3057: bad function call (0)
+//
+// and then prints the rest of the file trying to show the line, which
+// buries the message in a screenful of its own source. The header is
+// still right for images built through a preprocessor; it is just not
+// reachable from a file that has to compile without one.
+//
+// Both are cheap enough to keep here in full. Announced, never probed
+// (include/c4bb_info.h has the reasoning): 0x1a4/0x1a8 are c4bb device
+// registers and ORDINARY MEMORY everywhere else, so nothing may touch
+// them unless __c4_info() says the port is fitted.
+enum { BB_I_WHOWROTE = 0x1000 };
+enum { BB_WW_QUERY = 420, BB_WW_ANSWER = 424 };   // 0x1a4, 0x1a8
+
+int bb_has_whowrote () { return __c4_info() & BB_I_WHOWROTE; }
+
+// Which PC last stored to `addr`, or 0 for "nobody yet"/not fitted.
+// CHECK bb_has_whowrote() FIRST.
+int bb_whowrote (int addr) {
+	int *q, *ans;
+	q = (int *)BB_WW_QUERY;
+	ans = (int *)BB_WW_ANSWER;
+	*q = addr;
+	return *ans;
+}
+#define NO_LOADC4R_MAIN
+#include "./load-c4r.c"
+
+// C4 lacks do while, change it to a direct if statement
+#ifdef __c4cc__
+#define DO_WHILE_0(body) if (1) body
+#else
+#define DO_WHILE_0(body) do body while(0)
+#endif
+
+///
+// Kernel configuration
+///
+/// Feel free to play around with the values in this enum
+enum {                         // Main configuration section
+	KERN_TASK_COUNT = 192,     // Fixed count until updated to use linked list
+	// How much stack memory to allocate to tasks.
+	//
+	// This was 0xFFFF -- 64 KB, 16k words on a 32-bit machine -- and a
+	// recursive-descent compiler does not fit in it. c4sc walking the
+	// AST of src/c4ix/sched.c ran off the bottom and kept pushing,
+	// straight through the heap blocks below, and the failure surfaced
+	// thousands of allocations later as a free() on a block header that
+	// had been eaten. See docs/task-memory.md; the guard below is there
+	// so that never happens quietly again.
+	TASK_STACK_SIZE = 0x40000,
+	// Poisoned words below every task stack. A frame is entered with a
+	// single ENT that moves sp by the whole local count at once, so a
+	// one-word canary can be jumped clean over; this is sized to be
+	// wider than any plausible frame.
+	TASK_STACK_GUARD = 256,           // bytes
+	TASK_STACK_POISON = 0x57415348,   // "WASH" -- what is left when the tide goes out
+	SIGNAL_MAX = 64,           // How many signals are supported
+	// Minimum acceptable cycles between cycle-based interrupt.
+	// Values below this may crash the kernel.
+	// 900 seems to crash fairly consistently, 901 only sometimes.
+	KERNEL_CYCLES_MIN = 10000,
+	// If the cycles count between cycle-based interrupts is less
+	// than this figure, consider the kernel slow and enable some
+	// workarounds.
+	KERNEL_SLOW_THRESHOLD = 100000,
+	// Maximum pre-emptive interrupts per second to aim for.
+	IH_MAX_CYCLES_PER_SECOND = 10,
+	KERNEL_EXTENSIONS_MAX = 32,
+	// Give tasks 10 seconds to comply with SIGTERM during shutdown
+	KERNEL_FINISH_WAIT_TIME = 10000,
+	// How many items the kernel/io thread services per cycle,
+	// lower values result in less io work done per loop.
+	// Too high and the system will become sluggish.
+	KERNEL_IO_CAP = 2,
+	// When printing stack values, these two apply:
+	KPRINT_STACK_DEPTH = 8,
+	KPRINT_STACK_WIDTH = 8,
+	// Niceness value for tasks that should run often
+	NICE_OFTEN = 1,
+	// Niceness value for tasks that should run normally
+	NICE_NORMAL = 9,
+};
+
+///
+// Kernel definitions
+///
+/// These shouldn't need to be changed.
+
+/// Kernel verbosity
+enum {
+	VERB_NONE = 0,             // Be as quiet as possible
+	VERB_MIN  = 10,            // Minimal information
+	VERB_MED  = 50,            // Medial information
+	VERB_MAX  = 100,           // Maximal information
+	VERB_DEFAULT = 50
+};
+
+// These settings control how long we measure performance for during boot.
+enum { KERNEL_MEASURE_QUICK = 200, KERNEL_MEASURE_SLOW = 1000 };
+enum { KERNEL_TFACTOR_QUICK =   5, KERNEL_TFACTOR_SLOW =    1 };
+enum { KERNEL_IDLE_SLEEP_TIME = 10000 }; // used with usleep, so in microseconds
+
+// Details for managing the opcode to function vector
+enum { CO_BASE = 128, CO_MAX = 128 };
+
+// start_errno values
+enum {
+	START_NONE,      // No error, success
+	START_NOFREE,    // No free task slot
+	START_NOSTACK,   // Unable to allocate stack
+	START_NOSIG,     // Unable to allocate signal handlers
+	START_ARGV,      // Failed to allocate argv
+};
+
+// At some stage this will be a symbol available under c4m
+// Trap codes
+enum {
+	// Illegal opcode, allows custom opcodes to be implemented using
+	// install_trap_handler()
+	TRAP_ILLOP,
+	// Hard IRQ generated by c4m under some condition
+	TRAP_HARD_IRQ,
+	// Soft IRQ generated by user code
+	TRAP_SOFT_IRQ,
+	// A POSIX signal was received
+	TRAP_SIGNAL,
+	// Invalid memory read or write
+	TRAP_SEGV,
+	// Invalid opcode value (specifically with OPCD)
+	TRAP_OPV,
+	// SYSCALL in protected mode
+	TRAP_PM_VIOLATION,
+	// Debug trap, used by DBG opcode
+	TRAP_DEBUG,
+	// A load or store outside every region the running context owns.
+	// Raised only by c4mpg (docs/c4mpg-design.md); listed here so the
+	// number is reserved across the whole family and the two enums stay
+	// in step. Plain c4m never raises it.
+	TRAP_MPG_VIOLATION,
+};
+
+// Instruction mode  : unprotected (default) and protected.
+// o Unprotected mode: SYSCALLs operate as usual
+// o Protected mode  : SYSCALLs generate a trap, exiting protected mode
+enum { MODE_UNPROTECTED, MODE_PROTECTED };
+
+// Configure codes, for use with CSYS/__c4_configure
+enum { C4KE_CONF_CYCLE_INTERRUPT_INTERVAL, C4KE_CONF_CYCLE_INTERRUPT_HANDLER };
+
+// The programmable interrupt timer, when there is one.
+//
+// c4bb puts a real timer at a device register (include/c4bb.h) and
+// announces it in __c4_info(). It raises exactly the trap the cycle
+// interrupt raises, through exactly the handler the cycle interrupt
+// uses, so the whole of C4KE's scheduling works unchanged -- the only
+// difference is what decides WHEN. The cycle interrupt fires after so
+// many instructions, which means the kernel has to measure how fast
+// this host runs and then guess a number; the timer fires after so
+// many real milliseconds, which is the thing the kernel actually
+// wanted to say.
+//
+// These are addresses, and only on a machine that has the device.
+// Nothing here is touched unless kernel_pit_ms is set, and that is
+// only set after __c4_info() says the register window is real -- under
+// native c4m 0x1a0 is ordinary memory and a store there is a wild
+// write, not a harmless no-op. See docs/c4bb-storage.md M14.
+enum {
+	C4KE_PIT_REG  = 0x1a0,  // r/w: tick every N real ms, 0 masks it
+	C4KE_PIT_INFO = 0x800,  // __c4_info(): this machine has the clock
+	C4KE_PIT_MS   = 10      // the scheduling tick we ask for, real ms
+};
+
+static char *VERSION() { return "0.66"; }
+
+// Task state, keep up to date in u0.c
+enum {
+	STATE_UNLOADED = 0x0,
+	STATE_LOADED   = 0x1,
+	STATE_RUNNING  = 0x2,
+	STATE_WAITING  = 0x4,
+	STATE_TRAPPED  = 0x8,  // TODO: Unused
+	STATE_ZOMBIE   = 0x20, // Waiting to die
+	STATE_NOTRUN   = 0x30
+};
+
+// Task privileges
+enum {
+	PRIV_NONE,        // TODO: Useful?
+	PRIV_USER,        // Usermode acess
+	PRIV_KERNEL       // Kernel mode access
+};
+
+// Wait states
+enum {
+	WSTATE_NONE,     // Not waiting
+	WSTATE_TIME,     // Waiting for a time target. WAITARG is target timestamp
+	WSTATE_PID,      // Waiting for a process to terminate. WAITARG is the pid.
+	WSTATE_SYSCALL,  // Waiting for a system call. WAITARG is syscall status (0 == not done)
+	WSTATE_MESSAGE,  // Waiting for a message. WAITARG is the "give up" timestamp
+};
+
+// Task structure
+enum {
+	// Since it's the first element, state can be checked with one
+	// less array lookup if it is at the start of the array.
+	TASK_STATE,       // int, see STATE_
+	TASK_ID,          // int, task id
+	TASK_NICE,        // int, priority counter
+	TASK_NICE_BASE,   // int, priority base level
+	TASK_PARENT,      // int, parent task id
+	TASK_WAITSTATE,   // int, see WSTATE_
+	TASK_WAITARG,     // int, depends on WSTATE_
+	TASK_BASE,        // int *, Task BP/SP base address
+	TASK_CODE,        // int *, Code address, not used by builtin tasks
+	TASK_DATA,        // char *, Data address, not used by builtin tasks
+	TASK_REG_A,       // int, saved register A value
+	TASK_REG_BP,      // int *, saved register BP value
+	TASK_REG_SP,      // int *, saved register SP value
+	TASK_REG_PC,      // int *, saved register PC value
+	TASK_ENTRY,       // int *, initial PC register value
+	TASK_PRIVS,       // int, see PRIV_
+	TASK_NAME,        // char *, copied from source and freed at clean
+	TASK_NAMELEN,     // int, length of name
+	TASK_EXIT_CODE,   // int, exit code for task
+	TASK_ARGC,        // int, arg count
+	TASK_ARGV,        // char **, pointer to allocated argv
+	TASK_ARGV_DATA,   // char **, TASK_ARGV points to here
+	TASK_CYCLES,      // int, how many cycles task has run
+	TASK_TIMEMS,      // int, time running in milliseconds
+	TASK_TRAPS,       // int, how many traps the task has caused
+	TASK_C4R,         // int *, ptr to C4R structure
+	TASK_SIGHANDLER,  // int *, TODO: replacement for SIGHANDLERS
+	TASK_SIGHANDLERS, // int *, ptr to SIGH_ structure
+	TASK_SIGPENDING,  // int, number of pending signals total
+	TASK_MBOX,        // int *, see MBOX_
+	TASK_MBOX_SZ,     // int,
+	TASK_MBOX_COUNT,  // int,
+	TASK_EXCLUSIVE,   // int,
+	TASK_MEM_ALLOC,   // int, amount of memory used by malloc() (doesn't count free()'s)
+	TASK_EXTDATA,     // int *, task extension data
+	TASK_DBGHANDLER,  // int *, pointer to debug handler
+	TASK_DBGSTACK,    // int *, stack size for debug handler
+	TASK_STACK_LOW,   // int *, lowest SP ever observed for this task
+	TASK_STACK_BROKEN,// int, non-zero once the stack guard has been reported
+	TASK_CYCLES_HI,   // int, billions of cycles; see kernel_add_cycles
+	TASK_MEM_HEAD,    // int *, head of this task's tracked allocation list
+	TASK_LOADING,     // int, set until the task enters the program's main
+	TASK__Sz          // task structure size
+};
+
+// Tracked task allocations.
+//
+// A task's own malloc()s are invisible to the kernel unless protected
+// mode is on, and even then only if somebody records them -- which is
+// what extensions/c4ke_pm.c does. Each tracked block carries four words
+// in front of what the task is given: its size, its place in the owning
+// task's doubly-linked list, and a magic that is a sanity marker rather
+// than a test (whether a pointer is ours is answered by the ktm_ set in
+// kernel_task_malloc, which cannot be fooled and does not read memory
+// that may not be ours). A program that frees everything it allocated
+// leaves the chain empty; the point is that it does not have to.
+enum {
+	TMEM_MAGIC,
+	TMEM_NEXT,
+	TMEM_PREV,
+	TMEM_SIZE,
+	TMEM__Sz
+};
+enum { TMEM_MAGIC_VALUE = 0x4D454D30 };   // "MEM0"
+
+// Kernel task information, the superstructure for kernel task information
+// returned via kern_tasks_export() in u0.c
+enum {
+	KTI_COUNT,
+	KTI_USED,
+	KTI_LIST,  // see KTE_*
+	KTI__Sz
+};
+
+// Kernel task element - keep up to date with u0.c
+enum {
+	// First element, so can be referenced as *kte instead of kte[KTE_TASK_STATE]
+	KTE_TASK_STATE,  // int
+	KTE_TASK_WAITSTATE, // int
+	KTE_TASK_ID,     // int
+	KTE_TASK_PARENT, // int
+	KTE_TASK_NAME,   // char *
+	KTE_TASK_NAMELEN,// int
+	KTE_TASK_PRIORITY, // int
+	KTE_TASK_PRIVS,  // int, see PRIV_*
+	KTE_TASK_NICE,   // int
+	KTE_TASK_CYCLES, // int
+	KTE_TASK_CYCLES_HI, // int, billions
+	KTE_TASK_TIMEMS, // int
+	KTE_TASK_TRAPS,  // int
+	KTE_TASK_STACK,  // int
+	KTE_TASK_ALLOC,  // int
+	KTE__Sz
+};
+
+// Custom opcodes
+// TODO: Move to a syscall interface instead of string based opcode lookup.
+//       All of these are checked via memcmp in request_symbol()
+// TODO: These could be global ints instead, and offset when detecting we're running
+//       within C4KE already. That way multiple kernels could run at once. At the moment,
+//       each child kernel disables the parent kernel.
+enum {
+	// Request a symbols opcode
+	// (char *symbol) -> integer value of requested symbol
+	OP_REQUEST_SYMBOL = 128,
+	// Request system flags
+	// () -> get system flags
+	OP_C4INFO,
+	// Switch task manually
+	// () -> success (1) or no task to switch to (0)
+	OP_SCHEDULE,
+	// Wait for a message or timeout
+	// (int timeout) -> 0 TODO: only timeout is implemented, messages not
+	OP_AWAIT_MESSAGE,
+	// Wait for a process to exit
+	// (int pid)     -> pid exit code
+	OP_AWAIT_PID,
+	// Finish a task - not used by user code, put directly onto the stack
+	// of a task so that returning from main calls it to cleanly finish.
+	OP_TASK_FINISH,
+	// Exit a task - similar to OP_TASK_FINISH, but called by the user.
+	// (int exit_code) -> does not return
+	OP_TASK_EXIT,
+	OP_TASK_EXEC,
+	// Indicate which task is currently focused
+	// (int pid)
+	OP_TASK_FOCUS,
+	// Get the number of cycles the task has run
+	OP_TASK_CYCLES,
+	// TODO: Not implemented, currently the only way to shutdown is for
+	//       the init process to exit.
+	// Request kernel shutdown
+	OP_SHUTDOWN,
+	// Request a halt.
+	// TODO: does nothing.
+	OP_HALT,
+	// Request a timestamp, return value in milliseconds.
+	// TODO: this is much slower than just using __time(), not really useful
+	OP_TIME,
+	// Test opcode that returns the value of the BP register
+	OP_PEEK_BP,
+	// Test opcode that returns the value of the SP register
+	OP_PEEK_SP,
+	// TODO: not used at all
+	//OP_KERN_TASK_START_BUILTIN,
+	// TODO: replaced by u0 functions that work better
+	//OP_KERN_PRINT_TASK_STATE,
+	//OP_KERN_GETLEN_TASK_STATE,
+	// Get the current task ID
+	OP_KERN_TASK_CURRENT_ID,
+	// Check if a task is running
+	// (int task_id) -> 1 if running, 0 if not
+	OP_KERN_TASK_RUNNING,
+	// Request number of allocated tasks
+	OP_KERN_TASK_COUNT,
+	// Request maximum number of tasks
+	OP_KERN_TASKS_MAX,
+	// Request a task listing. Returns a KTI_* struct.
+	// () -> int *
+	OP_KERN_TASKS_EXPORT,
+	// Update a task listing with the latest data from the kernel.
+	// (int *kti) -> void
+	OP_KERN_TASKS_EXPORT_UPDATE,
+	// Release a task listing and all data
+	OP_KERN_TASKS_EXPORT_FREE,
+	// Get the number of running tasks
+    OP_KERN_TASKS_RUNNING,
+	// Debug command: print a stacktrace of the current program
+	OP_DEBUG_PRINTSTACK,
+	// Debug command: print a debug kernel state
+	OP_DEBUG_KERNELSTATE,
+	// Start a .c4r file. Uses task_loadc4r.
+	// int __user_start_c4r(int argc, char **argv);
+	// TODO: Move to a system request interface. This is temporary.
+	//       Probably not very secure, since kernel will copy the given argv
+	//       based on argc.
+	OP_USER_START_C4R,
+	// Sleep the specified number of milliseconds
+	// int sleep(int ms)
+	OP_USER_SLEEP,
+	// Get the process id of the current task
+	OP_USER_PID,
+	// Get the parent process id of the current task
+	OP_USER_PARENT,
+	// Setup a signal handler
+	OP_USER_SIGNAL,
+	// Send a signal to a process
+	OP_USER_KILL,
+	// Update the name of the current task. Badly named?
+	OP_CURRENTTASK_UPDATE_NAME,
+	// Start a .c4r file with debugging attachment. Uses task_loadc4r_debug.
+	// Utilize the below functions.
+	// int __user_start_c4r_debug(int argc, char **argv);
+	OP_USER_START_C4R_DEBUG,
+	// Set the debug handler for a process. It is called when the requested
+	// debug process traps for an instruction.
+	// int __user_debug_handler(int (*handler)(int *debug_structure))
+	// see DBGS_*
+	OP_USER_DEBUG_HANDLER,
+	// Debugging functions to disable/enable the cycle based interrupt
+	OP_KERN_REQUEST_EXCLUSIVE,
+	OP_KERN_RELEASE_EXCLUSIVE,
+	// The kernel RAM filesystem (see the ramfs section):
+	// int   vfs_put (char *name, char *buf, int len)  copies buf in; 0 = ok
+	// char *vfs_get (char *name, int *len)            kernel-owned buffer
+	// int   vfs_unlink (char *name)
+	// int   vfs_count ()
+	// char *vfs_name (int i)
+	OP_VFS_PUT,
+	OP_VFS_GET,
+	OP_VFS_UNLINK,
+	OP_VFS_COUNT,
+	OP_VFS_NAME,
+	OP_EXTENSIONS_START,       // Not used directly, kernel extensions will start from this
+	                           // number when registering opcodes.
+};
+
+// Extensions register their opcode names here; request_symbol asks this
+// table first, so u0's __c4_opcode("OP_X", OP_REQUEST_SYMBOL) reaches them.
+//
+// Pointers allocated on first use, NOT arrays: c4ke.c is compiled from
+// source by c4m at run time (innerbench, the C4DOS ladder), and c4's
+// compiler has no global arrays -- "static char *x[32];" is "bad global
+// declaration" there, which is how this table once broke innerbench.
+enum { KEXT_SYMBOLS_MAX = 32 };
+static char **kext_symbol_names;
+static int   *kext_symbol_ops;
+static int    kext_symbol_count;
+static int kext_register_symbol (char *name, int opcode) {
+	if (kext_symbol_count >= KEXT_SYMBOLS_MAX) return 0;
+	if (!kext_symbol_names) {
+		if (!(kext_symbol_names = (char **)malloc(KEXT_SYMBOLS_MAX * sizeof(char *)))) return 0;
+		if (!(kext_symbol_ops = (int *)malloc(KEXT_SYMBOLS_MAX * sizeof(int)))) return 0;
+	}
+	kext_symbol_names[kext_symbol_count] = name;
+	kext_symbol_ops[kext_symbol_count] = opcode;
+	++kext_symbol_count;
+	return 1;
+}
+static int kext_symbol_lookup (char *symbol) {
+	int i; char *a, *b;
+	i = 0;
+	while (i < kext_symbol_count) {
+		a = symbol; b = kext_symbol_names[i];
+		while (*a && *a == *b) { ++a; ++b; }
+		if (!*a && !*b) return kext_symbol_ops[i];
+		++i;
+	}
+	return 0;
+}
+
+static int request_symbol (char *symbol) {
+	int op;
+	if ((op = kext_symbol_lookup(symbol))) return op;
+	if (!memcmp(symbol, "OP_HALT", 7)) return OP_HALT;
+	if (!memcmp(symbol, "OP_TIME", 7)) return OP_TIME;
+	if (!memcmp(symbol, "OP_C4INFO", 9)) return OP_C4INFO;
+	if (!memcmp(symbol, "OP_PEEK_BP", 10)) return OP_PEEK_BP;
+	if (!memcmp(symbol, "OP_PEEK_SP", 10)) return OP_PEEK_SP;
+	if (!memcmp(symbol, "OP_SCHEDULE", 11)) return OP_SCHEDULE;
+	if (!memcmp(symbol, "OP_USER_PID", 11)) return OP_USER_PID;
+	if (!memcmp(symbol, "OP_USER_KILL", 12)) return OP_USER_KILL;
+	if (!memcmp(symbol, "OP_AWAIT_PID", 12)) return OP_AWAIT_PID;
+	if (!memcmp(symbol, "OP_TASK_EXIT", 12)) return OP_TASK_EXIT;
+	if (!memcmp(symbol, "OP_TASK_EXEC", 12)) return OP_TASK_EXEC;
+	if (!memcmp(symbol, "OP_TASK_FOCUS", 13)) return OP_TASK_FOCUS;
+	if (!memcmp(symbol, "OP_USER_SLEEP", 13)) return OP_USER_SLEEP;
+	if (!memcmp(symbol, "OP_TASK_CYCLES", 14)) return OP_TASK_CYCLES;
+	if (!memcmp(symbol, "OP_USER_SIGNAL", 14)) return OP_USER_SIGNAL;
+	if (!memcmp(symbol, "OP_TASK_FINISH", 14)) return OP_TASK_FINISH;
+	if (!memcmp(symbol, "OP_USER_PARENT", 14)) return OP_USER_PARENT;
+	if (!memcmp(symbol, "OP_AWAIT_MESSAGE", 16)) return OP_AWAIT_MESSAGE;
+	if (!memcmp(symbol, "OP_REQUEST_SYMBOL", 17)) return OP_REQUEST_SYMBOL;
+	if (!memcmp(symbol, "OP_VFS_PUT", 10)) return OP_VFS_PUT;
+	if (!memcmp(symbol, "OP_VFS_GET", 10)) return OP_VFS_GET;
+	if (!memcmp(symbol, "OP_VFS_UNLINK", 13)) return OP_VFS_UNLINK;
+	if (!memcmp(symbol, "OP_VFS_COUNT", 12)) return OP_VFS_COUNT;
+	if (!memcmp(symbol, "OP_VFS_NAME", 11)) return OP_VFS_NAME;
+	if (!memcmp(symbol, "OP_USER_START_C4R", 17)) return OP_USER_START_C4R;
+	if (!memcmp(symbol, "OP_KERN_TASKS_MAX", 17)) return OP_KERN_TASKS_MAX;
+	if (!memcmp(symbol, "OP_KERN_TASK_COUNT", 18)) return OP_KERN_TASK_COUNT;
+	if (!memcmp(symbol, "OP_DEBUG_PRINTSTACK", 19)) return OP_DEBUG_PRINTSTACK;
+	if (!memcmp(symbol, "OP_DEBUG_KERNELSTATE", 20)) return OP_DEBUG_KERNELSTATE;
+	if (!memcmp(symbol, "OP_KERN_TASK_RUNNING", 20)) return OP_KERN_TASK_RUNNING;
+	if (!memcmp(symbol, "OP_KERN_TASKS_RUNNING", 21)) return OP_KERN_TASKS_RUNNING;
+	if (!memcmp(symbol, "OP_KERN_TASK_CURRENT_ID", 23)) return OP_KERN_TASK_CURRENT_ID;
+	//if (!memcmp(symbol, "OP_KERN_PRINT_TASK_STATE", 24)) return OP_KERN_PRINT_TASK_STATE;
+	if (!memcmp(symbol, "OP_KERN_REQUEST_EXCLUSIVE", 25)) return OP_KERN_REQUEST_EXCLUSIVE;
+	if (!memcmp(symbol, "OP_KERN_RELEASE_EXCLUSIVE", 25)) return OP_KERN_RELEASE_EXCLUSIVE;
+	//if (!memcmp(symbol, "OP_KERN_GETLEN_TASK_STATE", 25)) return OP_KERN_GETLEN_TASK_STATE;
+	if (!memcmp(symbol, "OP_KERN_TASKS_EXPORT_FREE", 25)) return OP_KERN_TASKS_EXPORT_FREE;
+	if (!memcmp(symbol, "OP_KERN_TASKS_EXPORT_UPDATE", 27)) return OP_KERN_TASKS_EXPORT_UPDATE;
+	if (!memcmp(symbol, "OP_KERN_TASKS_EXPORT", 20)) return OP_KERN_TASKS_EXPORT;
+	//if (!memcmp(symbol, "OP_KERN_TASK_START_BUILTIN", 26)) return OP_KERN_TASK_START_BUILTIN;
+	if (!memcmp(symbol, "OP_CURRENTTASK_UPDATE_NAME", 26)) return OP_CURRENTTASK_UPDATE_NAME;
+
+	printf("c4ke: symbol '%s' not found\n", symbol);
+
+	return 0;
+}
+
+// C4INFO state - must match that in c4m.c
+// TODO: defined in load_c4r.c too
+//enum {
+//	C4I_NONE = 0x0,  // No C4 info
+//	C4I_C4   = 0x1,  // Ultimately running under C4
+//	C4I_C4M  = 0x2,  // Running under c4m (directly or C4)
+//	C4I_C4P  = 0x4,  // Running under c4plus
+//	C4I_HRT  = 0x10, // High resolution timer
+//	C4I_SIG  = 0x20, // Signals supported
+//	C4I_FLT  = 0x40, // Floating point support
+//	C4I_PROT = 0x80, // Protected mode support
+//	C4I_C4KE = 0x200, // C4KE is running
+//};
+static int c4_info;
+static void print_c4_info () {
+	printf("%dbit ", sizeof(int) * 8);
+	if (c4_info == C4I_NONE) printf("(unknown)");
+	if (c4_info & C4I_C4) printf("C4+");
+	if (c4_info & C4I_C4M) printf("C4M");
+	if (c4_info & C4I_C4P) printf("C4Plus");
+	if (c4_info & C4I_HRT) printf("+HighResTimer");
+	if (c4_info & C4I_SIG) printf("+Signals");
+	if (c4_info & C4I_FLT) printf("+Floating point");
+	if (c4_info & C4I_PROT)printf("+Protected mode");
+	if (c4_info & C4I_C4KE) printf(" under C4KE");
+}
+
+
+///
+/// Signals
+///
+// Signal handlers structure
+enum {
+	SIGH_PENDING,      //
+	SIGH_BLOCKED,
+	SIGH_ADDRESS,      // C4 code address of handler
+	SIGH__Sz
+};
+
+//enum {
+//    SIGHUP = 1, SIGINT, SIGQUIT, SIGILL, SIGTRAP, SIGABRT,
+//    // Default caught but can be overridden
+//    SIGTERM,
+//    // Last chance for task to quit nicely
+//    SIGKILL,
+//	SIGSEGV = 11
+//};
+
+// Stop regular compilers from caring about these signals
+#undef SIGHUP
+#undef SIGINT
+#undef SIGQUIT
+#undef SIGILL
+#undef SIGTRAP
+#undef SIGABRT
+#undef SIGBUS
+#undef SIGFPE
+#undef SIGKILL
+#undef SIGUSR1
+#undef SIGSEGV
+#undef SIGUSR2
+#undef SIGPIPE
+#undef SIGALRM
+#undef SIGTERM
+#undef SIGSTKFLT
+#undef SIGCHLD
+#undef SIGCONT
+#undef SIGSTOP
+#undef SIGTSTP
+#undef SIGTTIN
+#undef SIGTTOU
+#undef SIGURG
+#undef SIGXCPU
+#undef SIGXFSZ
+#undef SIGVTALRM
+#undef SIGPROF
+#undef SIGWINCH
+#undef SIGIO
+#undef SIGPWR
+#undef SIGSYS
+#undef SIGRTMIN
+#undef SIGRTMAX
+enum {
+  SIGHUP = 1  ,SIGINT      ,SIGQUIT     ,SIGILL      ,SIGTRAP,
+  SIGABRT     ,SIGBUS      ,SIGFPE      ,SIGKILL     ,SIGUSR1,
+  SIGSEGV     ,SIGUSR2     ,SIGPIPE     ,SIGALRM     ,SIGTERM,
+  SIGSTKFLT   ,SIGCHLD     ,SIGCONT     ,SIGSTOP     ,SIGTSTP,
+  SIGTTIN     ,SIGTTOU     ,SIGURG      ,SIGXCPU     ,SIGXFSZ,
+  SIGVTALRM   ,SIGPROF     ,SIGWINCH    ,SIGIO       ,SIGPWR,
+  SIGSYS      ,
+  SIGRTMIN = 32, // ...
+  SIGRTMAX = 63, SIGMAX = 64 // Should match SIGNAL_MAX
+};
+
+// Kernel extensions
+enum {
+	KEXT_STATE,        // int, See KXS_*
+	KEXT_NAME,         // char *
+	KEXT_INIT,         // int *, ptr to init function if any
+	KEXT_START,        // int *, ptr to start (called just before tasks execute) if any
+	KEXT_SHUTDOWN,     // int *, ptr to shutdown function if any
+	KEXT__Sz
+};
+
+enum {
+	KEVT_TASK_CREATE,  // Fires when a task is created. kernel_task_current will be valid.
+	KEVT_TASK_FINISH,  // Fires when a task is finished
+	KEVT_TASK_CLEAN,   // Fires when a task is about to be cleaned.
+};
+
+// KEXT_STATE values
+enum {
+	KXS_NONE,             // Not in use
+	KXS_REGISTERED = 0x1, // Present and registered
+	KXS_ERROR = 0x2       // Error during init
+};
+
+// Kernel extension callback function return values
+enum {
+	KXERR_NONE = 0,    // No error
+	KXERR_FAIL = 1,    // Error of some sort (see kernel_ext_errno)
+};
+
+///
+// Kernel main data
+///
+static int *kernel_tasks;            // struct TASK*
+static int *kernel_task_current;     // struct TASK*
+static int *kernel_task_idle;        // struct TASK*
+static int  kernel_task_id_counter;
+static int  kernel_max_slot;
+static int  kernel_task_extdata_size;// For TASK_EXTDATA member of TASK
+static int *kernel_task_focus; // Interactive focus, hacky
+static int  kernel_verbosity;
+static int  kernel_loadc4r_mode; // defaults to not loading symbols unless -g is given
+static int  kernel_disable_c4_optimizations; // Don't enable C4-specific optimizations
+static int  kernel_shutdown;
+static char*kernel_init,
+           *kernel_default_init;
+static int  kernel_init_argc,
+           *kernel_init_task;
+static char **kernel_init_argv;
+static int  kernel_running;
+static int *kernel_c4r;
+static int  kernel_start_time;
+static int  kernel_schedule_time;
+static int  kernel_shutdown_time;
+static int *kernel_extensions, kernel_ext_count, kernel_ext_errno;
+static int  kernel_ext_initialized;
+static int *kernel_syscall_handler, kernel_syscall_handler_stack;
+static int  kernel_mem_alloc;
+static int  kernel_stack_overruns;
+// Timer-interrupt re-entrancy and starvation (docs/next-session.md).
+//
+// RE-ENTRANCY: ih_cycle entered while a previous ih_cycle has not
+// finished. It masks the PIT on the way in and re-arms on the way out,
+// so this should be impossible -- except in the window between
+// critical_path_end() and the handler's TLEV, which is exactly where an
+// already-overdue timer would land.
+//
+// STARVATION: the next tick arriving so soon after the last re-arm that
+// the task switched to executed almost nothing. Not a bug in itself --
+// a saturated timer is allowed to saturate -- but it is the livelock,
+// and it is measurable where re-entrancy is not.
+static int  kernel_ih_depth;      // >0 while inside ih_cycle
+static int  kernel_ih_reentry;    // entered while already inside
+static int  kernel_ih_lastarm;    // cycle count at the previous re-arm
+static int  kernel_ih_starved;    // ticks that left the task ~no cycles
+static int  kernel_ih_minrun;     // fewest cycles a resumed task got
+static int  kernel_ih_ticks;      // ticks seen at all, so a zero can be read
+enum { IH_STARVED_CYCLES = 2000 };
+static int  kernel_pm_support;
+static int schedule_task_mask;
+static int  kernel_is_slow;
+
+#if CONFIG_KEVENTS
+// Event handlers
+static int *kernel_event_handler; // For now, a single handler that takes a KEVT_*
+// Make gcc not complain about how we call int*'s
+#ifndef C4CC
+#define kernel_event_handler(x,y)   ((void (*)(int,int*))kernel_event_handler)(x,y)
+#endif /* ifndef C4CC */
+#endif /* if CONFIG_KEVENTS */
+
+// Testing modes
+static int enable_measurement; // perform speed measurement at startup
+static int enable_test_tasks;  // launch internal test tasks
+static int kernel_cycles_count, kernel_cycles_base;
+static int kernel_cycles_force;
+// Non-zero when scheduling runs off a real timer rather than the cycle
+// counter, and then it is the interval in milliseconds. Doubles as the
+// "is this machine's PIT ours to touch" flag: see C4KE_PIT_REG.
+static int kernel_pit_ms;
+
+// Track task counts
+static int  kernel_tasks_unloaded, kernel_tasks_loaded;
+static int  kernel_tasks_running, kernel_tasks_waiting;
+static int  kernel_tasks_trapped;
+static int  kernel_tasks_zombie;
+static int  kernel_ips;        // Rough measure of instructions per second
+// Preserve old cycle interrupt details in these variables.
+static int old_ih_cycle_interval, *old_ih_cycle_handler;
+// And signal handlers
+static int *old_sig_int;//, *old_sig_segv;
+static int *custom_opcodes;
+static int start_errno; // see START_*
+static int kernel_task_find_iterator;
+// TODO: removed
+//static int kernel_hlt_count; // Tracks tasks call to halt, except for the idle task
+static int last_trap_handler;
+// Set in main()
+static char *readable_int_table;
+static int   readable_int_max;
+static int kernel_last_cycle;
+static int kernel_last_time;
+// Initialized to the C4m opcode for TLEV in main(), used only in process_trap.
+static int opcode_TLEV;
+static int opcode_PSH;
+// TODO: no longer used
+static int  critical_path_value;
+
+///
+// Utility functions
+///
+
+static int _strlen (char *s) { char *t; t = s; while(*t) ++t; return t - s; }
+static int _strcmp (char *s1, char *s2) { while(*s1 && (*s1 == *s2)) { ++s1; ++s2; } return *s1 - *s2; }
+static int _atoi (char *str, int radix) {
+	int v, sign;
+
+	v = 0;
+	sign = 1;
+	if(*str == '-') {
+		sign = -1;
+		++str;
+	}
+	while (
+		(*str >= 'A' && *str <= 'Z') ||
+		(*str >= 'a' && *str <= 'z') ||
+		(*str >= '0' && *str <= '9')) {
+		v = v * radix + ((*str > '9') ? (*str & ~0x20) - 'A' + 10 : (*str - '0'));
+		++str;
+	}
+	return v * sign;
+}
+
+// Old implementation
+// static void print_int_readable (int n) {
+// 	int  table_pos;
+// 	int  rem;
+// 	table_pos = rem = 0;
+// 	while(table_pos < readable_int_max && n / 1000 > 0) {
+// 		rem = n % 1000;
+// 		n = n / 1000;
+// 		++table_pos;
+// 	}
+// 	printf("%ld", n);
+// 	if (rem) printf(".%03d", rem);
+// 	printf("%c", readable_int_table[table_pos]);
+// }
+static void print_int_readable (int n) {
+	int  table_pos;
+	int  x, rem;
+	char c;
+	table_pos = rem = 0;
+	while(table_pos < readable_int_max && (x = n / 1000) > 0) {
+		rem = n % 1000;
+		n = x;
+		++table_pos;
+	}
+	printf("%ld.%03d %c", n, rem, readable_int_table[table_pos]);
+}
+static void print_int_readable_using (int n, char *table, int table_max) {
+	int  table_pos;
+	int  rem;
+	char c;
+	table_pos = rem = 0;
+	while(table_pos < table_max && n / 1000 > 0) {
+		rem = n % 1000;
+		n = n / 1000;
+		++table_pos;
+	}
+	printf("%ld", n);
+	if (rem) printf(".%03d", rem);
+	if ((c = table[table_pos]) && c != ' ')
+		printf("%c", c);
+}
+static void print_time_readable (int ms) {
+	print_int_readable_using(ms, "m ", 2);
+}
+static void kprint_stack (int *sp) {
+	int *s, c;
+	return; // TODO: disabled
+	c = KPRINT_STACK_DEPTH;
+	s = sp ? sp : (int *)&sp;
+	while (c--) {
+		printf("  %08X", *s++);
+		if (c > 0 && (c % KPRINT_STACK_WIDTH == 0))
+			printf("\n");
+	}
+	printf("\n");
+}
+
+// Variant of malloc that can use custom logic.
+// In the future that will allow a custom mallocator.
+// At present, it just tracks kernel memory usage.
+void *kmalloc (int size) {
+	void *a;
+	int *t;
+
+	// printf("!! kmalloc(%ld)\n", size);
+
+	a = malloc(size);
+	if (a) {
+		kernel_mem_alloc = kernel_mem_alloc + size;
+	}
+
+	return a;
+}
+
+// strcpy with allocation
+static char *k_strcpy_alloc (char *source) {
+	int len, *s;
+	char *dest, *t;
+	//if (source == 0) return 0; // allow nuls
+	if (source == 0) {
+		printf("c4ke: k_strcpy_alloc - source is null\n");
+		source = "(k_strcpy_alloc)";
+	}
+	// Find length
+	len = 0; t = source;
+	while (*t++) ++len;
+	// Allocate buffer
+	if (!(dest = kmalloc(len + 1))) {
+		printf("c4ke: memory allocation failure in k_strcpy_alloc\n");
+		return 0;
+	}
+	// Copy
+	t = dest;
+	while (*source)
+		*dest++ = *source++;
+	*dest++ = 0;
+	return t;
+}
+
+// Print the readable form of a task state
+static void kernel_print_task_state (int s) {
+	if(s & STATE_ZOMBIE)       printf("Z");
+	else if(s & STATE_WAITING) printf("W");
+	else if(s & STATE_TRAPPED) printf("T");
+	else if(s & STATE_RUNNING) printf("R");
+	else                       printf("U");
+}
+
+// Print task state information
+static void kernel_print_task (int *t) {
+	printf("c4ke: task '%s' at 0x%lx:\n", t[TASK_NAME], t);
+	printf("  Id: %d State: 0x%x ", t[TASK_ID], t[TASK_STATE]);
+	kernel_print_task_state(t[TASK_STATE]);
+	printf("\n  Registers: A=0x%lx  BP=0x%lx  SP=0x%lx  PC=0x%lx (entry - 0x%lx)\n",
+	       t[TASK_REG_A], t[TASK_REG_BP], t[TASK_REG_SP], t[TASK_REG_PC], t[TASK_REG_PC] - t[TASK_ENTRY]);
+	kprint_stack((int *)t[TASK_REG_SP]);
+	//if (t[TASK_STATE] 
+	//	printf("\n  Exit code: %d\n", t[TASK_EXIT_CODE]);
+}
+
+// TODO: load balancing removed
+enum { MAX_BALANCE_RANGE = 2 };
+//static void kernel_load_balance () {
+//	// Multiply kernel_cycles_base based on number of loaded tasks
+//	int new_cycles;
+//	// doesn't play well on slow systems
+//	return;
+//
+//	new_cycles = kernel_cycles_base + (kernel_cycles_base * (MAX_BALANCE_RANGE * (100 - ((kernel_tasks_loaded - kernel_tasks_waiting) * 100 / KERN_TASK_COUNT * 100) / 100) / 100));
+//	if (new_cycles != kernel_cycles_count) {
+//		if (kernel_verbosity >= VERB_MED)
+//			printf("c4ke: load balance adjusting cycles to %ld\n", new_cycles);
+//		__c4_configure(C4KE_CONF_CYCLE_INTERRUPT_INTERVAL, (kernel_cycles_count = new_cycles));
+//	}
+//}
+
+// Cycle count helper
+// Cycles, in two words, because one is not enough.
+//
+// The VM's counter is 32 bits on a 32-bit machine and a single C4IX
+// build passes 2^31 several times over -- which showed up in ps as a
+// negative number of cycles. Rather than pretend to have a 64-bit type
+// this system does not have, the count is kept as
+//
+//     cycles = TASK_CYCLES_HI * 1000000000 + TASK_CYCLES
+//
+// -- decimal carry, so printing it is two ordinary numbers and no
+// arithmetic wider than an int ever happens. A slice is around a
+// million cycles, so the loop below almost always runs once.
+static void kernel_add_cycles (int *t, int d) {
+	int lo;
+	if (d < 0) return;              // a wrapped sample: not a real slice
+	lo = t[TASK_CYCLES] + d;
+	while (lo >= 1000000000) {
+		lo = lo - 1000000000;
+		++t[TASK_CYCLES_HI];
+	}
+	t[TASK_CYCLES] = lo;
+}
+
+static int cycles_difference () {
+	int c, d;
+	c = __c4_cycles();
+	d = c - kernel_last_cycle;
+	kernel_last_cycle = c;
+	return d;
+}
+
+///
+// Kernel-callable functions
+///
+#if NO_INLINE
+#define sleep     c4ke_sleep
+static int pid () { return kernel_task_current[TASK_ID]; }
+static void sleep(int n) { __c4_opcode(n, OP_USER_SLEEP); }
+// kernel-callable function to invoke await_pid op
+static int await_pid (int pid) {
+	return __c4_opcode(pid, OP_AWAIT_PID);
+}
+static int await_message (int timeout) { return __c4_opcode(timeout, OP_AWAIT_MESSAGE); }
+static void kernel_task_setwait (int *task, int waitstate, int waitarg) {
+	*task = *task | STATE_WAITING;
+	task[TASK_WAITSTATE] = waitstate;
+	task[TASK_WAITARG]   = waitarg;
+	++kernel_tasks_waiting;
+}
+// Version of signal that can be called in kernel extensions
+static int ksignal (int *handler, int signal) {
+	return __c4_opcode(handler, signal, OP_USER_SIGNAL);
+}
+#else
+#define pid()            kernel_task_current[TASK_ID]
+#define sleep(n)         __c4_opcode(n, OP_USER_SLEEP)
+#define await_pid(pid)   __c4_opcode(pid, OP_AWAIT_PID)
+#define await_message(t) __c4_opcode(t, OP_AWAIT_MESSAGE)
+#define kernel_task_setwait(task, waitstate, waitarg) DO_WHILE_0({*task = *task | STATE_WAITING; task[TASK_WAITSTATE] = waitstate; task[TASK_WAITARG] = waitarg; ++kernel_tasks_waiting;})
+#define ksignal(h,s)     __c4_opcode(h, s, OP_USER_SIGNAL)
+#endif
+
+//
+// Trap emulator
+//
+
+// Kernel function that handles the trap and forwards the result onto the signal handler.
+// This is so that signal handlers can be passed some signal information instead of what
+// is usually on the stack during a trap handle.
+// TODO: unused, signal handlers in user processes get access to the full trap handler stack.
+static void process_trap_handler (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	int wstate, warg;
+	int *handler, signal;
+
+	// Save task wait information, restore it after return from handler
+	wstate = kernel_task_current[TASK_WAITSTATE];
+	warg   = kernel_task_current[TASK_WAITARG];
+	// Now clear them to mark the task runnable
+	kernel_task_current[TASK_WAITSTATE] = WSTATE_NONE;
+	kernel_task_current[TASK_WAITARG]   = 0;
+	// TODO: handler needs to a single item, not an array of handlers
+	handler = (int *)kernel_task_current[TASK_SIGHANDLER];
+	signal  = trap; // Signal number is stored here
+
+#ifndef __c4cc__
+#define handler(x) ((void (*)(int))handler)(x)
+#endif
+	handler(signal);
+
+	// Restore previous wait states (TODO: unless a new one has been set?)
+	kernel_task_current[TASK_WAITSTATE] = wstate;
+	kernel_task_current[TASK_WAITARG]   = warg;
+}
+#ifndef __c4cc__
+#undef handler
+#endif
+// Takes two extra arguments that are pushed onto the stack.
+
+// Cause a trap on a task: 1 if the frame was built, 0 if it could not be.
+// Works the same as c4m's trap function, writing temporary values to the stack
+// to be popped by TLEV to return to the previous code position.
+//
+// It works on the registers in the task's slots, so it is called only
+// where those are the task's real ones: by kernel_before_switch, whose
+// callers all save the outgoing task's registers to its slots first and
+// load the incoming task's from its slots after. That holds when the
+// task about to run is the one that was running, too -- the scheduler
+// picks it again when nothing else can run -- and that is when a busy
+// task gets its Ctrl-C. This used to refuse the current task outright,
+// and kernel_before_switch counted the signal delivered anyway: spin
+// under C4KE, nested in c4m inside C4IX, lost its SIGINT and ran on.
+static int process_trap (int *task, int type, int parameter, int *handler) {
+	int *temp, i;
+	int *sp, *bp, *pc, mode, a;
+
+	// Copy the segfault fix from c4m
+	if (!handler) {
+		printf("c4ke: process_trap() BUG handler not set!\n");
+		printf("c4ke: Trap type %d, task %d\n", type, task[TASK_ID]);
+		return 0;
+	}
+
+	sp = (int *)task[TASK_REG_SP];
+	bp = (int *)task[TASK_REG_BP];
+	pc = (int *)task[TASK_REG_PC];
+	a  = task[TASK_REG_A];
+	// This frame is going to be handed to TLEV, which restores every
+	// slot in it including the mode. Without protected mode there is
+	// no interesting value to compute -- but there is still a slot,
+	// and leaving it uninitialised pushes whatever the stack held.
+	// TLEV then loads that into the machine's mode register, and the
+	// next SYSCALL opcode from the resumed task looks like a
+	// protected-mode violation. Signals are delivered through here,
+	// so shutdown -- which TERMs every surviving task -- hit it every
+	// time.
+	mode = MODE_UNPROTECTED;
+	if (kernel_pm_support)
+		mode = task[TASK_PRIVS] == PRIV_KERNEL ? MODE_UNPROTECTED : MODE_PROTECTED;
+	temp = sp;
+
+	// Push details used by TLEV
+	// Push instruction and trap number
+	*--sp = type;          // printf("*sp(0x%X) = trap type %d\n", sp, *sp);
+	*--sp = parameter;     // printf("*sp(0x%X) = parameter %d (at 0x%X)\n", sp, *sp, pc - 1);
+	// Push the registers. These can be updated, they are restored by TLEV.
+	*--sp = (int)mode;     // printf("*sp(0x%X) = mode %d\n", sp, mode);
+	*--sp = (int)a;        // printf("*sp(0x%X) = a %d\n", sp, a);
+	*--sp = (int)bp;       // printf("*sp(0x%X) = bp 0x%X\n", sp, *sp);
+	*--sp = (int)temp;     // printf("*sp(0x%X) = sp 0x%X\n", sp, *sp);
+	*--sp = (int)pc;       // printf("*sp(0x%X) = returnpc 0x%X\n", sp, *sp);
+	*--sp = (int)&opcode_TLEV; // set LEV returnpc to TLEV instruction address
+	*--sp;                 // Next position is our handler bp
+	// Update BP as if we entered a function, allowing arguments to be referenced.
+	// We peek at the ENT x that was skipped to read the number of local variables.
+	bp = sp;               // Update handler bp
+	*sp = (int)bp;         // Set LEV bp to handler bp
+	// Adjust stack to account for local variables
+	sp = sp - *(handler + 1); // printf("adjusted stack using ENT %d\n", *(handler - 1));
+	// printf("Arguments pushed: %d, sp=0x%X\n", t - sp, sp);
+	// Update passed in registers and set pc trap handler after ENT x opcode.
+	task[TASK_REG_SP] = (int)sp;
+	task[TASK_REG_BP] = (int)bp;
+	task[TASK_REG_PC] = (int)(handler + 2); // +2 to skip ENT x
+	return 1;
+}
+
+//
+// Critical path functions
+//
+// Trap handlers may be interrupted by c4m, at present by the cycle interrupt.
+// These function disable the cycle interrupt during critical paths where an
+// interrupt could leave the kernel in an inconsistent state.
+//
+// Both timers mask the same way: write zero going in, write the
+// interval coming out. The PIT keeps its deadline across a mask -- see
+// include/c4bb.h -- precisely so that this, which happens on every
+// trap, cannot starve it.
+#if NO_INLINE
+static void critical_path_start () {
+	//if (!critical_path_value)
+		if (kernel_pit_ms) *(int *)C4KE_PIT_REG = 0;
+		else __c4_configure(C4KE_CONF_CYCLE_INTERRUPT_INTERVAL, 0);
+	//++critical_path_value;
+	//printf("c4ke: critical path value now at %d\n", critical_path_value);
+}
+static void critical_path_end() {
+	//if (critical_path_value && !--critical_path_value) {
+		if (kernel_pit_ms) *(int *)C4KE_PIT_REG = kernel_pit_ms;
+		else __c4_configure(C4KE_CONF_CYCLE_INTERRUPT_INTERVAL, kernel_cycles_count);
+	//	critical_path_value = 0;
+	//}
+	//printf("c4ke: critical path value now at %d\n", critical_path_value);
+}
+#else
+// One line each, and they have to stay that way: the preprocessor that
+// runs ON the machine (src/c4dos/cpp.c) has no backslash-newline
+// continuation, and this kernel has to be buildable by it.
+#define critical_path_start()   (kernel_pit_ms ? (*(int *)C4KE_PIT_REG = 0) : __c4_configure(C4KE_CONF_CYCLE_INTERRUPT_INTERVAL, 0))
+#define critical_path_end()     (kernel_pit_ms ? (*(int *)C4KE_PIT_REG = kernel_pit_ms) : __c4_configure(C4KE_CONF_CYCLE_INTERRUPT_INTERVAL, kernel_cycles_count))
+#endif
+
+// Is there a timer, and does it answer?
+//
+// Two questions, and both have to be asked. __c4_info() answers the
+// first, and it has to: the register cannot be probed blind, because
+// on every host that is NOT the board 0x1a0 is ordinary memory, and a
+// store there corrupts whatever lives at 0x1a0 instead of doing
+// nothing. Only once the bit says the window is real is it safe to ask
+// the second question, which is whether the device behind it behaves:
+// arm an interval, read it back, mask it, read that back. A machine
+// that claims the bit and answers something else is a machine we
+// schedule on the cycle counter, exactly as before.
+//
+// Masking at the end is not tidiness -- it leaves the timer off until
+// the kernel is ready to be interrupted, which is stage 4.
+static int kernel_pit_probe (int ms) {
+	int *reg;
+	int armed;
+
+	if (!(c4_info & C4KE_PIT_INFO)) return 0;
+	reg = (int *)C4KE_PIT_REG;
+	*reg = ms;
+	armed = *reg;
+	*reg = 0;
+	if (armed != ms) return 0;
+	if (*reg) return 0;
+	return ms;
+}
+
+//
+// Timekeeping helpers
+//
+
+static int time_difference () {
+	int t, d;
+	t = __time();
+	d = (t - kernel_last_time);
+	kernel_last_time = t;
+	return d;
+}
+
+#if NO_INLINE
+// Update the current task's timekeeping details.
+static void current_task_timekeeping () {
+	kernel_add_cycles(kernel_task_current, cycles_difference());
+	kernel_task_current[TASK_TIMEMS] = kernel_task_current[TASK_TIMEMS] + time_difference();
+	++kernel_task_current[TASK_TRAPS];
+}
+
+// Update the kernel tasks' timekeeping details.
+static void kernel_task_timekeeping () {
+	kernel_add_cycles(kernel_tasks, cycles_difference());
+	kernel_tasks[TASK_TIMEMS] = kernel_tasks[TASK_TIMEMS] + time_difference();
+}
+
+static void trap_enter() {
+	critical_path_start();
+	current_task_timekeeping();
+}
+
+// Called by all traps to restore interrupts and task state
+static void trap_exit() {
+	// Assign task keeping
+	kernel_task_timekeeping();
+	critical_path_end();
+}
+#else
+// TODO: c4m doesn't understand macro continuations, these must be on one line
+#define current_task_timekeeping() kernel_add_cycles(kernel_task_current, cycles_difference()); kernel_task_current[TASK_TIMEMS] = kernel_task_current[TASK_TIMEMS] + time_difference(); ++kernel_task_current[TASK_TRAPS];
+#define kernel_task_timekeeping() kernel_add_cycles(kernel_tasks, cycles_difference()); kernel_tasks[TASK_TIMEMS] = kernel_tasks[TASK_TIMEMS] + time_difference();
+#define trap_enter()          critical_path_start(); current_task_timekeeping();
+#define trap_exit()           kernel_task_timekeeping(); critical_path_end();
+#endif
+
+///
+// Scheduling and task manipulation
+///
+
+#if NO_INLINE
+// Perform scheduling and switch to another active task.
+// @return 1 on successful switch, 0 on no other task to switch to
+int schedule () {
+	// TODO: trap_exit() here?
+	trap_exit();
+	return __c4_opcode(OP_SCHEDULE);
+}
+
+static void kernel_task_wake (int *task) {
+	// No checking done to see if task is valid
+	task[TASK_STATE] = task[TASK_STATE] & ~(STATE_WAITING);
+	--kernel_tasks_waiting;
+    // TODO: this line causes more problems than its worth
+	// task[TASK_WAITSTATE] = task[TASK_WAITARG] = 0;
+}
+
+static int kernel_is_task_running (int *task) {
+	return task[TASK_STATE] & STATE_RUNNING;
+}
+#else
+#define kernel_task_wake(task) DO_WHILE_0({ task[TASK_STATE] = task[TASK_STATE] & ~(STATE_WAITING); --kernel_tasks_waiting; })
+#define kernel_is_task_running(task)  (*task & STATE_RUNNING)
+#define schedule()                    __c4_opcode(OP_SCHEDULE)
+#endif
+
+// The host mailbox (c4bb MBOX_*, docs/c4bb-design.md): fitted or not, and the
+// task bound to host frames -- the first to receive or await them. The opcodes
+// live in extensions/c4ke_mbox.c; the state is here because the scheduler
+// below reads it and c4 has no prototypes.
+//
+// The two things the scheduler asks of the mailbox are written out here
+// against the registers, NOT through c4bb_mbox.h's mb_poll/mb_bell: this
+// file is compiled from source by c4m, which skips #include (see
+// bb_whowrote above), and calling a function it never saw is "bad
+// function call (0)" -- which is how the mailbox once broke innerbench.
+// Same register map and ring format as include/c4bb_mbox.h.
+enum { KMBX_BASE = 0x1b4, KMBX_BELL = 0x1bc, KMBX_BELL_IDLE = 2 };
+static int  mbx_fitted;
+static int *mbx_host_owner;
+static int  mbx_host_pending () {
+	int *in, cap, head, tail, at;
+	if (!mbx_fitted) return 0;
+	in = (int *)*(int *)KMBX_BASE;
+	cap = in[0]; head = in[1]; tail = in[2];      // MB_CAP, MB_HEAD, MB_TAIL
+	if (head == tail) return 0;
+	at = tail % cap;
+	if (in[3 + at] == -1) {                        // skip marker: as mb_poll
+		tail = tail + (cap - at);
+		in[2] = tail;
+		if (head == tail) return 0;
+	}
+	return 1;
+}
+static void mbx_bell_idle () { *(int *)KMBX_BELL = KMBX_BELL_IDLE; }
+
+// Find a task to run.
+// Also handles certain wait states like sleeping.
+// Under C4, this function is invoked as pure C4 code, so much not
+// use any C4M-specific opcodes.
+// This function is probably inefficient
+// TODO: re-enable find_mask if appropriate
+// TODO: the logic could be much simplified, but attempts to do so keep breaking task switching.
+static int *kernel_task_find_real () {
+	int c, i, *t, ts, ws, wa, *result, ms, n, nb;
+	int *backup_task, backup_task_nice, backup_task_iterator;
+	int  tsw;
+	i = kernel_task_find_iterator;
+	result = backup_task = (int *)(c = 0);
+	ms = kernel_max_slot + 1;
+	backup_task_nice = 100;
+	// backup_task_iterator = 0;
+
+	//while (!result && ++c < KERN_TASK_COUNT) {
+	//	i = (i + 1) % KERN_TASK_COUNT;
+	while (++c < ms) {
+		i = (i + 1) % ms;
+		t = kernel_tasks + (TASK__Sz * i);
+		//ts = t[TASK_STATE];
+		// printf("c4ke: check task 0x%lx, id %ld, state 0x%x\n", t, t[TASK_ID], t[TASK_STATE]);
+		// TASK_STATE is the first item in the structure
+		if (!(ts = *t) || ts & STATE_ZOMBIE) {
+			// Skip empty/zombie tasks
+		//} else
+		//} else if (t == kernel_task_current) {
+			// Skip current task
+		//} else if (ts & STATE_ZOMBIE) {
+			// Skip zombies
+		// } else if (ts & STATE_NOTRUN) {
+			// Skip ethereal and zombie tasks
+		//} else if (ts) { // & find_mask) {
+		//} else if ((tsw = ts & STATE_WAITING)) {
+		} else if (ts & STATE_WAITING) {
+			//ws = t[TASK_WAITSTATE];
+			wa = t[TASK_WAITARG];
+			if ((ws = t[TASK_WAITSTATE]) == WSTATE_TIME) {
+				// kernel_last_time will have been updated recently enough that we
+				// need not call __time() but use the last saved value.
+				if (kernel_last_time >= wa)
+					result = t;
+			}
+			else if (ws == WSTATE_MESSAGE) {
+				// A message in the task's inbox, or a host frame for the task
+				// bound to the mailbox, wakes it with 1 in the accumulator (what
+				// OP_MBOX_AWAIT returns); a timeout (wa != 0) wakes it with 0.
+				if (t[TASK_MBOX_COUNT] > 0 || (t == mbx_host_owner && mbx_host_pending())) {
+					t[TASK_REG_A] = 1;
+					result = t;
+				} else if (wa && kernel_last_time >= wa) {
+					t[TASK_REG_A] = 0;
+					result = t;
+				}
+			}
+			else if (ws == WSTATE_SYSCALL) {
+				// Only check WAITARG != 0
+				if (t[TASK_WAITARG])
+					result = t;
+			}
+			// WSTATE_PID is not checked here, but in kernel_task_finish
+			if (result) {
+				kernel_task_find_iterator = i;
+				t[TASK_NICE] = t[TASK_NICE_BASE];
+				// Wake up
+				kernel_task_wake(t);
+				//if (c4_info & C4I_C4)
+				//	printf("c4ke: woke up task %d after %d cycles (crit path: %d)\n", t[TASK_ID], __c4_cycles() - cycles, critical_path_value);
+				return t;
+			}
+		// } else if (!tsw && n > 0) {
+		} else if ((n = t[TASK_NICE]) > 0) {
+			// TODO: this section feels wrong.
+			// Skip if nice counter not met,
+			// but allow if nothing else is found
+			if ((t[TASK_NICE] = --n) < backup_task_nice) {
+				backup_task = t;
+				backup_task_nice = n;
+				backup_task_iterator = i;
+			}
+		} else {
+			// Satisfies all criteria
+			kernel_task_find_iterator = i;
+			t[TASK_NICE] = t[TASK_NICE_BASE];
+			// if (c4_info & C4I_C4)
+			//	printf("c4ke: activating task %d after %d cycles (crit path: %d)\n", t[TASK_ID], __c4_cycles() - cycles, critical_path_value);
+			return t;
+		}
+	}
+	if (backup_task) {
+		kernel_task_find_iterator = backup_task_iterator;
+		backup_task[TASK_NICE] = backup_task[TASK_NICE_BASE];
+		// printf("c4ke: returning backup task in slot %i\n", backup_task_iterator);
+		return backup_task;
+	}
+	kernel_task_find_iterator = i; // ?i;
+	//if (c4_info & C4I_C4)
+	//	printf("c4ke: failed to find task to activate after %d cycles (crit path: %d)\n", __c4_cycles() - cycles, critical_path_value);
+	return 0;
+}
+
+// This function gets updated to either a JMP to the above function, or a JMP to the below function.
+static int *kernel_task_find () {
+	return kernel_task_find_real();
+}
+
+// This function uses C4M's __c4_invoke jailbreak to run kernel_task_find_real much faster.
+static int *kernel_task_find_pure () {
+	return __c4_invoke((int *)&kernel_task_find_real);
+}
+
+// Find a free task slot and return it.
+// Assumes already running in a critical path section.
+// @return 0 on failure (max tasks running), otherwise task address
+static int *kernel_task_find_free () {
+	int i, *t, loops_remain;
+	i = 0;
+	t = kernel_tasks;
+	loops_remain = KERN_TASK_COUNT;
+	while (loops_remain-- && i < KERN_TASK_COUNT) {
+		i = (i + 1) % KERN_TASK_COUNT;
+		t = kernel_tasks + (TASK__Sz * i);
+		if (t[TASK_STATE] == STATE_UNLOADED) {
+			// printf("c4ke: find_free found at 0x%lx\n", t);
+			return t;
+		}
+		//t = t + TASK__Sz;
+	}
+
+	return 0;
+}
+
+// Find a specific task id and return the task structure.
+// Assumes already running in a critical path section.
+// @return 0 on failure (not found), otherwise task address
+static int *kernel_task_find_pid (int pid) {
+	int *t, loops_remain;
+
+	if (pid <= 0)
+		return 0;
+
+	t = kernel_tasks;
+	loops_remain = KERN_TASK_COUNT;
+	while (--loops_remain) {
+		if (t[TASK_ID] == pid) {
+			return t;
+		}
+		t = t + TASK__Sz;
+	}
+
+	return 0;
+}
+
+///
+// Kernel extensions
+// When added after c4ke.c in the c4cc command line, extensions can access all of
+// C4KE's data as well as add in its own opcodes.
+///
+
+// Handle a trap before the kernel is ready.
+static void early_trap_handler (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	int *alt;
+
+	if (kernel_verbosity >= VERB_MED) {
+		printf("c4ke: early_trap_handler called! printing stack trace:\n");
+		alt = kernel_task_current ? (int *)kernel_task_current[TASK_C4R] : 0;
+		// c4r_print_stacktrace(kernel_c4r, alt, 0, 0);
+		c4r_print_stacktrace(kernel_c4r, alt, bp, returnpc);
+	}
+}
+
+// Tracks the state of early initialization
+static int done_early_init;
+// Performs early initialization of the kernel, either called by:
+//  - extension modules (as part of kext_register in constructors)
+//  - directly from main
+static void do_early_init () {
+	if (done_early_init)
+		return;
+
+	done_early_init = 1;
+
+	// Install early trap handler as soon as possible
+	last_trap_handler = install_trap_handler((int *)&early_trap_handler);
+
+	kernel_last_cycle = __c4_cycles();
+	kernel_start_time = __time();
+}
+
+// Internal
+static int kext_initialize () {
+	int i;
+
+	if (kernel_ext_initialized)
+		return KXERR_NONE;
+
+	// Initialize kernel extension state
+	if (!(kernel_extensions = kmalloc((i = sizeof(int) * KEXT__Sz * KERNEL_EXTENSIONS_MAX)))) {
+		printf("c4ke: kext_register failed to allocate %d bytes for kernel extensions\n", i);
+		return KXERR_FAIL;
+	}
+	memset(kernel_extensions, 0, i);
+	kernel_ext_count = 0;
+	kernel_ext_errno = 0;
+	kernel_ext_initialized = 1;
+
+	kernel_task_extdata_size = 0;
+
+	do_early_init();
+
+	return KXERR_NONE;
+}
+
+// Internal
+// Stop regular compilers complaining about calling int *'s
+#ifndef __c4cc__
+#define cb() ((int (*)())cb)()
+#endif
+static int kext_run_all (int callback_type) {
+	int i, *kext, *cb, cb_res;
+
+	kext = kernel_extensions;
+	i    = 0;
+	while (i < KERNEL_EXTENSIONS_MAX) {
+		// Save an array lookup by relying on KEXT_STATE being the first element
+		if (*kext == KXS_REGISTERED) {
+			cb = (int *)kext[callback_type];
+			if (cb) {
+				cb_res = cb();
+				// Special for init
+				if (callback_type == KEXT_INIT) {
+					if (cb_res != KXERR_NONE) {
+						printf("c4ke: kernel extension %s returned error during init, disabled\n",
+						       (char *) kext[KEXT_NAME]);
+						*kext = KXS_ERROR;
+					}
+				}
+			}
+		}
+		kext = kext + KEXT__Sz;
+		++i;
+	}
+
+	return KXERR_NONE;
+}
+#ifndef __c4cc__
+#undef cb
+#endif
+
+// Register a kernel extension, with optional event callback functions.
+// Can be called during a constructor in __attribute__((constructor)) functions.
+// - init can be used to add custom opcodes. Called before tasks are created.
+// - start can be used to perform code just before the kernel starts executing tasks.
+// - shutdown is called during kernel shutdown.
+// - event is called during events, such as task creation and cleanup
+// start and shutdown are optional.
+static int kext_register (char *name, int *init, int *start, int *shutdown) {
+	int *kext;
+
+	// TODO: set kernel_ext_errno
+	if (!kernel_ext_initialized) {
+		if (kext_initialize() == KXERR_FAIL)
+			return KXERR_FAIL;
+	}
+
+	if (kernel_ext_count >= KERNEL_EXTENSIONS_MAX) {
+		printf("c4ke: kext_register failed because kernel_ext_count(%d) at maximum (%d)\n",
+		       kernel_ext_count, KERNEL_EXTENSIONS_MAX);
+		return KXERR_FAIL;
+	}
+	kext = kernel_extensions + (KEXT__Sz * kernel_ext_count++);
+
+	kext[KEXT_STATE] = KXS_REGISTERED;
+	kext[KEXT_NAME]  = (int)name;
+	kext[KEXT_INIT]  = (int)init;
+	kext[KEXT_START] = (int)start;
+	kext[KEXT_SHUTDOWN] = (int)shutdown;
+
+	return KXERR_NONE;
+}
+
+
+//
+// Task memory: what a task owns, and who gives it back.
+//
+// A task's own malloc()s never reach the kernel unless protected mode is
+// on; when it is, they arrive here (extensions/c4ke_pm.c) and this is
+// where they are written down. A program is not obliged to free what it
+// allocated -- and even a program that would has no say in being killed
+// -- so the kernel keeps the list and empties it in kernel_clean_task.
+// Without this, twelve compiler runs in one session leave twelve arenas
+// behind and the machine needs four times the memory it should.
+// See docs/task-memory.md.
+//
+// Each tracked block carries TMEM__Sz words in front of the pointer the
+// task is given, holding its size and its place in the owning task's
+// doubly-linked list.
+//
+// The awkward part is FREE. A protected task can perfectly well free
+// something it did NOT get from here: u0's atexit table is allocated by
+// a constructor, which the loader runs in kernel mode, and released by a
+// destructor, which runs in the task. Deciding by peeking at the words
+// in front of the pointer is both an out-of-bounds read and a guess, so
+// instead the kernel keeps a set of the pointers it handed out -- the
+// same open-addressed shape as c4m's own c4_mt_ table (c4m.c:1150),
+// tombstones and all, since membership is the only question there is no
+// value array. A pointer that is not in it is freed exactly as given.
+//
+enum { KTM_EMPTY, KTM_DEAD };     // 0 and 1 are not valid heap pointers
+static int *ktm_key;
+static int  ktm_cap, ktm_live, ktm_used;
+
+static int ktm_slot (int p) {
+	// Heap pointers are at least 8-byte aligned, so the low three bits
+	// carry nothing; fold the high half down so that a run of adjacent
+	// allocations does not become a run of adjacent slots.
+	return ((p >> 3) ^ (p >> 17)) & (ktm_cap - 1);
+}
+
+// Insert into a table known to have room. Used by the rehash, where
+// growing again would be circular.
+static void ktm_put_raw (int p) {
+	int i;
+	i = ktm_slot(p);
+	while (ktm_key[i] != KTM_EMPTY) {
+		if (ktm_key[i] == p) return;
+		i = (i + 1) & (ktm_cap - 1);
+	}
+	ktm_key[i] = p;
+	++ktm_live;
+	++ktm_used;
+}
+
+// Returns 0 on success. Rehashes at the same size when the table is
+// mostly tombstones, which is the steady state for a compiler.
+static int ktm_grow () {
+	int *old;
+	int  oldcap, cap, i;
+
+	old = ktm_key;
+	oldcap = ktm_cap;
+	cap = ktm_cap ? ktm_cap + ktm_cap : 1024;
+	if (ktm_live * 4 < oldcap) cap = oldcap;
+	if (!(ktm_key = malloc(cap * sizeof(int)))) { ktm_key = old; return 1; }
+	memset(ktm_key, 0, cap * sizeof(int));
+	ktm_cap = cap;
+	ktm_live = 0;
+	ktm_used = 0;
+	i = 0;
+	while (i < oldcap) {
+		if (old[i] != KTM_EMPTY && old[i] != KTM_DEAD) ktm_put_raw(old[i]);
+		++i;
+	}
+	if (old) free(old);
+	return 0;
+}
+
+static int ktm_put (int p) {
+	int i;
+	if (ktm_used + ktm_used >= ktm_cap)
+		if (ktm_grow()) return 0;
+	i = ktm_slot(p);
+	while (ktm_key[i] != KTM_EMPTY && ktm_key[i] != KTM_DEAD) {
+		if (ktm_key[i] == p) return 1;
+		i = (i + 1) & (ktm_cap - 1);
+	}
+	if (ktm_key[i] == KTM_EMPTY) ++ktm_used;
+	ktm_key[i] = p;
+	++ktm_live;
+	return 1;
+}
+
+static int ktm_has (int p) {
+	int i, n;
+	if (!ktm_cap) return 0;
+	i = ktm_slot(p);
+	n = 0;
+	while (ktm_key[i] != KTM_EMPTY && n < ktm_cap) {
+		if (ktm_key[i] == p) return 1;
+		i = (i + 1) & (ktm_cap - 1);
+		++n;
+	}
+	return 0;
+}
+
+static void ktm_del (int p) {
+	int i, n;
+	if (!ktm_cap) return;
+	i = ktm_slot(p);
+	n = 0;
+	while (ktm_key[i] != KTM_EMPTY && n < ktm_cap) {
+		if (ktm_key[i] == p) { ktm_key[i] = KTM_DEAD; --ktm_live; return; }
+		i = (i + 1) & (ktm_cap - 1);
+		++n;
+	}
+}
+
+static int *kernel_task_malloc (int *t, int size) {
+	int *p;
+
+	if (size < 0) return 0;
+	if (!(p = malloc(size + sizeof(int) * TMEM__Sz))) return 0;
+	p[TMEM_MAGIC] = TMEM_MAGIC_VALUE;
+	p[TMEM_PREV]  = 0;
+	p[TMEM_NEXT]  = t[TASK_MEM_HEAD];
+	p[TMEM_SIZE]  = size;
+	if (p[TMEM_NEXT]) ((int *)p[TMEM_NEXT])[TMEM_PREV] = (int)p;
+	t[TASK_MEM_HEAD]  = (int)p;
+	t[TASK_MEM_ALLOC] = t[TASK_MEM_ALLOC] + size;
+	p = p + TMEM__Sz;
+	ktm_put((int)p);
+	return p;
+}
+
+static void kernel_task_free (int *t, int *ptr) {
+	int *p;
+
+	if (!ptr) return;
+	if (!ktm_has((int)ptr)) { free(ptr); return; }   // not ours; as given
+	ktm_del((int)ptr);
+	p = ptr - TMEM__Sz;
+	if (p[TMEM_PREV]) ((int *)p[TMEM_PREV])[TMEM_NEXT] = p[TMEM_NEXT];
+	else              t[TASK_MEM_HEAD] = p[TMEM_NEXT];
+	if (p[TMEM_NEXT]) ((int *)p[TMEM_NEXT])[TMEM_PREV] = p[TMEM_PREV];
+	t[TASK_MEM_ALLOC] = t[TASK_MEM_ALLOC] - p[TMEM_SIZE];
+	p[TMEM_MAGIC] = 0;
+	free(p);
+}
+
+static int *kernel_task_realloc (int *t, int *ptr, int size) {
+	int *n, *p;
+	int  old, i;
+	char *s, *d;
+
+	if (!ptr) return kernel_task_malloc(t, size);
+	if (size <= 0) { kernel_task_free(t, ptr); return 0; }
+	// A pointer this kernel never handed out has no recorded length, so
+	// there is no safe number of bytes to copy -- the same answer c4m's
+	// own c4_realloc gives (c4m.c:1252).
+	if (!ktm_has((int)ptr)) return 0;
+	p = ptr - TMEM__Sz;
+	old = p[TMEM_SIZE];
+	if (old >= size) return ptr;
+	if (!(n = kernel_task_malloc(t, size))) return 0;
+	s = (char *)ptr;
+	d = (char *)n;
+	i = 0;
+	while (i < old) { d[i] = s[i]; ++i; }
+	kernel_task_free(t, ptr);
+	return n;
+}
+
+// Everything the task still owns. Called from kernel_clean_task, which
+// is the one place that knows a task is really finished with.
+static void kernel_task_release (int *t) {
+	int *p, *next;
+
+	p = (int *)t[TASK_MEM_HEAD];
+	while (p) {
+		next = (int *)p[TMEM_NEXT];
+		ktm_del((int)(p + TMEM__Sz));
+		p[TMEM_MAGIC] = 0;
+		free(p);
+		p = next;
+	}
+	t[TASK_MEM_HEAD] = 0;
+}
+
+// Clean up a task. Called by idle and the kernel shutdown routine.
+// Assumes already in critical path section.
+static void kernel_clean_task (int *t) {
+	int *p, *ct;
+
+	// Set kernel_task_current to t for duration of clean event callback
+	//ct = kernel_task_current;
+	//kernel_task_current = t;
+	// Allow events to run
+	//kext_run_all1(KEXT_EVENT, KEVT_TASK_CLEAN);
+	// kernel_event_handler(KEVT_TASK_CLEAN, t);
+	// Restore kernel_task_current
+	// kernel_task_current = ct;
+
+	// Free the data used by this process
+
+	// Everything the task allocated for ITSELF, if the kernel was in a
+	// position to see it. This is the one kind of memory a task can own
+	// that nothing else will ever return.
+	kernel_task_release(t);
+
+	if ((p = (int *)t[TASK_NAME])) {
+		if (t != kernel_tasks)
+			free((char *)p);
+	}
+	// printf("c4ke: freeing task stack at 0x%lx\n", t[TASK_BASE]);
+	if ((p = (int *)t[TASK_BASE])) free(p);
+	if ((p = (int *)t[TASK_CODE])) free(p);
+	if ((p = (int *)t[TASK_DATA])) free(p);
+	if ((p = (int *)t[TASK_ARGV])) free(p);
+	if ((p = (int *)t[TASK_ARGV_DATA])) free((char *)p);
+	if ((p = (int *)t[TASK_SIGHANDLERS])) free(p);
+	if ((p = (int *)t[TASK_MBOX])) free(p);   // extensions/c4ke_mbox.c's per-task inbox
+	// Only free a C4R the task actually owns. Builtin tasks (start_task_builtin)
+	// borrow the kernel's own C4R structure, which is owned by the loader that
+	// started the kernel -- freeing it here left loadc4r_run() with a dangling
+	// pointer and a double free at exit.
+	if ((p = (int *)t[TASK_C4R]) && p != kernel_c4r) c4r_free(p);
+	if ((p = (int *)t[TASK_EXTDATA])) free(p);
+	// Mark as unused and clear other state.
+	memset(t, 0, sizeof(int) * TASK__Sz);
+	*t = STATE_UNLOADED;
+	//t[TASK_ID] = t[TASK_PARENT] = t[TASK_REG_A]  = t[TASK_REG_BP] =
+	//             t[TASK_REG_SP] = t[TASK_REG_PC] = t[TASK_ENTRY]  =
+	//             t[TASK_PRIVS]  = t[TASK_CYCLES] = t[TASK_TIMEMS] =
+	//             t[TASK_ENTRY]  = t[TASK_EXIT_CODE] = t[TASK_TRAPS] =
+	//             t[TASK_NICE]   = t[TASK_NICE_BASE] = t[TASK_CYCLES] =
+	//             t[TASK_TIMEMS] = t[TASK_SIGPENDING] =
+	//             t[TASK_MBOX]   = t[TASK_MBOX_SZ] = t[TASK_MBOX_COUNT] =
+	//             t[TASK_WAITSTATE] = t[TASK_WAITARG] = t[TASK_EXCLUSIVE] =
+	//			 t[TASK_NAMELEN] =
+	//             0;
+}
+
+static void currenttask_update_name (char *newname) {
+	char *p;
+	critical_path_start();
+	if ((p = (char *)kernel_task_current[TASK_NAME]) != 0)
+		free(p);
+	kernel_task_current[TASK_NAME] = (int)k_strcpy_alloc(newname);
+	kernel_task_current[TASK_NAMELEN] = _strlen(newname);
+	critical_path_end();
+}
+
+#if NO_INLINE
+static int *kernel_task_sighandler (int *task, int sig) {
+	return ((int *)task[TASK_SIGHANDLERS]) + (sig * SIGH__Sz);
+}
+#else
+#define kernel_task_sighandler(task, sig) ((int *)task[TASK_SIGHANDLERS]) + (sig * SIGH__Sz)
+#endif
+
+//
+// Stack guard.
+//
+// Every task stack is allocated with TASK_STACK_GUARD poisoned bytes
+// underneath it. A task that recurses past the bottom writes into those
+// words first and into somebody else's heap block second; checking the
+// poison at every context switch turns a silent, delayed heap
+// corruption into a message naming the task that caused it.
+//
+// The check runs on the OUTGOING task: kernel_before_switch is called
+// after its registers have been saved and before kernel_task_current is
+// moved on, so kernel_task_current is still the task that just ran.
+//
+static int kernel_stack_intact (int *t) {
+	int *g, i;
+	if (!t[TASK_BASE]) return 1;
+	g = (int *)t[TASK_BASE];
+	i = TASK_STACK_GUARD / sizeof(int);
+	while (i--)
+		if (g[i] != TASK_STACK_POISON) return 0;
+	return 1;
+}
+
+//
+// What the report can say. The check runs at a switch or at exit, so SP
+// then is NOT how deep the stack went: a recursion that runs off the
+// bottom and returns between two checks leaves SP near the top and the
+// guard in ruins. "44 of 262144 bytes, guard broken" -- the old wording
+// -- was read as a stray write more than once (docs/dos-rung-fixes.md,
+// docs/next-session.md), and the climb's case was exactly that
+// recursion: c4sc 4,671 frames deep in g:resolvecode (docs/task-memory.md).
+//
+// The stack itself knows better. It is zeroed when the task starts
+// (kernel_task_start), so the lowest word that is not zero is as deep
+// as the task has ever written: its true high-water mark, between
+// checks or not. A stack used to within a guard's length of its bottom
+// ran off it -- not to the last word, because a frame need not write
+// every word it covers (a test recursion's frames left the bottom 20
+// bytes zero); a guard broken under a stack that never got near it was
+// hit by something else. A frame with more untouched locals than that
+// could still fool it, which is why it says "most likely".
+static int kernel_stack_peak (int *t) {
+	int *p, *end;
+	p   = (int *)(t[TASK_BASE] + TASK_STACK_GUARD);
+	end = (int *)(t[TASK_BASE] + TASK_STACK_GUARD + TASK_STACK_SIZE);
+	while (p < end && !*p) ++p;
+	return (int)end - (int)p;
+}
+
+static void kernel_stack_check (int *t, int at_exit) {
+	int used, peak, i, n;
+	int *g;
+	if (!t[TASK_BASE]) return;
+	// Low-water mark, sampled at every switch. Not exact -- a peak
+	// between two switches is invisible, and trap_schedule_in_trap calls
+	// kernel_before_switch before it saves the outgoing registers, so
+	// there the reading is one switch stale -- but enough to size a
+	// stack by. The guard check below reads memory, not registers, and
+	// is exact either way.
+	if (!t[TASK_STACK_LOW] || t[TASK_REG_SP] < t[TASK_STACK_LOW])
+		t[TASK_STACK_LOW] = t[TASK_REG_SP];
+	if (t[TASK_STACK_BROKEN]) return;
+	if (kernel_stack_intact(t)) return;
+	t[TASK_STACK_BROKEN] = 1;
+	++kernel_stack_overruns;
+	g = (int *)t[TASK_BASE];
+	i = TASK_STACK_GUARD / sizeof(int);
+	n = 0;
+	while (i--)
+		if (g[i] != TASK_STACK_POISON) ++n;
+	used = TASK_STACK_GUARD + TASK_STACK_SIZE - (t[TASK_REG_SP] - t[TASK_BASE]);
+	peak = kernel_stack_peak(t);
+	printf("c4ke: task %d (%s) OVERRAN ITS STACK of %d bytes: %d of %d guard words broken.\n",
+	       t[TASK_ID], t[TASK_NAME] ? (char *)t[TASK_NAME] : "?", TASK_STACK_SIZE,
+	       n, TASK_STACK_GUARD / sizeof(int));
+	if (peak > TASK_STACK_SIZE - TASK_STACK_GUARD)
+		printf("c4ke:   its stack is used to the bottom: it ran off it (a recursion deeper than the stack, most likely)\n");
+	else
+		printf("c4ke:   its stack was never used below %d bytes: a stray write from elsewhere, most likely\n", peak);
+	printf("c4ke:   found %s, with %d bytes in use then -- which is not how deep it went.\n",
+	       at_exit ? "as it exited" : "at a switch", used);
+	printf("c4ke: the heap below 0x%lx is no longer trustworthy.\n", t[TASK_BASE]);
+	// ...and on a board fitted with the provenance port, WHO. This is
+	// the question the guard could never answer: it notices at a
+	// context switch or at exit, some unknown time after the write.
+	// c4bb remembers the PC that last stored to each word, so ask it.
+	// For a recursion, the words name PCs in the recursing function or
+	// in the ones it calls.
+	//
+	// Gated on the announcement, never probed: those addresses are
+	// c4bb devices and c4m's own memory everywhere else, so a kernel
+	// that runs in both places must not touch them uninvited
+	// (include/c4bb_info.h).
+	if (bb_has_whowrote()) {
+		g = (int *)t[TASK_BASE];
+		i = TASK_STACK_GUARD / sizeof(int);
+		while (i--) {
+			if (g[i] != TASK_STACK_POISON)
+				printf("c4ke: guard word 0x%lx was last written by pc 0x%lx\n",
+				       &g[i], bb_whowrote((int)&g[i]));
+		}
+	}
+}
+
+// Before switching to a task, check if any signals are pending, and if so
+// cause a process trap before we switch to it. Also the point at which
+// the task being switched AWAY from has its stack guard checked.
+static void kernel_before_switch (int *task) {
+	int *sigh, i;
+
+	if (kernel_task_current && kernel_task_current != task)
+		kernel_stack_check(kernel_task_current, 0);
+
+	// TODO: need a SIGWAITING or something to tell if the process is already in a signal handler.
+	if (task[TASK_SIGPENDING]) {
+		sigh = kernel_task_sighandler(task, 0);
+		i = 0;
+		// Find lowest signal id
+		while (i < SIGNAL_MAX) {
+			if (sigh[SIGH_PENDING]) {
+				// delivered once its frame is built; otherwise it stays pending
+				if (process_trap(task, TRAP_SIGNAL, i, (int *)sigh[SIGH_ADDRESS])) {
+					--sigh[SIGH_PENDING];
+					--task[TASK_SIGPENDING];
+				}
+				// TODO: use process_trap_handler and forward the signal nicer
+				//process_trap2(task, TRAP_SIGNAL, i, (int *)&process_trap_handler, sigh(SIGH_ADDRESS), i);
+				// break loop
+				i = SIGNAL_MAX;
+			}
+			++i;
+			sigh = sigh + SIGH__Sz;
+		}
+	}
+}
+
+#if NO_INLINE
+static int internal_task_slot (int *task) {
+	return (task - kernel_tasks) / TASK__Sz;
+}
+#else
+#define internal_task_slot(task)   ((task - kernel_tasks) / TASK__Sz)
+#endif
+
+// Called when a task finishes, by EXIT or returning from main, or some other way.
+// Also handles waking tasks when a task finishes.
+static void kernel_task_finish (int *task) {
+	int s, *t, i, tid, *ct;
+
+	// printf("c4ke: kernel_task_finish(%d), exit code = %d\n", task[TASK_ID], task[TASK_EXIT_CODE]);
+	//ct = kernel_task_current; // Save for duration of event callback
+	//kernel_task_current = task;
+	// kext_run_all1(KEXT_EVENT, KEVT_TASK_FINISH);
+	// kernel_event_handler(KEVT_TASK_FINISH, task);
+	// kernel_task_current = ct;
+
+	// A task that overran and then exited without being switched out
+	// once more would otherwise never be checked.
+	kernel_stack_check(task, 1);
+	// The stack's own high-water mark, not the switch-sampled one: a
+	// peak between two switches is what sizes a stack.
+	if (kernel_verbosity >= VERB_MAX && task[TASK_BASE])
+		printf("c4ke: task %d used at most %d of %d stack bytes\n", task[TASK_ID],
+		       kernel_stack_peak(task), TASK_STACK_SIZE);
+
+	// Update kernel counters
+	s = task[TASK_STATE];
+	if (s & STATE_LOADED) --kernel_tasks_loaded;
+	if (s & STATE_RUNNING) --kernel_tasks_running;
+	if (s & STATE_WAITING) --kernel_tasks_waiting;
+	if (s & STATE_TRAPPED) --kernel_tasks_trapped;
+	// The host mailbox goes with the task bound to it (extensions/
+	// c4ke_mbox.c): mbx_host_owner is a slot's address, so left set it
+	// handed the host's frames to whatever task next took the slot, and
+	// until then no other task could bind.
+	if (task == mbx_host_owner) mbx_host_owner = 0;
+	s = internal_task_slot(task);
+	if (kernel_max_slot == s) {
+		--kernel_max_slot;
+		// printf("c4ke: max slot-- now %d\n", kernel_max_slot);
+	}
+
+	// Check if any process is waiting on this task
+	t = kernel_tasks;
+	i = 0;
+	tid = task[TASK_ID];
+	while (i <= kernel_max_slot) {
+		if (*t & STATE_WAITING) {
+			if (t[TASK_WAITSTATE] == WSTATE_PID) {
+				// TODO: negative values to check against parent id
+				if (t[TASK_WAITARG] == tid) {
+					// Found a task waiting on this task's id specifically
+
+					// Update the WAITARG with tasks exit code.
+					t[TASK_WAITARG] = task[TASK_EXIT_CODE];
+					// printf("c4ke: woke task.%d with task exit code %d\n", t[TASK_ID], task[TASK_EXIT_CODE]);
+					// Wake up the task
+					kernel_task_wake(t);
+				}
+			}
+		}
+		t = t + TASK__Sz;
+		++i;
+	}
+}
+
+#define SCHEDULE_IN_TRAP()        __c4_jmp((int *)&trap_schedule_in_trap + 2)
+static int *trap_schedule_in_trap_next;
+static void trap_schedule_in_trap (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	//int *next;
+
+		// TODO: removeme stack
+		//c4r_print_stacktrace(kernel_c4r, (int *)kernel_task_current[TASK_C4R], 0, 0);
+		//c4r_print_stacktrace(kernel_c4r, (int *)kernel_task_current[TASK_C4R], bp, returnpc);
+
+	// The outgoing task's registers to its slots first, as every switch
+	// does before kernel_before_switch: a signal for the task that runs
+	// next is built in its slots, and that may be this one
+	kernel_task_current[TASK_REG_A]  = (int)a;
+	kernel_task_current[TASK_REG_BP] = (int)bp;
+	kernel_task_current[TASK_REG_SP] = (int)sp;
+	kernel_task_current[TASK_REG_PC] = (int)returnpc;
+	if (!trap_schedule_in_trap_next) {
+		if ((trap_schedule_in_trap_next = kernel_task_find())) {
+			// TODO: not used on idle task, any reason to? not yet
+			kernel_before_switch(trap_schedule_in_trap_next);
+		} else {
+			if (kernel_task_current == kernel_task_idle) {
+				printf("c4ke: trap_schedule_in_trap(): attempt to switch from idle task to idle task. Doing nothing.\n");
+				return;
+			}
+
+			// Wake up the idle task and switch to it
+			trap_schedule_in_trap_next = kernel_task_idle;
+			kernel_task_wake(trap_schedule_in_trap_next);
+		}
+	}
+
+	// printf("(c4ke: trap_schedule_in_trap found task: 0x%lx, isidle=%d)\n", trap_schedule_in_trap_next, trap_schedule_in_trap_next == kernel_task_idle);
+	// Load new state
+	if (kernel_pm_support)
+		mode = (trap_schedule_in_trap_next[TASK_PRIVS] == PRIV_KERNEL || trap_schedule_in_trap_next[TASK_LOADING]) ? MODE_UNPROTECTED : MODE_PROTECTED;
+	a  =        trap_schedule_in_trap_next[TASK_REG_A];
+	bp = (int *)trap_schedule_in_trap_next[TASK_REG_BP];
+	sp = (int *)trap_schedule_in_trap_next[TASK_REG_SP];
+	returnpc = (int *)trap_schedule_in_trap_next[TASK_REG_PC];
+	// Update the task pointer
+	kernel_task_current = trap_schedule_in_trap_next;
+	// printf("c4ke: trap_schedule_in_trap: switched to trap_schedule_in_trap_next task 0x%lx\n", trap_schedule_in_trap_next);
+	// printf("c4ke: trap_schedule_in_trap: returnpc = 0x%lx\n", returnpc);
+
+	trap_schedule_in_trap_next = 0;
+
+	trap_exit();
+}
+
+#define KILL_TASK_AND_SCHEDULE()        __c4_jmp((int *)&trap_kill_task_and_schedule + 2)
+static void trap_kill_task_and_schedule (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	printf("trap_kill_task_and_schedule()\n");
+	// Update task info using trap details
+	kernel_task_current[TASK_REG_A]  = (int)a;
+	kernel_task_current[TASK_REG_BP] = (int)bp;
+	kernel_task_current[TASK_REG_SP] = (int)sp;
+	kernel_task_current[TASK_REG_PC] = (int)returnpc;
+	// Kill the task and schedule()
+	kernel_print_task(kernel_task_current);
+	kernel_task_current[TASK_EXIT_CODE] = -1000;
+	kernel_task_finish(kernel_task_current);
+	kernel_task_current[TASK_STATE] = STATE_ZOMBIE;
+	++kernel_tasks_zombie;
+	// c4r_print_stacktrace(kernel_c4r, (int *)kernel_task_current[TASK_C4R], returnpc);
+	// If this schedule returns, abort this thread
+	printf("schedule_in_trap()\n");
+	__c4_jmp((int *)&trap_schedule_in_trap + 2);
+	printf("c4ke: unable to terminate instruction faulting process\n");
+	exit(-2);
+}
+
+
+///
+// Basic opcodes provided by C4KE.
+///
+static void op_c4info (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	// Add extra info flags
+	a = __c4_info() | C4I_C4KE;
+	trap_exit();
+}
+
+static void op_request_symbol (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	char *symbol;
+	int i;
+	// printf("c4ke: symbol request, stack contents:\n");
+	// i = -5; while (i < 5) {
+	//	printf("c4ke: sp+%d = 0x%x (%d)\n", i, sp[i], sp[i]);
+	//	++i;
+	// }
+	symbol = (char *)sp[1];
+	// printf("Requesting symbol '%s'\n", symbol);
+	a = request_symbol(symbol);
+	// printf("Symbol value: %d\n", a);
+	trap_exit();
+}
+
+// Retrieve current BP value
+static void op_peek_bp (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	a = (int)bp;
+	// printf("  (peek bp is 0x%lx)\n", bp);
+	trap_exit();
+}
+// Retrieve current SP value
+static void op_peek_sp (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	a = (int)sp;
+	// printf("  (peek sp is 0x%lx)\n", sp);
+	trap_exit();
+}
+
+// Enter the program.
+//
+// A task starts life as the LOADER -- task_loadc4r, which is kernel
+// code -- and only becomes the program at the moment it calls the
+// program's main. That distinction matters as soon as the kernel tracks
+// a task's allocations: everything the loader allocates (the image, its
+// relocated code and data, the task's name) is the KERNEL's to free, in
+// kernel_clean_task, and tracking it as the task's own would free it
+// twice. So a task runs unprotected until this opcode, whatever
+// privilege it was started with.
+//
+// The mode change takes effect immediately because mode is part of the
+// trap frame TLEV restores -- the same lever pm_syscall_handler uses.
+static void op_task_exec (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	kernel_task_current[TASK_LOADING] = 0;
+	if (kernel_pm_support)
+		mode = kernel_task_current[TASK_PRIVS] == PRIV_KERNEL ? MODE_UNPROTECTED : MODE_PROTECTED;
+	trap_exit();
+}
+
+// Handle a schedule request.
+// We do this by obtaining a new task, saving the register state to the old task,
+// and putting the new task register state in place before returning.
+// We could also update memory access permissions if that were a thing.
+static void op_schedule (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	int *next, *curr;
+
+	if ((next = kernel_task_find())) {
+		//printf("c4ke: schedule found a task to run, switch from 0x%lx to 0x%lx\n",
+		//       kernel_task_current, next);
+		// Save current state
+		curr = kernel_task_current;
+		curr[TASK_REG_A]  = (int)1; // Found a task to switch to
+		curr[TASK_REG_BP] = (int)bp;
+		curr[TASK_REG_SP] = (int)sp;
+		curr[TASK_REG_PC] = (int)returnpc;
+		// Load new state
+		kernel_before_switch(next);
+		if (kernel_pm_support)
+			mode = (next[TASK_PRIVS] == PRIV_KERNEL || next[TASK_LOADING]) ? MODE_UNPROTECTED : MODE_PROTECTED;
+		a  =        next[TASK_REG_A];
+		bp = (int *)next[TASK_REG_BP];
+		sp = (int *)next[TASK_REG_SP];
+		returnpc = (int *)next[TASK_REG_PC];
+		// Update the task pointer
+		kernel_task_current = next;
+		//printf("c4ke: registers set to bp=0x%X, sp=0x%X, pc=0x%X\n", bp, sp, returnpc);
+	} else {
+		// No task switch
+		a = 0;
+		//printf("c4ke: Schedule: no task found\n");
+	}
+
+	trap_exit();
+}
+
+// Handle a task finishing. This is added to the running function stack so that
+// it is called when its entry/main function exits.
+// Cleanup is performed by task_idle, because the stack for this task is still
+// active until we switch out of it to a new task.
+// If this trap is reached, the task is currently active.
+// We need to find another task to switch to.
+static void op_task_finish (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	int *next, *p;
+
+	kernel_task_finish(kernel_task_current);
+	// printf("op_task_finish: finding a new task to move to\n");
+	kernel_task_current[TASK_STATE] = STATE_ZOMBIE; // Will be collected later
+	++kernel_tasks_zombie;
+
+	// Record the exit code
+	kernel_task_current[TASK_EXIT_CODE] = *sp;
+
+	if ((next = kernel_task_find())) {
+		// TODO: not used on idle task, any reason to? not yet
+		kernel_before_switch(next);
+	} else {
+		// Wake up the idle task and switch to it
+		next = kernel_task_idle;
+		kernel_task_wake(next);
+	}
+
+	// printf("op_task_finish: found task, loading %d\n", next[TASK_ID]);
+	// Load new state
+	if (kernel_pm_support)
+		mode = (next[TASK_PRIVS] == PRIV_KERNEL || next[TASK_LOADING]) ? MODE_UNPROTECTED : MODE_PROTECTED;
+	a  =        next[TASK_REG_A];
+	bp = (int *)next[TASK_REG_BP];
+	sp = (int *)next[TASK_REG_SP];
+	returnpc = (int *)next[TASK_REG_PC];
+	// Update the task pointer
+	kernel_task_current = next;
+	// printf("op_task_finish: switched to next task 0x%lx\n", next);
+	// printf("op_task_finish: returnpc = 0x%lx\n", returnpc);
+
+	trap_exit();
+}
+
+// Used by applications that wish to call exit.
+// This code is similar to op_task_finish except that the exit code is in a
+// different location on the stack.
+static void op_task_exit (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	int *next, *p;
+
+	//if (kernel_verbosity > VERB_MED)
+	//	printf("c4ke: op_task_exit: exit code=%d\n", sp[1]);
+	// Record the exit code
+	kernel_task_current[TASK_EXIT_CODE] = sp[1];
+	kernel_task_finish(kernel_task_current);
+	kernel_task_current[TASK_STATE] = STATE_ZOMBIE; // Will be collected later by idle
+	++kernel_tasks_zombie;
+
+	if ((next = kernel_task_find())) {
+		kernel_before_switch(next);
+	} else {
+		// Wake up the idle task and switch to it
+		next = kernel_task_idle;
+		kernel_task_wake(next);
+	}
+
+	// Load new state
+	if (kernel_pm_support)
+		mode = (next[TASK_PRIVS] == PRIV_KERNEL || next[TASK_LOADING]) ? MODE_UNPROTECTED : MODE_PROTECTED;
+	a  =        next[TASK_REG_A];
+	bp = (int *)next[TASK_REG_BP];
+	sp = (int *)next[TASK_REG_SP];
+	returnpc = (int *)next[TASK_REG_PC];
+	// Update the task pointer
+	kernel_task_current = next;
+	//printf("op_task_exit: switched to next task 0x%lx\n", next);
+
+	trap_exit();
+}
+
+// Indicates to the kernel which task is currently focused.
+// Allows for signal handlers to be called
+static void op_task_focus (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	int *t;
+
+	t = kernel_task_find_pid(sp[1]);
+	if (!t) {
+		printf("c4ke: pid %d not found\n", sp[1]);
+	} else {
+		kernel_task_focus = t;
+		// printf("c4ke: focus set to pid %d\n", kernel_task_focus[TASK_ID]);
+	}
+	trap_exit();
+}
+
+// Wait on a pid and return its exit code.
+// int await_pid(int pid) => pid's exit code
+// TODO: implement as waitpid with POSIX style
+static void op_await_pid(int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	int pid;
+
+	pid = sp[1];
+	if (kernel_task_find_pid(pid)) {
+		*kernel_task_current = *kernel_task_current | STATE_WAITING;
+		kernel_task_current[TASK_WAITSTATE] = WSTATE_PID;
+		kernel_task_current[TASK_WAITARG] = pid;
+		++kernel_tasks_waiting;
+		trap_exit();
+		// TODO: schedule in trap, no way around it
+		schedule();
+		// Exit code is placed into TASK_WAITARG by kernel_task_finish
+		a = kernel_task_current[TASK_WAITARG];
+		// if (kernel_verbosity > VERB_MED)
+		//	printf("c4ke: op_await_pid returning, a = %d\n", a);
+	} else {
+		// If task not running, no point in waiting
+		printf("c4ke: await_pid(%d) - process %d not found\n", pid, pid);
+		a = -1;
+		trap_exit();
+	}
+}
+
+///
+// The kernel RAM filesystem
+//
+// A flat table of named, kernel-owned byte buffers, reachable from user
+// tasks through the OP_VFS_* opcodes and consulted by the program loader
+// before the host filesystem -- so a compiler running under C4KE can
+// write an image here and the kernel can execute it, no host write
+// syscall required (the VM has none).
+///
+
+enum { RAMFS_MAX = 256 };
+
+static char **ramfs_names;   // entry names, kernel-owned copies
+static char **ramfs_bufs;    // file contents, kernel-owned copies
+static int   *ramfs_lens;
+static int    ramfs_nfiles;
+
+static int ramfs_strlen (char *s) {
+	int n;
+	n = 0;
+	while (s[n]) ++n;
+	return n;
+}
+
+// First use allocates; returns nonzero on failure
+static int ramfs_lazy_init () {
+	if (ramfs_names) return 0;
+	if (!(ramfs_names = malloc(RAMFS_MAX * sizeof(int))) ||
+	    !(ramfs_bufs  = malloc(RAMFS_MAX * sizeof(int))) ||
+	    !(ramfs_lens  = malloc(RAMFS_MAX * sizeof(int)))) {
+		printf("c4ke: ramfs allocation failure\n");
+		ramfs_names = 0;
+		return 1;
+	}
+	ramfs_nfiles = 0;
+	return 0;
+}
+
+static int ramfs_find (char *name) {
+	int i, la, lb;
+	if (!ramfs_names || !name) return -1;
+	la = ramfs_strlen(name);
+	i = 0;
+	while (i < ramfs_nfiles) {
+		lb = ramfs_strlen(ramfs_names[i]);
+		if (la == lb && !memcmp(name, ramfs_names[i], la)) return i;
+		++i;
+	}
+	return -1;
+}
+
+// Store a copy of buf under name, replacing any existing entry. 0 = ok.
+static int ramfs_put (char *name, char *buf, int len) {
+	int i, n;
+	char *nb, *nn;
+	if (ramfs_lazy_init()) return -1;
+	if (!name || len < 0) return -1;
+	if (!(nb = malloc(len + 1))) return -1;
+	memcpy(nb, buf, len);
+	nb[len] = 0;
+	if ((i = ramfs_find(name)) >= 0) {
+		free(ramfs_bufs[i]);
+		ramfs_bufs[i] = nb;
+		ramfs_lens[i] = len;
+		return 0;
+	}
+	if (ramfs_nfiles >= RAMFS_MAX) { free(nb); return -1; }
+	n = ramfs_strlen(name);
+	if (!(nn = malloc(n + 1))) { free(nb); return -1; }
+	memcpy(nn, name, n + 1);
+	ramfs_names[ramfs_nfiles] = nn;
+	ramfs_bufs[ramfs_nfiles] = nb;
+	ramfs_lens[ramfs_nfiles] = len;
+	++ramfs_nfiles;
+	return 0;
+}
+
+// The kernel-owned buffer, or 0. Length through plen when given.
+static char *ramfs_get (char *name, int *plen) {
+	int i;
+	if ((i = ramfs_find(name)) < 0) return 0;
+	if (plen) *plen = ramfs_lens[i];
+	return ramfs_bufs[i];
+}
+
+static int ramfs_unlink (char *name) {
+	int i;
+	if ((i = ramfs_find(name)) < 0) return -1;
+	free(ramfs_names[i]);
+	free(ramfs_bufs[i]);
+	--ramfs_nfiles;
+	while (i < ramfs_nfiles) {
+		ramfs_names[i] = ramfs_names[i + 1];
+		ramfs_bufs[i] = ramfs_bufs[i + 1];
+		ramfs_lens[i] = ramfs_lens[i + 1];
+		++i;
+	}
+	return 0;
+}
+
+static char *ramfs_name_at (int i) {
+	if (i < 0 || i >= ramfs_nfiles) return 0;
+	return ramfs_names[i];
+}
+
+// The OP_VFS_* handlers. Arguments are at sp[1..n] (pushed through
+// __c4_opcode with the first argument listed last); results in a.
+static void op_vfs_put (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	a = ramfs_put((char *)sp[1], (char *)sp[2], sp[3]);
+	trap_exit();
+}
+static void op_vfs_get (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	a = (int)ramfs_get((char *)sp[1], (int *)sp[2]);
+	trap_exit();
+}
+static void op_vfs_unlink (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	a = ramfs_unlink((char *)sp[1]);
+	trap_exit();
+}
+static void op_vfs_count (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	a = ramfs_nfiles;
+	trap_exit();
+}
+static void op_vfs_name (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	a = (int)ramfs_name_at(sp[1]);
+	trap_exit();
+}
+
+// int sleep (int ms)
+// always returns 0, unlike POSIX which may get interrupted sleep
+static void op_user_sleep (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	*kernel_task_current = *kernel_task_current | STATE_WAITING;
+	kernel_task_current[TASK_WAITSTATE] = WSTATE_TIME;
+	++kernel_tasks_waiting;
+	// Use kernel_last_time, since __time() was called just prior to this opcode handler
+	kernel_task_current[TASK_WAITARG] = kernel_last_time + sp[1];
+	// Update kernel times
+	//trap_exit();
+	//schedule();
+	__c4_jmp((int *)&trap_schedule_in_trap + 2);
+}
+
+///
+// Task manipulation
+///
+
+// Attempt to start a builtin task using a pointer to a function.
+// Kernel functions can be started as tasks using this function.
+//
+// On a failure (return code 0), start_errno is set with the reason.
+//   - See above START_ enum.
+// @param entry   The code entry point. The function should have the same syntax
+//                as any normal main function. Obtained via (int *)&function
+// @param argc    Pushed as arguments
+// @param argv    Copied, then pushed as arguments
+// @param name    Name of the task
+// @param privileges   See PRIV_ enum
+// @return 0 on failure (with start_errno set), or on success the task structure
+//         created.
+// A spawn that fails should SAY SO. start_errno was set in five places
+// and read in none, so a task that could not be created looked exactly
+// like one that could -- the caller got a 0 and no reason, and under
+// memory pressure that is the difference between "the machine is out of
+// memory" and "the machine has stopped working".
+static void start_fail (int reason, char *name) {
+	start_errno = reason;
+	printf("c4ke: cannot start '%s': ", name ? name : "?");
+	if      (reason == START_NOFREE)  printf("no free task slot (%d in use)\n", KERN_TASK_COUNT);
+	else if (reason == START_NOSTACK) printf("out of memory for a %d byte stack\n", TASK_STACK_SIZE);
+	else if (reason == START_NOSIG)   printf("out of memory for signal handlers\n");
+	else if (reason == START_ARGV)    printf("out of memory for arguments\n");
+	else                              printf("reason %d\n", reason);
+}
+
+static int *start_task_builtin (int *entry, int argc, char **_argv, char *name, int privileges) {
+	int    *t, *temp, *sp, *bp, *sigh;
+	int    argv_size, i;
+	char **argv, *argv_data, *s;
+	int    slot;
+	int    require_critical;
+	int   *ct;
+
+	if (kernel_running)
+		critical_path_start();
+
+    start_errno = START_NONE;
+	if (!(t = kernel_task_find_free())) {
+		start_fail(START_NOFREE, name);
+		if (kernel_running)
+			critical_path_end();
+		return 0;
+	}
+	if (kernel_verbosity >= VERB_MAX)
+		printf("c4ke: found free task at 0x%lx\n", t);
+
+	if (!(bp = sp = kmalloc(TASK_STACK_GUARD + TASK_STACK_SIZE))) {
+		// NOT free(t). `t` is an interior pointer into the single
+		// kernel_tasks block (kernel_task_find_free returns
+		// kernel_tasks + TASK__Sz * i), so handing it to free() gives
+		// the allocator a pointer it never issued and corrupts the
+		// heap -- on the OUT OF MEMORY path, which is exactly when the
+		// machine can least afford it. Nothing needs releasing either:
+		// the slot is claimed by writing TASK_STATE further down, and
+		// on every path up to there it is still STATE_UNLOADED, which
+		// is what find_free looks for.
+		start_fail(START_NOSTACK, name);
+		if (kernel_running)
+			critical_path_end();
+		return 0;
+	}
+	memset(sp, 0, TASK_STACK_GUARD + TASK_STACK_SIZE);
+	// Poison the guard. Everything above it is the task's; anything that
+	// disturbs these words has already left its own stack.
+	i = TASK_STACK_GUARD / sizeof(int);
+	while (i--) sp[i] = TASK_STACK_POISON;
+	if (kernel_verbosity >= VERB_MAX)
+		printf("c4ke: allocated %d bytes for task stack at 0x%lx\n", TASK_STACK_SIZE, bp);
+
+	if (!(sigh = kmalloc((i = sizeof(int) * SIGH__Sz * SIGNAL_MAX)))) {
+		// see the free(t) note above: t is not the allocator's
+		free(bp);
+		start_fail(START_NOSIG, name);
+		if (kernel_running)
+			critical_path_end();
+		return 0;
+	}
+	memset(sigh, 0, i);
+	t[TASK_SIGHANDLERS] = (int)sigh;
+	t[TASK_SIGPENDING] = 0;
+
+	start_errno = START_NONE;
+
+	// Make a copy of the argv, otherwise tasks calling this function and returning
+	// before the program is started loses the argv values.
+	t[TASK_ARGC] = argc;
+	if (!(argv = kmalloc((i = sizeof(char *) * (argc + 1))))) {
+		// see the free(t) note above: t is not the allocator's
+		free(bp);
+		free(argv);
+		printf("c4ke: Unable to allocate argv\n");
+		start_fail(START_ARGV, name);
+		if (kernel_running)
+			critical_path_end();
+		return 0;
+	}
+	memset(argv, 0, i);
+	t[TASK_ARGV] = (int)argv;
+	i = argv_size = 0; while(i < argc) argv_size = argv_size + _strlen(_argv[i++]) + 1;
+	// Bugfix(1): argv_size of 0 returns null under original c4
+	++argv_size;
+	if (!(argv_data = kmalloc(argv_size))) {
+		// see the free(t) note above: t is not the allocator's
+		free(bp);
+		free(argv);
+		start_fail(START_ARGV, name);
+		printf("c4ke: Unable to allocate argv data of %d\n", argv_size);
+		if (kernel_running)
+			critical_path_end();
+		return 0;
+	}
+	memset(argv_data, 0, argv_size);
+	t[TASK_ARGV_DATA] = (int)argv_data;
+	if (kernel_verbosity >= VERB_MAX)
+		printf("c4ke: Allocated our own argv @ 0x%lx and data @ 0x%lx\n", argv, argv_data);
+	// Copy items
+	i = 0;
+	while(i < argc) {
+		argv[i] = argv_data;
+		s = _argv[i];
+		while (*s) *argv_data++ = *s++;
+		*argv_data++ = 0; // nul terminator
+		++i;
+	}
+
+	// Setup task stack
+	t[TASK_BASE] = (int)bp;
+	t[TASK_CODE] = 0;
+	t[TASK_DATA] = 0;
+	bp = sp = (int *)((int)sp + TASK_STACK_GUARD + TASK_STACK_SIZE);
+
+	// Avoid a c4 issue where printf can read past the allocated stack
+	sp = bp = sp - 6;
+	
+	// Setup stack so that on return a TASK_FINISH opcode runs.
+	*--sp = OP_TASK_FINISH;
+	*--sp = opcode_PSH; temp = sp;
+	*--sp = argc;
+	*--sp = (int)argv;
+	*--sp = (int)temp;
+
+	if (kernel_verbosity >= VERB_MAX) {
+		printf("c4ke: updating task at 0x%lx\n", t);
+	}
+	// Every task begins in the loader; see op_task_exec. Builtin kernel
+	// threads never clear it, which costs them nothing -- they are
+	// PRIV_KERNEL and unprotected either way.
+	t[TASK_LOADING] = 1;
+	t[TASK_ID] = ++kernel_task_id_counter;
+	t[TASK_NICE]   = t[TASK_NICE_BASE] = NICE_NORMAL; // default
+	// DEBUG renice based on name
+	// TODO: add renice interface and don't do it here in the kernel
+	if (!_strcmp(name, "kernel/idle") || !_strcmp(name, "top")) {
+		t[TASK_NICE] = t[TASK_NICE_BASE] = NICE_OFTEN;
+	}
+	t[TASK_PARENT] = kernel_task_current[TASK_ID];
+	t[TASK_STATE] = STATE_LOADED | STATE_RUNNING;
+	t[TASK_REG_A] = 0;
+	t[TASK_REG_BP] = (int)bp;
+	t[TASK_REG_SP] = (int)sp;
+	t[TASK_REG_PC] = t[TASK_ENTRY] = (int)entry;
+	t[TASK_PRIVS]  = privileges;
+	t[TASK_C4R]    = (int)kernel_c4r; // Use kernel C4R structure
+	t[TASK_NAME]   = (int)k_strcpy_alloc(name);
+	if (!t[TASK_NAME]) {
+		printf("c4ke: Warning: unable to copy task name\n");
+		t[TASK_NAME] = (int)"(copy error)";
+	}
+	t[TASK_NAMELEN] = _strlen((char *)t[TASK_NAME]);
+	t[TASK_EXTDATA] = 0;
+	if (kernel_task_extdata_size) {
+		if (!(t[TASK_EXTDATA] = (int)kmalloc(kernel_task_extdata_size))) {
+			printf("c4ke: Warning: unable to allocate task extended data of %ld bytes\n", kernel_task_extdata_size);
+		}
+	}
+
+	--kernel_tasks_unloaded;
+	++kernel_tasks_loaded;
+	++kernel_tasks_running;
+	slot = internal_task_slot(t);
+	if (slot > kernel_max_slot) {
+		kernel_max_slot = slot;
+		// printf("c4ke: max slot++ now %d\n", kernel_max_slot);
+	}
+
+	// Trigger a load balance
+	// TODO: disabled
+	//kernel_load_balance();
+
+	if (kernel_verbosity >= VERB_MAX)
+		kernel_print_task(t);
+
+#if CONFIG_KEVENTS
+	// TODO: remove KEVENTS or make more useful
+	// Run events
+	//ct = kernel_task_current;
+	//kernel_task_current = t;
+	//kext_run_all1(KEXT_EVENT, KEVT_TASK_CREATE);
+	//kernel_event_handler(KEVT_TASK_CREATE, t);
+	// kernel_task_current = ct;
+#endif
+
+	if (kernel_running)
+		critical_path_end();
+	return t;
+}
+
+//
+// Trap functions
+//
+
+// Handle a trap.
+//
+// Traps handled:
+//   * TRAP_SEGV:  segfault trap, kill task
+//   * TRAP_OPV:   fault in OPCD opcode, kill task
+//   * TRAP_ILLOP: illegal opcode, look up handler or kill task if not present
+//   * TRAP_PM_VIOLATION: SYSCALL in protected mode, emulate it
+//   * TRAP_DEBUG: trigger the attached debugger
+//   * TRAP_MPG_VIOLATION: a region violation under c4mpg, kill task
+//
+// This handler allows a number of custom opcodes. It jumps directly into
+// the custom handler.
+//
+// @param trap      The trap signal, see TRAP_*
+// @param ins       The instruction code that caused the trap.
+// @param mode      Protected mode status. Can be updated.
+// @param a         Register A at time of trap. Can be updated.
+//                  Value restored to register A when a TLEV occurs.
+// @param bp        Register BP at time of trap. Restored by TLEV.
+// @param sp        Register SP at time of trap. Restored by TLEV.
+// @param returnpc  Register PC at time of trap. You get the idea.
+static void trap_handler (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	int *handler;
+	//printf("Trap handler: T%d  I%d(0x%X) mode%d\n", trap, ins, ins, mode);
+	//printf("  SP=0x%X  BP=0x%X  ReturnPC=0x%X\n", sp, bp, returnpc);
+	//printf("  opcode handler address: 0x%X\n", (custom_opcodes + (ins - CO_BASE)));
+	//printf("  opcode handler value  : 0x%X\n", *(custom_opcodes + (ins - CO_BASE)));
+
+	// Stops timekeeping for task, activates kernel timekeeping
+	trap_enter();
+
+	if (trap == TRAP_ILLOP) {
+		// BOUNDS FIRST. custom_opcodes holds CO_MAX entries starting at
+		// CO_BASE, and ins is whatever the faulting task raised -- which
+		// under u0 can be a POINTER, because __c4_opcode leaves its
+		// last-evaluated argument in a when a request is not serviced and
+		// __u0_ops_init stores whatever comes back. Indexing on that read
+		// a word from arbitrary heap; if the word was non-zero the kernel
+		// then did __c4_adjust(handler[-1] * -1) and __c4_jmp(handler),
+		// so an out-of-range opcode became a wild stack adjustment and a
+		// jump to data. That is why one task raising a bad opcode took
+		// down bystanders and, often, the whole machine: the range check
+		// had been written and then commented out.
+		handler = 0;
+		if (ins >= CO_BASE && ins < CO_BASE + CO_MAX)
+			handler = (int *)(*(custom_opcodes + (ins - CO_BASE)));
+
+		// TODO: save current privilege and set kernel privilege mode for duration
+		//       of custom opcode. Must restore on return.
+
+		if (handler) {
+			// Adjust stack based on bp for handler we're about to jump into.
+			// Reads x from ENT x instruction.
+			// Technically we should take 1 off the number since trap_handler
+			// already has a local variable, but it's not worth the additional
+			// instructions.
+			__c4_adjust(*(handler - 1) * -1);
+			// Jump to the handler, does not return
+			__c4_jmp(handler);
+			return; // not reached
+		}
+
+		// Update task info using trap details
+		kernel_task_current[TASK_REG_A]  = (int)a;
+		kernel_task_current[TASK_REG_BP] = (int)bp;
+		kernel_task_current[TASK_REG_SP] = (int)sp;
+		kernel_task_current[TASK_REG_PC] = (int)returnpc;
+		// Kill the task and schedule()
+		printf("c4ke: Custom opcode not found: %d, executed by task %d\n",
+			   ins, kernel_task_current[TASK_ID]);
+		// WAS THAT WORD WRITTEN, OR IS THE PC WRONG? Two very different
+		// bugs wear the same message. If something overwrote the
+		// instruction, the board remembers who; if nothing ever wrote
+		// there, the word is original and it is the PC that is wrong --
+		// a bad restore, not a bad write. Only c4bb with --whowrote can
+		// tell them apart, and it is announced, never probed
+		// (include/c4bb_info.h).
+		if (bb_has_whowrote())
+			printf("c4ke:   the word at 0x%lx was last written by pc 0x%lx (0 = never written)\n",
+			       returnpc - 1, bb_whowrote((int)(returnpc - 1)));
+		kernel_print_task(kernel_task_current);
+		c4r_print_stacktrace(kernel_c4r, (int *)kernel_task_current[TASK_C4R], bp, returnpc);
+		kernel_task_current[TASK_EXIT_CODE] = -1000;
+		kernel_task_finish(kernel_task_current);
+		kernel_task_current[TASK_STATE] = STATE_ZOMBIE;
+		++kernel_tasks_zombie;
+		c4r_print_stacktrace(kernel_c4r, (int *)kernel_task_current[TASK_C4R], bp, returnpc);
+		// If this schedule returns, abort this thread
+		//	schedule();
+		__c4_jmp((int *)&trap_schedule_in_trap + 2);
+		printf("c4ke: unable to terminate instruction faulting process\n");
+		exit(-2);
+	}
+
+	// Protected mode violation (SYSCALL)
+	else if (trap == TRAP_PM_VIOLATION) {
+		// Every other branch checks its target before jumping to it,
+		// and this one is no more trustworthy: kernel_syscall_handler
+		// is only set by the pm extension's start, so with
+		// CONFIG_ENABLE_PM off it is null and this jump lands on
+		// address zero. Say so instead of segfaulting the VM.
+		if (!kernel_syscall_handler) {
+			printf("c4ke: protected mode violation (opcode %d) from task %d, "
+			       "but no syscall handler is installed\n",
+			       ins, kernel_task_current[TASK_ID]);
+			kernel_print_task(kernel_task_current);
+			c4r_print_stacktrace(kernel_c4r, (int *)kernel_task_current[TASK_C4R], bp, returnpc);
+			kernel_task_current[TASK_EXIT_CODE] = -1000;
+			kernel_task_finish(kernel_task_current);
+			kernel_task_current[TASK_STATE] = STATE_ZOMBIE;
+			++kernel_tasks_zombie;
+			__c4_jmp((int *)&trap_schedule_in_trap + 2);
+			printf("c4ke: unable to terminate faulting process\n");
+			exit(-4);
+		}
+		// Adjust stack based on bp for handler we're about to jump into.
+		// TODO: removed the adjustment for now, not using stack variables.
+		// __c4_adjust(kernel_syscall_handler_stack);
+		// Jump to the kernel_syscall_handler, does not return
+		__c4_jmp(kernel_syscall_handler);
+		return; // not reached
+	}
+
+	// Segfault?
+	else if (trap == TRAP_SEGV) {
+		// Update task info using trap details
+		kernel_task_current[TASK_REG_A]  = (int)a;
+		kernel_task_current[TASK_REG_BP] = (int)bp;
+		kernel_task_current[TASK_REG_SP] = (int)sp;
+		kernel_task_current[TASK_REG_PC] = (int)returnpc;
+		printf("c4ke: segfault in process %d! Attempted to read from 0x%lx\n",
+		       kernel_task_current[TASK_ID], ins);
+		kernel_print_task(kernel_task_current);
+		c4r_print_stacktrace(kernel_c4r, (int *)kernel_task_current[TASK_C4R], bp, returnpc);
+		// Kill the task and schedule()
+		kernel_task_current[TASK_EXIT_CODE] = -1000;
+		kernel_task_finish(kernel_task_current);
+		kernel_task_current[TASK_STATE] = STATE_ZOMBIE;
+		++kernel_tasks_zombie;
+		//schedule();
+		__c4_jmp((int *)&trap_schedule_in_trap + 2);
+		printf("c4ke: unable to terminate segfaulting process\n");
+		exit(-4);
+	}
+
+	// A load or store outside every region the running task owns --
+	// c4mpg only (docs/c4mpg-design.md), and inert under plain c4m,
+	// which never raises this trap.
+	//
+	// THE DIVISION OF LABOUR IS THE POINT. c4mpg has already printed
+	// the things only it can know: which region was nearest, what its
+	// permissions were, how many bytes past its end the access ran,
+	// whether the address used to be a region and was freed. It cannot
+	// say WHO, because it has never heard of a task. That is all here:
+	// the id, the name the task was started with, its registers, and a
+	// stack trace through its own .c4r symbols. And then the machine
+	// carries on -- one task dies, which is the difference between a
+	// debugging session and a halted board.
+	else if (trap == TRAP_MPG_VIOLATION) {
+		// Update task info using trap details, so the print below and
+		// the stack trace both see where it actually was.
+		kernel_task_current[TASK_REG_A]  = (int)a;
+		kernel_task_current[TASK_REG_BP] = (int)bp;
+		kernel_task_current[TASK_REG_SP] = (int)sp;
+		kernel_task_current[TASK_REG_PC] = (int)returnpc;
+		printf("c4ke: task %d '%s' touched 0x%lx, which it does not own\n",
+		       kernel_task_current[TASK_ID],
+		       (char *)kernel_task_current[TASK_NAME], ins);
+		kernel_print_task(kernel_task_current);
+		c4r_print_stacktrace(kernel_c4r, (int *)kernel_task_current[TASK_C4R], bp, returnpc);
+		// Kill the task and schedule()
+		kernel_task_current[TASK_EXIT_CODE] = -1000;
+		kernel_task_finish(kernel_task_current);
+		kernel_task_current[TASK_STATE] = STATE_ZOMBIE;
+		++kernel_tasks_zombie;
+		__c4_jmp((int *)&trap_schedule_in_trap + 2);
+		printf("c4ke: unable to terminate the task that broke a region\n");
+		exit(-5);
+	}
+
+	// OPCD fault?
+	else if (trap == TRAP_OPV) {
+		printf("c4ke: opcd fault in process %d! Attempted to use opcode %d\n",
+		       kernel_task_current[TASK_ID], ins);
+		kernel_print_task(kernel_task_current);
+		c4r_print_stacktrace(kernel_c4r, (int *)kernel_task_current[TASK_C4R], bp, returnpc);
+		// Kill the task and schedule()
+		kernel_task_current[TASK_EXIT_CODE] = -1000;
+		kernel_task_finish(kernel_task_current);
+		kernel_task_current[TASK_STATE] = STATE_ZOMBIE;
+		++kernel_tasks_zombie;
+		//schedule();
+		__c4_jmp((int *)&trap_schedule_in_trap + 2);
+		printf("c4ke: unable to terminate segfaulting process\n");
+		exit(-4);
+	}
+
+	// Debug trap?
+	else if (trap == TRAP_DEBUG) {
+		// Transfer control to debug handler.
+		if (!kernel_task_current[TASK_DBGHANDLER]) {
+			printf("c4ke: task requested debug handler with no attached debugger\n");
+			kernel_print_task(kernel_task_current);
+			c4r_print_stacktrace(kernel_c4r, (int *)kernel_task_current[TASK_C4R], bp, returnpc);
+			// Kill the task and schedule()
+			kernel_task_current[TASK_EXIT_CODE] = -1000;
+			kernel_task_finish(kernel_task_current);
+			kernel_task_current[TASK_STATE] = STATE_ZOMBIE;
+			++kernel_tasks_zombie;
+			//schedule();
+			__c4_jmp((int *)&trap_schedule_in_trap + 2);
+			printf("c4ke: unable to switch from faulting task\n");
+			exit(-4);
+			return; // never reached
+		}
+
+		__c4_adjust(kernel_task_current[TASK_DBGSTACK] * -1);
+		__c4_jmp(kernel_task_current[TASK_DBGHANDLER]);
+		return; // never reached
+	}
+
+	// No other traps supported
+	else {
+		printf("c4ke: Unexpected trap %d\n", trap);
+		kprint_stack(sp);
+		c4r_print_stacktrace(kernel_c4r, (int *)kernel_task_current[TASK_C4R], bp, returnpc);
+		exit(-1);
+	}
+}
+
+//
+// Custom opcodes
+//
+
+// Install a custom opcode handler.
+//
+// By convention, custom opcodes start at 128.
+//
+// The handler address recorded skips the ENT x instruction, but the main
+// trap handler inspects this instruction to adjust the stack accordingly.
+//
+// If a custom opcode handler already exists, the program exits. This could
+// likely signify an opcode getting trashed because the wrong value is being
+// used.
+//
+// @param opcode    Opcode to install handler for
+// @param handler   The handler, obtained using (int *)&function_name
+// @return          0 on success, 1 on error (out of range).
+static int install_custom_opcode (int opcode, int *handler) {
+	int addr;
+
+	// `<= CO_BASE + CO_MAX` was one too many: the table has CO_MAX
+	// entries, so the last valid opcode is CO_BASE + CO_MAX - 1 and the
+	// old bound let an extension write custom_opcodes[CO_MAX], one word
+	// past a kmalloc'd block.
+	if (opcode >= CO_BASE && opcode < CO_BASE + CO_MAX) {
+		addr = opcode - CO_BASE;
+		if (custom_opcodes[addr]) {
+			// Signal an error since we may be clobbering other custom opcodes
+			printf("c4ke: error - attempting to overwrite opcode %d handler\n", opcode);
+			exit(-3);
+		}
+		// Skip the ENT x instruction
+		custom_opcodes[addr] = (int)(handler + 2);
+		// printf("Custom opcode %d handler at 0x%x installed at 0x%x\n", opcode, handler + 2, &custom_opcodes[addr]);
+		return 0;
+	}
+
+	return 1;
+}
+
+//
+// Builtin kernel tasks
+//
+
+// A builtin task that attempts to schedule.
+// Also cleans up finished tasks, as their stack is not in use when another
+// task is running, and is free to cleanup.
+static int task_idle (int argc, char **argv) {
+	int i, *t;
+	int run;
+	int spin;
+	int load_balance_time, lbt;
+
+	//printf("idle: task %d starting idle loop\n", kernel_task_current[TASK_ID]);
+	run = 1;
+	load_balance_time = __time();
+	// TODO: c4cc, while(1) should use unconditional jump
+	while (1) {
+		// Clear out zombie tasks, and do inventory on task counts.
+		// Disables task switching whilst this is performed.
+		//
+		// This used to wait a second between sweeps. Two things were
+		// wrong with that. The small one is that it bought nothing:
+		// kernel_tasks_zombie already gates the sweep, and one sweep
+		// takes it to zero, so the table is never walked without
+		// something to find. The large one is that a dead task's
+		// memory is held for that whole second, and the second is
+		// measured in __time() -- which is derived from the cycle
+		// counter, so it is a count of work rather than an amount of
+		// time, and on a fast host it is a very long while indeed. A
+		// program that starts one child after another, each freeing
+		// nothing and each relying on the kernel to take its memory
+		// back (src/tests/test_leak.c is exactly that), ran out of
+		// heap while twelve dead tasks' worth of it sat waiting for a
+		// clock.
+		//
+		// Reaping is safe here and always was: kernel_task_finish has
+		// already copied the exit code into whatever task was waiting
+		// on this one, so nothing still needs to read the corpse.
+		if (kernel_tasks_zombie) {
+			i = 0;
+			t = kernel_tasks + (TASK__Sz * 2); // Skip kernel and idle tasks
+			critical_path_start();
+			while (++i < KERN_TASK_COUNT) {
+				// Might not see tasks that zombify straight away, but that's ok
+				if (t[TASK_STATE] & STATE_ZOMBIE) {
+					kernel_clean_task(t);
+					--kernel_tasks_zombie;
+					++kernel_tasks_unloaded;
+				}
+				t = t + TASK__Sz;
+			}
+			critical_path_end();
+		}
+
+		if (schedule()) {
+		} else {
+			//printf("idle: would halt now if it was implemented, "
+			//       "running tasks: %d (%d loaded)\n",
+			//       count_running, count_loaded);
+			// kernel_hlt_count = 0;
+			// TODO: check for next schedule time
+			//i = __time();
+			// Nothing runnable: tell a host that paces this machine by the
+			// mailbox that it may stop until it has queued something.
+			if (mbx_fitted) mbx_bell_idle();
+			__c4_usleep(KERNEL_IDLE_SLEEP_TIME);
+			//printf("(idle: slept for %d usec)\n", __time() - i);
+		}
+
+		// TODO: removed load balancing
+		//if (lbt - load_balance_time >= 2000) {
+		//	load_balance_time = lbt;
+		//	kernel_load_balance();
+		//}
+	}
+}
+
+// A test task that (uselessly) prints counting up to 5
+static int task_printloop_1 (int argc, char **argv) {
+	int count;
+	printf("printloop1.%d: starting loop\n", kernel_task_current[TASK_ID]);
+	count = 0;
+	while (++count <= 5) {
+		printf("printloop1.%d: some output (count %d)\n", kernel_task_current[TASK_ID], count);
+		schedule();
+	}
+
+	// printf("printloop1.%d: loop done\n", kernel_task_current[TASK_ID]);
+	return 0;
+}
+
+// A test task that (uselessly) prints counting up to 10
+static int task_printloop_2 (int argc, char **argv) {
+	int count;
+	printf("printloop2.%d: starting loop\n", kernel_task_current[TASK_ID]);
+	count = 0;
+	while (++count <= 10) {
+		printf("printloop2.%d: some output (count %d)\n", kernel_task_current[TASK_ID], count);
+		schedule();
+	}
+
+	// printf("printloop1.%d: loop done\n", kernel_task_current[TASK_ID]);
+	return 0;
+}
+
+// A task that loads a .c4r file and runs it by calling the entry point.
+// NOTE: Cannot use return in this function, use __c4_opcode(exit_code, OP_TASK_EXIT).
+static int task_loadc4r (int argc, char **argv) {
+	int i, p, result;
+	char *file, *name, *old;
+	int *module, *modules;
+	char *alt_file;
+	char argv_size, *name_ptr, *argv_data, *s;
+	char *ramfs_data;
+	int   ramfs_len;
+
+	file = argv[0];
+	p    = kernel_task_current[TASK_ID]; //pid();
+#if 0
+	//__c4_opcode(OP_DEBUG_PRINTSTACK);
+	//printf("task_loadc4r starting...\n");
+	//printf("task_loadc4r.%d: Loading '%s'...\n", p, file);
+	//printf("task_loadc4r.%d: arguments:\n", p);
+	//i = 0; while(i < argc) {
+	//printf("task_loadc4r.%d: argv[%d] == '%s'\n", p, i, argv[i]);
+	//++i;
+	//}
+#endif
+
+	// Update task name by concatenating all arguments.
+	i = argv_size = 0; while(i < argc) argv_size = argv_size + _strlen(argv[i++]) + 1;
+	++argv_size;
+	if (!(name = malloc(argv_size))) {
+		printf("c4ke: failed to allocate name correctly\n");
+		name = "(out of memory)";
+	} else {
+		memset(name, 0, argv_size);
+		// Copy items
+		i = 0;
+		name_ptr = name;
+		while (i < argc) {
+			s = argv[i];
+			while (*s) *name_ptr++ = *s++;
+			*name_ptr++ = ' '; // space between arguments
+			++i;
+		}
+		// Remove extraneous space
+		*--name_ptr = 0;
+	}
+	currenttask_update_name(name);
+
+	// printf("lc4r: load mode = 0x%x\n", kernel_loadc4r_mode);
+	alt_file = 0;
+	file = argv[0];
+	// TODO: this section runs in exclusive mode for speed
+	critical_path_start();
+	// The RAM filesystem shadows the host: an image written there (by a
+	// compiler running under C4KE, say) is what runs.
+	module = 0;
+	if ((ramfs_data = ramfs_get(file, &ramfs_len)))
+		module = c4r_load_mem(file, ramfs_data, ramfs_len, kernel_loadc4r_mode);
+	else {
+		alt_file = strcpycat(file, ".c4r");
+		if ((ramfs_data = ramfs_get(alt_file, &ramfs_len)))
+			module = c4r_load_mem(alt_file, ramfs_data, ramfs_len, kernel_loadc4r_mode);
+		free(alt_file);
+		alt_file = 0;
+	}
+	if (!module)
+	if (!(module = c4r_load_opt(file, kernel_loadc4r_mode))) {
+		// Attempt a version with .c4r appended
+		alt_file = strcpycat(file, ".c4r");
+		if (!(module = c4r_load_opt(alt_file, kernel_loadc4r_mode))) {
+			printf("lc4r: unable to open '%s' or '%s'\n", file, alt_file);
+			free(alt_file);
+			free(name);
+			__c4_opcode(1, OP_TASK_EXIT);
+		}
+	}
+	critical_path_end();
+	// printf("lc4r: module %s loaded\n", alt_file ? alt_file : file);
+
+	// c4r_dump_info(module);
+	result = -1;
+	kernel_task_current[TASK_C4R] = (int)module;
+	if (module[C4R_LOADCOMPLETE]) {
+		// Everything above this line was the kernel loading a program.
+		// Everything below it is the program.
+		__c4_opcode(OP_TASK_EXEC);
+		result = loadc4r_execute(module, argc, argv);
+	}
+	else
+		printf("c4ke: load not complete\n");
+	if (alt_file) free(alt_file);
+
+	if (kernel_verbosity >= VERB_MAX)
+		printf("task '%s' (%d): exit with status %d\n", name, p, result);
+	free(name);
+	// opcode exit
+	__c4_opcode(result, OP_TASK_EXIT);
+}
+
+///
+// Interrupt handlers
+///
+
+// Cycle interrupt handler.
+// This is never directly called via an opcode, it happens as a trap with
+// type TRAP_HARD_IRQ.
+// Since it isn't a function call, we must take care to save and not modify
+// any registers.
+static void ih_cycle (int type, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	// TODO: move to a generic function? duplicates code from schedule
+	int *next, *curr;
+	int  ih_ran;
+
+	//if (critical_path_value) {
+	//	printf("c4ke: ih_cycle in critical path!? (level %d)\n", critical_path_value);
+	//	return;
+	//}
+
+	critical_path_start();
+	// Measured first, before anything below can perturb it.
+	++kernel_ih_ticks;
+	if (kernel_ih_depth) {
+		++kernel_ih_reentry;
+		if (kernel_ih_reentry <= 3)
+			printf("c4ke: ih_cycle RE-ENTERED at depth %d -- a tick landed inside the handler\n",
+			       kernel_ih_depth);
+	}
+	++kernel_ih_depth;
+	if (kernel_ih_lastarm) {
+		ih_ran = __c4_cycles() - kernel_ih_lastarm;
+		if (!kernel_ih_minrun || ih_ran < kernel_ih_minrun) kernel_ih_minrun = ih_ran;
+		if (ih_ran < IH_STARVED_CYCLES) {
+			++kernel_ih_starved;
+			// Said as it happens: the runs this is meant to explain are
+			// the ones that never reach a shutdown to report at.
+			if (kernel_ih_starved <= 3 || !(kernel_ih_starved % 1000))
+				printf("c4ke: tick %d left the resumed task only %d cycles\n",
+				       kernel_ih_starved, ih_ran);
+		}
+	}
+	current_task_timekeeping();
+
+	// Getting too close to stack overflow error, just return.
+	// (May lag system)
+	//if (sp <= (int *)kernel_task_current[TASK_BASE] + 100) {
+	//	printf(" !! c4ke: stack overflow warning, too many interrupts!! \n");
+	//	critical_path_end();
+	//	return;
+	//}
+
+	//printf("c4ke: forcing task schedule\n");
+	if ((next = kernel_task_find())) {
+		// printf("c4ke: ih_cycle found a task to run, switch from 0x%lx to 0x%lx\n",
+		//        kernel_task_current, next);
+		// Save current state
+		curr = kernel_task_current;
+		curr[TASK_REG_A]  = (int)a;
+		curr[TASK_REG_BP] = (int)bp;
+		curr[TASK_REG_SP] = (int)sp;
+		curr[TASK_REG_PC] = (int)returnpc;
+		// Load new state
+		if (kernel_pm_support)
+			mode = (next[TASK_PRIVS] == PRIV_KERNEL || next[TASK_LOADING]) ? MODE_UNPROTECTED : MODE_PROTECTED;
+		kernel_before_switch(next);
+		a  =        next[TASK_REG_A];
+		bp = (int *)next[TASK_REG_BP];
+		sp = (int *)next[TASK_REG_SP];
+		returnpc = (int *)next[TASK_REG_PC];
+		// Update the task pointer
+		// printf("c4ke: scheduled next task\n");
+		kernel_task_current = next;
+	} else {
+		// No task switch - probably idle is the only task available
+		// printf("c4ke: warning in ih_cycle: no other task found\n");
+		// Just return as normal since no other tasks found
+	}
+	kernel_task_timekeeping();
+	critical_path_end();
+	// The clock starts HERE, when the timer is live again, so what it
+	// measures is exactly what the resumed task gets to do.
+	kernel_ih_lastarm = __c4_cycles();
+	--kernel_ih_depth;
+}
+
+//
+// Signal handling
+//
+
+// Internal use only, takes a task pointer.
+// See kernel_signal for user accessible function
+static int internal_signal (int *task, int sig) {
+	int *sigh;
+
+	// printf("c4ke: internal_signal(task[%d], %d)\n", task[TASK_ID], sig);
+
+	sigh = kernel_task_sighandler(task, sig);
+
+	if (sigh[SIGH_ADDRESS]) {
+		// process_trap(task, TRAP_SIGNAL, sig, (int *)sigh[SIGH_ADDRESS]);
+		++task[TASK_SIGPENDING];
+		++sigh[SIGH_PENDING];
+		// printf("c4ke: Handler: 0x%x  Pending: %d  Blocked: %d\n",
+		//	sigh[SIGH_ADDRESS], sigh[SIGH_PENDING], sigh[SIGH_BLOCKED]);
+		// TODO: signals wake tasks, even if awaiting on a pid
+		kernel_task_wake(task);
+	} else {
+		// If SIGKILL, terminate it
+		if (sig == SIGKILL) {
+			printf("c4ke: SIGKILL on pid.%d, terminating it.\n", task[TASK_ID]);
+			kernel_print_task(task);
+			kernel_task_finish(task);
+			task[TASK_STATE] = STATE_ZOMBIE;
+			++kernel_tasks_zombie;
+		} else {
+			printf("c4ke: internal_signal(pid.%d, signal.%d) - no signal handler found\n",
+				   task[TASK_ID], sig);
+		}
+	}
+	return 0;
+
+	// Old code
+	// printf("c4ke: SIGINT(%d) on task %d, killing it!\n", sig, task[TASK_ID]);
+	// task[TASK_STATE] = STATE_ZOMBIE;
+	//if (kernel_task_current == task)
+	//	schedule();
+	//printf("c4ke: Handler: 0x%x  Pending: %d  Blocked: %d\n",
+	//	sigh[SIGH_ADDRESS], sigh[SIGH_PENDING], sigh[SIGH_BLOCKED]);
+}
+
+// Callable by user functions as kill
+static int kernel_signal (int pid, int sig) {
+	int *task;
+	if (!(task = kernel_task_find_pid(pid)))
+		return -1;
+	else
+		return internal_signal(task, sig);
+}
+
+// TODO: moveme
+static void dump_tasks () {
+	int i, *t;
+	i = 0;
+	t = kernel_tasks;
+	while (i < kernel_max_slot) {
+		kernel_print_task(t);
+		++i;
+		t = t + TASK__Sz;
+	}
+}
+
+// Callback handler for SIGINT
+static void signal_forwarder (int type, int sig, int mode, int a, int *bp, int *sp, int *returnpc) {
+	// Force override signal to our version of SIGINT
+	// TODO: no other signals will work
+	//sig = SIGINT;
+	if (kernel_shutdown) {
+		// Should not happen. Currently does if a signal handler is overwritten by invoking
+		// a new c4ke.
+		//printf("c4ke: signal_forwarder not removed during kernel shutdown, immediately exiting\n");
+		//exit(-100);
+		// Tell the task finisher to exit now
+		kernel_shutdown = 100;
+	}
+	trap_enter();
+	// printf("c4m: signal_forwarder(%d, %d)\n", type, sig);
+	if (kernel_task_focus && (kernel_task_focus[TASK_STATE] & STATE_RUNNING))
+		// Signal to the task in focus
+		internal_signal(kernel_task_focus, sig);
+	else {
+		printf("c4ke: Could not forward signal as no task is focused or focused task not running.\n");
+		printf("c4ke: As a result, requesting kernel shutdown.\n");
+		dump_tasks();
+		printf("c4ke: The task list is likely corrupt. Initiating immediate exit.\n");
+		exit(-99);
+		// Wake kernel task, it begins shutdown
+		kernel_task_wake(kernel_tasks);
+	}
+	trap_exit();
+}
+
+//static void sig_segv_handler (int type, int sig, int a, int *bp, int *sp, int *returnpc) {
+//	printf("c4ke: SIGSEGV caught on process %d!\n", kernel_task_current[TASK_ID]);
+//	kernel_print_task(kernel_task_current);
+//	exit(-1);
+//}
+
+///
+// More opcode handlers using functions above
+///
+
+
+// For now doesn't actually halt
+static void op_halt (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	// Increment halt counter unless we're idle task
+	if (kernel_task_current == kernel_task_idle) {
+		// Really halt..somehow
+	} else {
+		// TODO: removed
+		// ++kernel_hlt_count;
+	}
+	trap_exit();
+}
+
+static void op_time (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	// The time has just been updated prior to entering this trap, use that
+	a = kernel_last_time;
+	trap_exit();
+}
+
+static void op_task_cycles (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	a = kernel_task_current[TASK_CYCLES];
+	trap_exit();
+}
+
+// Request kernel shutdown: no-op right now, idle enables the kernel task
+static void op_shutdown (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	if (kernel_task_current == kernel_task_idle ||
+	    kernel_task_current == kernel_tasks) {
+	} else {
+		printf("c4ke: shutdown requested from non-idle task 0x%lx, ignored\n", kernel_task_current);
+	}
+	trap_exit();
+}
+
+static void op_kern_print_task_state (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	kernel_print_task_state(sp[1]);
+	trap_exit();
+}
+static void op_kern_getlen_task_state (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	a = 1; // Now hardcoded
+	trap_exit();
+}
+static void op_kern_task_current_id (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	a = kernel_task_current[TASK_ID];
+	trap_exit();
+}
+static void op_kern_task_running (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	int id, i, *t;
+	id = sp[1];
+	// printf("c4ke: kern_task_running requested for task %d\n", id);
+	// Skip kernel and idle
+	t = kernel_tasks + (TASK__Sz * 2);
+	i = 2;
+	while (i < KERN_TASK_COUNT) {
+		if (t[TASK_ID] == id) {
+			a = kernel_is_task_running(t);
+			trap_exit();
+			return;
+		}
+		++i;
+		t = t + TASK__Sz;
+	}
+	a = 0;
+	trap_exit();
+}
+// Get the current number of tasks
+static void op_kern_task_count (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	a = kernel_tasks_running;
+	trap_exit();
+}
+// Get the maximum number of tasks
+static void op_kern_tasks_max (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	a = KERN_TASK_COUNT;
+	trap_exit();
+}
+
+static int *kern_tasks_export_update_real_target;
+static void kern_tasks_export_update_real () {
+	int i, *t, task_name, kti_used, kte_name, kte_size;
+	int kms, *target;
+
+	target = kern_tasks_export_update_real_target;
+	kti_used = target[KTI_USED];
+	// Set the used tasks count and cache value for use in while loop
+	target[KTI_USED] = (kms = kernel_max_slot + 1);
+	// printf("c4ke: kern_tasks_export_update(0x%lx)\n", target);
+	// Fill in public details
+	target = target + KTI__Sz;
+	i = 0;
+	t = kernel_tasks;
+	kte_size = sizeof(int) * KTE__Sz; // cache for later
+	while (++i <= kms) {
+		kte_name = target[KTE_TASK_NAME];
+		// If a task is present...
+		if ((*target = *t)) {
+			task_name = t[TASK_NAME];
+			// If task name is different or kte_name not set
+			// TODO: strcmp that also gathers strlen for less cycles
+			// TODO: this whole section is questionable and takes far too many cycles
+			//if (kte_name ? _strcmp((char *)task_name, (char *)kte_name) : 1) {
+			if (kte_name ? (target[KTE_TASK_NAMELEN] != t[TASK_NAMELEN] && _strcmp((char *)task_name, (char *)kte_name)) : 1) {
+				target[KTE_TASK_ID] = t[TASK_ID];
+				target[KTE_TASK_PARENT] = t[TASK_PARENT];
+				target[KTE_TASK_PRIVS] = t[TASK_PRIVS];
+				if (kte_name) free((char *)kte_name);
+				if (!(kte_name = target[KTE_TASK_NAME] = (int)k_strcpy_alloc((char *)task_name))) {
+					printf("c4ke: KTE alloc failure\n");
+					target[KTE_TASK_NAMELEN] = 0;
+				} else {
+					// Update these values once only
+					target[KTE_TASK_NAMELEN] = _strlen((char *)kte_name);
+				}
+			}
+			// Update these values every cycle
+			target[KTE_TASK_WAITSTATE] = t[TASK_WAITSTATE];
+			target[KTE_TASK_CYCLES] = t[TASK_CYCLES];
+			target[KTE_TASK_CYCLES_HI] = t[TASK_CYCLES_HI];
+			target[KTE_TASK_TIMEMS] = t[TASK_TIMEMS];
+			target[KTE_TASK_TRAPS]  = t[TASK_TRAPS];
+			target[KTE_TASK_STACK]  = (t[TASK_BASE] ? (TASK_STACK_GUARD + TASK_STACK_SIZE - (t[TASK_REG_SP] - t[TASK_BASE])) : 0);
+			if (t != kernel_tasks)
+				target[KTE_TASK_ALLOC]  = t[TASK_MEM_ALLOC];
+			else
+				target[KTE_TASK_ALLOC]  = kernel_mem_alloc;
+			target[KTE_TASK_NICE]   = t[TASK_NICE_BASE];
+		} else if (kte_name) {
+			// Free KTE and reset data
+			free((char *)kte_name);
+			memset(target, 0, kte_size);
+		}
+		t = t + TASK__Sz;
+		target = target + KTE__Sz;
+	}
+	// Clear the rest of the entries
+	target = target + KTE__Sz;
+	while (++i <= kti_used) {
+		if ((kte_name = target[KTE_TASK_NAME])) {
+			// Free KTE and reset data
+			free((char *)kte_name);
+			memset(target, 0, kte_size);
+		}
+		target = target + KTE__Sz;
+		++i;
+	}
+	// printf("c4ke: kern_tasks_export_update finished\n");
+}
+static void kern_tasks_export_update () {
+	return kern_tasks_export_update_real();
+}
+static void kern_tasks_export_update_pure () {
+	__c4_invoke((int *)&kern_tasks_export_update_real);
+}
+static void op_kern_tasks_export (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	int sz, *result;
+	// printf("c4ke: Kern tasks export triggered by ins @ 0x%lx, task %d\n", returnpc, kernel_task_current[TASK_ID]);
+	sz = sizeof(int) * (KTI__Sz + (KERN_TASK_COUNT * KTE__Sz));
+	if (!(result = kmalloc(sz))) {
+		printf("c4ke: failed to malloc %d bytes\n", sz);
+		a = 0;
+		trap_exit();
+		return;
+	}
+	memset(result, 0, sz);
+
+	result[KTI_COUNT] = KERN_TASK_COUNT;
+	result[KTI_USED ] = kernel_tasks_loaded;
+	result[KTI_LIST ] = (int)(result + KTI__Sz);
+	kern_tasks_export_update_real_target = result;
+	kern_tasks_export_update();
+	a = (int)result;
+	trap_exit();
+}
+static void op_kern_tasks_export_update (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	kern_tasks_export_update_real_target = (int *)sp[1];
+	kern_tasks_export_update();
+	trap_exit();
+}
+static void op_kern_tasks_export_free (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	int *kti, *kte, i;
+
+	kti = (int *)sp[1];
+	kte = (int *)kti[KTI_LIST];
+	i = 0;
+	while (i++ < KERN_TASK_COUNT) {
+		if (kte[KTE_TASK_NAME]) {
+			free((char *)kte[KTE_TASK_NAME]);
+			kte[KTE_TASK_NAME] = 0;
+		}
+		kte = kte + KTE__Sz;
+	}
+
+	free(kti);
+	trap_exit();
+}
+static void op_kern_tasks_running (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	a = kernel_tasks_running;
+	trap_exit();
+}
+
+static void op_debug_printstack (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	printf("op_debug_printstack:\n");
+	printf("  pc: 0x%lx (%ld)\n", returnpc - 1, returnpc - 1);
+	printf("  instruction 0x%lx\n", ins);
+	printf("  a = 0x%lx (%ld)\n", a, a);
+	printf("  bp = 0x%lx\n", bp);
+	printf("  sp = 0x%lx\n", sp);
+	trap_exit();
+}
+
+static void op_debug_kernelstate (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	printf("c4ke: kernel state and counters:\n");
+	printf("    : tasks_unloaded: %2ld    tasks_loaded: %2ld\n",
+	       kernel_tasks_unloaded, kernel_tasks_loaded);
+	printf("    : tasks_running:  %2ld    tasks_waiting: %2ld\n",
+	       kernel_tasks_running, kernel_tasks_waiting);
+	printf("    : tasks_trapped:  %2ld    tasks_zombie:   %2ld\n",
+	       kernel_tasks_trapped,  kernel_tasks_zombie);
+	printf("    : task iterator:  %2ld    critical path:  %2ld\n",
+	       kernel_task_find_iterator, critical_path_value);
+	printf("Kernel stack trace:\n");
+	c4r_print_stacktrace(kernel_c4r, (int *)kernel_task_current[TASK_C4R], bp, returnpc);
+	trap_exit();
+}
+
+static void op_request_exclusive (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	// don't run trap_exit
+	a = 0;
+	kernel_task_current[TASK_EXCLUSIVE] = 1;
+}
+
+static void op_release_exclusive (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	a = 0;
+	kernel_task_current[TASK_EXCLUSIVE] = 0;
+	trap_exit();
+}
+
+// int __user_start_c4r(int argc, char **argv);
+// Start a .c4r file from a user process.
+// argv is copied based on argc.
+// return value is the process id, or 0 if failure.
+static void op_user_start_c4r (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	int argc;
+	char **argv;
+	int privileges;
+	char *name;
+	int *t;
+
+	argc = sp[1];
+	argv = (char **)sp[2];
+	name = (char *)sp[3];
+	privileges = sp[4];
+	// Remove kernel privileges if not a kernel task
+	if (!(kernel_task_current[TASK_PRIVS] & PRIV_KERNEL))
+		privileges = privileges & ~(PRIV_KERNEL);
+	// printf("op_user_start_c4r: argc: %d, argv:\n", argc);
+	t = start_task_builtin((int *)&task_loadc4r, argc, argv, name, privileges);
+	if (!t) {
+		printf("op_user_start_c4r: failed to start builtin\n");
+		a = 0;
+	} else {
+		// printf("op_user_start_c4r: builtin started, task id = %d\n", t[TASK_ID]);
+		a = t[TASK_ID];
+	}
+	trap_exit();
+}
+
+// int *signal (int sig, int *handler)
+// Install a signal handler
+static void op_user_signal (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	int *sigh, sig;
+	sig = sp[1];
+	if (sig < 0 || sig > SIGNAL_MAX) {
+		printf("c4ke: signal(%d, 0x%X) - invalid signal provided\n");
+	} else {
+		// printf("c4ke: install user signal handler, sig %d @ 0x%x\n", sp[1], sp[2]);
+		sigh = (int *)kernel_task_current[TASK_SIGHANDLERS];
+		sigh = sigh + (sig * SIGH__Sz);
+		sigh[SIGH_ADDRESS] = sp[2];
+	}
+	trap_exit();
+}
+
+// internal: blank signal handler
+static void kernel_task_sighandler_blank () {
+}
+
+// internal: set sig handlers for a kernel task.
+//           These handlers get set to a blank function.
+static void kernel_task_set_sighandlers (int *task) {
+	int sig, *sigh;
+
+	sig = 1;
+	sigh = (int *)task[TASK_SIGHANDLERS];
+	while (sig < SIGMAX) {
+		sigh[SIGH_ADDRESS] = (int)&kernel_task_sighandler_blank;
+		sigh = sigh + SIGH__Sz;
+		++sig;
+	}
+}
+
+// int pid ()
+// return the current task pid
+static void op_user_pid (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	a = pid();
+	trap_exit();
+}
+
+// int pid ()
+// return the current task pid
+static void op_user_parent (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	a = kernel_task_current[TASK_PARENT];
+	trap_exit();
+}
+
+// void currenttask_update_name (char *name)
+// Update the name of the current task
+static void op_currenttask_update_name (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	currenttask_update_name((char *)sp[1]);
+	trap_exit();
+}
+
+// int await_message(int timeout (0 = never))
+static void op_await_message(int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	*kernel_task_current = *kernel_task_current | STATE_WAITING;
+	kernel_task_current[TASK_WAITSTATE] = WSTATE_MESSAGE;
+	kernel_task_current[TASK_WAITARG] = kernel_last_time + sp[1]; // timeout
+	++kernel_tasks_waiting;
+	//trap_exit();
+	//schedule();
+	__c4_jmp((int *)&trap_schedule_in_trap + 2);
+	// TODO: fetch first message or return 0
+	// a = kernel_task_current[TASK_MBOX];
+	// printf("c4ke: op_await_message returning, a = %d\n", a);
+}
+
+// int kill(int pid, int signal) => 0 (success) -1 (error)
+// Send a signal to a process.
+// NOTE: not POSIX-compliant, presently only pid > 0 supported. No group signals
+// supported as process groups are not implemented.
+// TODO: implement process groups.
+static void op_user_kill (int trap, int ins, int mode, int a, int *bp, int *sp, int *returnpc) {
+	int *t, pid, sig;
+	pid = sp[1];
+	sig = sp[2];
+	// printf("c4ke: kill(%d, %d)\n", pid, sig);
+	if (pid < 0) {
+		printf("c4ke: kill(%d, %d) - invalid process id given\n", pid, sig);
+		a = -1;
+	} else if (sig < 0) {
+		printf("c4ke: kill(%ld, %ld) - process groups not implemented\n", pid, sig);
+		a = -1;
+	} else if (sig > SIGNAL_MAX) {
+		printf("c4ke: kill(%d, %d) - invalid signal provided\n", pid, sig);
+		a = -1;
+	} else if (!(t = kernel_task_find_pid(pid))) {
+		printf("c4ke: kill(%d, %d) - pid not found\n", pid, sig);
+		a = -1;
+	} else {
+		a = internal_signal(t, sig);
+	}
+	trap_exit();
+}
+
+//
+// Instructions per second
+//
+
+// Measure the instructions per second.
+static int measure_ips () {
+	int cycles, last_t, elapsed_t;
+	int timefactor;
+
+	// Wait until time moves. Ensures that we get a full second to measure
+	// under c4.
+	last_t = __time();
+	while(__time() == last_t)
+		; // do nothing
+
+	// Now measure for one second or KERNEL_MEASURE_QUICK, whichever comes first.
+	elapsed_t = 0;
+	last_t = __time();
+	cycles = __c4_cycles();
+	timefactor = KERNEL_TFACTOR_SLOW;
+	while(elapsed_t < KERNEL_MEASURE_QUICK)
+		elapsed_t = __time() - last_t;
+	if (elapsed_t < KERNEL_MEASURE_SLOW) // Better timestep than 1000?
+		timefactor = KERNEL_TFACTOR_QUICK;
+	cycles = __c4_cycles() - cycles;
+
+	return cycles * timefactor;
+}
+
+//
+// Command line parsing
+//
+static void show_help () {
+	printf("c4ke v%s: C4 Kernel Experiment\n"
+	       "          : [-dtmgO] [-v nn] [-c nn] [--] [init_file.c4r] [arguments...]\n"
+	       "           -d               Enable debug mode\n"
+	       "           -t               Enable test tasks\n"
+	       "           -m               Disable speed measurement\n"
+	       "           -g               Load .c4r symbols by default\n"
+		   "           -O               Disable C4-specific optimizations\n"
+	       "           -v nn            Enable verbose mode and set verbosity (0 - 100, default %i)\n"
+	       "           -c nn            Set cycle interrupt count (implies -m)\n"
+	       "           --               End arguments\n"
+	       "           init_file.c4r    File to use as init process (default: %s)\n"
+	       "           arguments...     Arguments to pass to init process\n"
+	       "           --help -h        Show this help\n"
+	       , VERSION(), kernel_verbosity, kernel_default_init);
+}
+
+// parse_commandline() => 0 success, 1 failure
+static int parse_commandline(int argc, char **argv) {
+	int   endargs, endopt;
+	char *arg;
+
+	endargs = endopt = 0;
+
+	// Skip first argument
+	--argc; ++argv;
+	if (!argc) return 0;
+	
+	///
+	/// Attempting to narrow down some funky issues with command line parsing segfaults...
+	if (argc < 0) {
+		printf("c4ke: parse_commandline() warning: argc underflow (%d)\n", argc);
+		return 0;
+	}
+	if (!argv) {
+		printf("c4ke: parse_commandline() warning: argv empty (1)\n");
+		return 0;
+	} else if (!*argv) {
+		printf("c4ke: parse_commandline() warning: argv empty (2)\n");
+		return 0;
+	}
+	///
+
+	// Read arguments
+	while(argc) {
+		// printf("c4ke: cmdline.%i == '%s'\n", argc, *argv);
+		// did argv go away?
+		if (!*argv) {
+			printf("c4ke BUG: argv gone?\n");
+			return 0;
+		}
+		if (!_strcmp(*argv, "--")) {
+			endargs = 1;
+		} else if (!_strcmp("--help", *argv) || !_strcmp("-h", *argv)) {
+			show_help();
+			return 1; // Abort
+		} else if (endargs == 0 && **argv == '-') {
+			arg = *argv + 1; // skip dash
+			endopt = 0;
+			while (!endopt && *arg) {
+				// Single character flags
+				if (*arg == 'd') { // Debug mode
+					c4r_debug = 1;
+					// kernel_verbosity = 100;
+				}
+				else if (*arg == 't') enable_test_tasks = 1;
+				else if (*arg == 'm') enable_measurement = 0;
+				else if (*arg == 'g') kernel_loadc4r_mode = kernel_loadc4r_mode | C4ROPT_SYMBOLS;
+				else if (*arg == 'O') kernel_disable_c4_optimizations = 1;
+				// Flags with options
+				else if (*arg == 'v') { // Verbosity
+					endopt = 1;
+					// grab spec from next argv
+					--argc; ++argv;
+					if (!argc) {
+						printf("c4ke: option '-v' requires an argument, none given\n");
+						return 1;
+					}
+					kernel_verbosity = _atoi(*argv, 10);
+					c4r_verbose = kernel_verbosity >= VERB_MED;
+				} else if (*arg == 'c') { // Cycle count
+					endopt = 1;
+					// grab from next argv
+					--argc; ++argv;
+					if (!argc) {
+						printf("c4ke: option '-c' requires an argument, none given\n");
+						return 1;
+					}
+					kernel_cycles_count = _atoi(*argv, 10);
+					kernel_cycles_force = 1; // skip minimum cycle count check
+					enable_measurement  = 0; // skip measurement
+				} else {
+					printf("Invalid option '%c'\n", *arg);
+					show_help();
+					return 1;
+				}
+				++arg;
+			}
+		} else {
+			// initfile
+			kernel_init = *argv;
+			kernel_init_argc = argc;
+			kernel_init_argv = argv;
+			return 0;
+		}
+		--argc; ++argv;
+	}
+
+	return 0;
+}
+
+///
+// Kernel shutdown procedures
+///
+
+static int kernel_finish_tasks_wait (int wait_time) {
+	int i, t, *tsk, start_time;
+
+	// track start time
+	start_time = __time();
+	t = 1; // force at least 1 loop
+	while(kernel_shutdown == 1 && t && __time() - start_time < wait_time) {
+		schedule();
+		i = 1; // skip kernel and idle
+		t = 0;
+		while(++i < KERN_TASK_COUNT) {
+			tsk = kernel_tasks + (TASK__Sz * i);
+			if (kernel_is_task_running(tsk)) {
+				++t; // track tasks needing to terminate
+			}
+		}
+	}
+
+	return t;
+}
+
+static int kernel_finish_tasks_send_all (int signal) {
+	int i, *tsk;
+	int remain;
+
+	i = 1; // skip kernel and idle
+	remain = 0;
+	while(++i < KERN_TASK_COUNT) {
+		tsk = kernel_tasks + (TASK__Sz * i);
+		if (kernel_is_task_running(tsk)) {
+			printf("c4ke: pid %d '%s' still running, sending signal %d\n", i, (char *)tsk[TASK_NAME], signal);
+			internal_signal(tsk, signal);
+			++remain; // track tasks needing to terminate
+		}
+	}
+
+	return remain;
+}
+
+static void kernel_finish_tasks_term () {
+	int i, *tsk;
+	int remain;
+
+	if (kernel_tasks_running && kernel_verbosity >= VERB_MIN)
+		printf("c4ke: sending all processes (%d) the TERM signal...\n", kernel_tasks_running - 2);
+
+	remain = kernel_finish_tasks_send_all(SIGTERM);
+	if (!remain) {
+		if (kernel_verbosity >= VERB_MIN)
+			printf("c4ke: no tasks waiting to finish\n");
+		return;
+	}
+
+	printf("c4ke: waiting for %d tasks to finish...\n", remain);
+	remain = kernel_finish_tasks_wait(KERNEL_FINISH_WAIT_TIME);
+	if (!remain) {
+		if (kernel_verbosity >= VERB_MIN)
+			printf("c4ke: SIGTERM successful, tasks finished\n");
+		return;
+	}
+
+	printf("c4ke: %d tasks remaining, sending KILL...\n", remain);
+	remain = kernel_finish_tasks_send_all(SIGKILL);
+	if (!remain) {
+		return;
+	}
+	remain = kernel_finish_tasks_wait(KERNEL_FINISH_WAIT_TIME);
+	if (!remain) {
+		printf("c4ke: SIGKILL successful, all tasks killed\n");
+		return;
+	}
+
+	if (kernel_verbosity >= VERB_MIN) {
+		printf("c4ke: %d tasks remaining, printing details...\n", remain);
+		i = 1; // skip kernel and idle
+		while(++i < KERN_TASK_COUNT) {
+			tsk = kernel_tasks + (TASK__Sz * i);
+			if (*tsk) {
+				kernel_print_task(tsk);
+			}
+		}
+	}
+}
+
+static void kernel_finish_tasks () {
+	int remain;
+
+	if (kernel_tasks_running <= 2) { // kernel and idle only?
+		if (kernel_verbosity >= VERB_MIN)
+			printf("c4ke: no tasks remaining to terminate\n");
+	} else {
+		kernel_finish_tasks_term();
+	}
+}
+
+
+///
+// Other functions
+///
+
+// Kernel constructor point, called by load-c4r.
+// The C4R structure is passed in, allowing stack traces in the kernel.
+static int __attribute__((constructor)) kernel_before_main (int *c4r) {
+	if (c4r) {
+		kernel_c4r = c4r;
+		//printf("c4ke: got kernel c4r structure:\n");
+		//c4r_dump_info(kernel_c4r);
+	}
+}
+
+static void kernel_default_event_handler (int event, int *task) {
+	// printf("(c4ke: default event handler %d)\n", event);
+}
+
+//
+// Kernel main entry point.
+//
+
+int main (int argc, char **argv) {
+	int t, *tsk, i, init_result;
+	char **tmp_argv;
+	int start_time, measurement_cycles;
+	int *code;
+
+	do_early_init();
+	critical_path_value = 0;
+	critical_path_start();
+
+	///
+	// Stage 0: configure initial state.
+	// - Set initialial global variables.
+	// - Read command line arguments, aborting if '--help' or invalid arguments
+	//   given.
+	// - Print banner and detected information.
+	// - Enable C4-specific optimizations
+	// - Measure instruction rate for an appropriate cycle interrupt time.
+	// - Initialize kernel extensions if present
+	///
+	readable_int_table = " kMGTPEZYRQ";
+	readable_int_max   = 11;
+	c4r_verbose = 0;
+	c4r_debug = 0;
+	kernel_last_time = __time();
+	kernel_max_slot = 1;
+	kernel_cycles_count = KERNEL_CYCLES_MIN;
+	kernel_cycles_force = 0;
+	kernel_verbosity = VERB_DEFAULT;
+	kernel_loadc4r_mode = C4ROPT_SYMBOLS; // TODO: was C4ROPT_NONE
+	kernel_init = kernel_default_init = "init.c4r";
+	kernel_init_argc = 0;
+	kernel_init_argv = 0;
+	kernel_running = 0;
+	enable_test_tasks = 0;
+	enable_measurement = 1;
+	c4_info = __c4_info();
+	if (parse_commandline(argc, argv)) {
+		// Abort early
+		return -1;
+	}
+	// Schedule on a real timer if this machine has one.
+	//
+	// `-c nn` is the override, and it is the honest one: it says "use
+	// the cycle interrupt, at this interval", which is a thing to say
+	// only if you want the cycle interrupt. Tests that pin a boot want
+	// exactly that, and so does anyone comparing two runs.
+	if (!kernel_cycles_force)
+		kernel_pit_ms = kernel_pit_probe(C4KE_PIT_MS);
+	if (kernel_pit_ms) {
+		// The measurement exists to turn "how fast is this host" into a
+		// cycle count, and a timer that counts milliseconds has no use
+		// for the answer. Skipping it is most of a second off the boot.
+		enable_measurement = 0;
+		kernel_cycles_count = 0;
+	}
+	// TODO: schedule_task_mask unused
+	schedule_task_mask = STATE_LOADED | STATE_RUNNING | STATE_WAITING;
+	kernel_tasks_unloaded = KERN_TASK_COUNT;
+	opcode_TLEV = __opcode("TLEV");
+	opcode_PSH = __opcode("PSH");
+
+	// Print the banner
+	if (kernel_verbosity >= VERB_MIN)
+		printf("\nc4ke v%s starting\n", VERSION());
+	
+	// Print system info
+	if (kernel_verbosity >= VERB_MIN) {
+		printf("c4ke: system ");
+		print_c4_info();
+		printf("\n");
+		//printf("c4ke: protected mode: (%d) %s\n", kernel_pm_support, kernel_pm_support ? "active" : "inactive");
+	}
+
+	// To make available, run via load-c4r:
+	//  c4m load-c4r.c -- c4ke
+	if (kernel_verbosity >= VERB_MED) {
+		printf("c4ke: kernel symbols %s\n", kernel_c4r ? "present:" : "unavailable");
+		if (kernel_c4r)
+			c4r_dump_info(kernel_c4r);
+	}
+
+	// This removes any cycle interrupt handler (saving the old value), so that
+	// initialization cannot be interrupted.
+	old_ih_cycle_handler = __c4_configure(C4KE_CONF_CYCLE_INTERRUPT_HANDLER, 0);
+	old_ih_cycle_interval = __c4_configure(C4KE_CONF_CYCLE_INTERRUPT_INTERVAL, 0);
+	if (old_ih_cycle_handler || kernel_verbosity >= VERB_MAX) {
+		printf("c4ke: clear cycle interrupt handler, old @ 0x%lx\n", old_ih_cycle_handler);
+		printf("c4ke: clear old cycle interrupt interval @ %ld\n", old_ih_cycle_interval);
+	}
+
+	// Enable C4-specific optimizations, currently for:
+	// * kernel_task_find()
+		// Setup kernel_task_find to JMP immediately
+		code = (int *)&kernel_task_find;
+		*code++ = __opcode("JMP");
+		*code = (int)&kernel_task_find_real;
+		// Under C4, patch in the pure functions that can run faster in C4 than C4M.
+		if (!kernel_disable_c4_optimizations && c4_info & C4I_C4) {
+			if (kernel_verbosity >= VERB_MED)
+				printf("c4ke: enabling C4-specific optimizations\n");
+			*code = (int)&kernel_task_find_pure;
+		}
+	// * kern_tasks_export_update()
+		code = (int *)&kern_tasks_export_update;
+		*code++ = __opcode("JMP");
+		*code = (int)&kern_tasks_export_update_real;
+		if (!kernel_disable_c4_optimizations && c4_info & C4I_C4) {
+			*code = (int)&kern_tasks_export_update_pure;
+		}
+
+	// Measure instructions per second
+	//  - disable for faster startup using '-m'
+	if (enable_measurement) {
+		if (kernel_verbosity >= VERB_MED)
+			printf("c4ke: measuring instructions per second, if this step gets stuck, pass -a to c4m...\n");
+		measurement_cycles = __c4_cycles();
+		kernel_ips = measure_ips();
+		measurement_cycles = __c4_cycles() - measurement_cycles;
+		if (kernel_verbosity >= VERB_MED) {
+			printf("c4ke: instructions per second roughly: ");
+			print_int_readable(kernel_ips);
+			printf(", measurement cycles: ");
+			print_int_readable(measurement_cycles);
+			printf("\n");
+		}
+		// Find a suitable IH_MAX_CYCLES_PER_SECOND
+		t = IH_MAX_CYCLES_PER_SECOND;
+		i = kernel_ips;
+		kernel_cycles_count = i / 10; // if not fast enough, below loop will not run
+		// TODO: calibration loop removed
+		if (0) {
+			while (i > 0) {
+				if (i / t > KERNEL_CYCLES_MIN) {
+					kernel_cycles_count = i = kernel_ips / t;
+				} else {
+					i = 0;
+				}
+				//printf("c4ke: i = %d, t = %d, kcc = %d\n", i, t, kernel_cycles_count);
+				i = i / 10;
+				t = t * 2;
+			}
+			if (kernel_verbosity >= VERB_MAX)
+				printf("c4ke: after measurement, i = %d, t = %d, kcc = %d\n",
+					   i, t, kernel_cycles_count);
+		}
+	}
+	if (kernel_pit_ms) {
+		if (kernel_verbosity >= VERB_MIN)
+			printf("c4ke: scheduling on the interval timer, every %dms of real time\n",
+			       kernel_pit_ms);
+	} else {
+		if (!kernel_cycles_force && kernel_cycles_count < KERNEL_CYCLES_MIN)
+			kernel_cycles_count = KERNEL_CYCLES_MIN;
+		else
+			kernel_cycles_count = kernel_cycles_count / 2;
+		if (kernel_verbosity >= VERB_MIN) {
+			printf("c4ke: setting cycle interrupt to %ld (", kernel_cycles_count);
+			print_int_readable(kernel_cycles_count);
+			printf(") cycles\n");
+		}
+	}
+	if (kernel_cycles_count < KERNEL_SLOW_THRESHOLD) {
+		// kernel_is_slow = 1;
+		// if (kernel_verbosity >= VERB_MIN)
+		//	printf("c4ke: slow kernel speed detected, enabling some workarounds for slow systems.\n");
+	}
+	kernel_cycles_base = kernel_cycles_count;
+	// Ensure SIGRTMAX is in range of SIGNAL_MAX
+	if (SIGNAL_MAX < SIGRTMAX)
+		printf("c4ke: WARN: SIGNAL_MAX(%d) < SIGRTMAX(%d)\n", SIGNAL_MAX, SIGRTMAX);
+	// Initialize extensions if not already done
+	kext_initialize();
+	if (kernel_verbosity >= VERB_MED)
+		printf("c4ke: kext_initialize with %d extensions at 0x%lx\n", kernel_ext_count, kernel_extensions);
+	// Run the init functions of extensions
+	if (kernel_ext_count) {
+		if (kernel_verbosity >= VERB_MED)
+			printf("c4ke: running kernel extensions init for %d extensions...\n", kernel_ext_count);
+		kext_run_all(KEXT_INIT);
+	}
+#if CONFIG_KEVENTS
+	// Install default event handler if none provided by extensions
+	if (!kernel_event_handler) kernel_event_handler = (int *)&kernel_default_event_handler;
+#endif
+
+	///
+	// Stage 1: allocate kernel memory
+	// - Allocate custom opcodes table and kernel tasks table.
+	// - Initialize kernel extensions data if not already done by a constructor
+	///
+	if (!(custom_opcodes = kmalloc((t = sizeof(int) * CO_MAX)))) {
+		printf("Unable to allocate %d bytes for custom opcode vector\n", t);
+		return -1;
+	}
+	memset(custom_opcodes, 0, t);
+	if (kernel_verbosity >= VERB_MED)
+		printf("c4ke: allocated %d (0x%x) bytes for custom_opcodes\n", t, t);
+
+	// TODO: is 1 + kern task count correct? fixes a bad read
+	if (!(kernel_tasks = kmalloc((t = sizeof(int) * TASK__Sz * (1 + KERN_TASK_COUNT))))) {
+		printf("Unable to allocate %d bytes for %d tasks\n", t, KERN_TASK_COUNT);
+		return -2;
+	}
+	memset(kernel_tasks, 0, t);
+	if (kernel_verbosity >= VERB_MED)
+		printf("c4ke: allocated %d (0x%x) bytes for kernel tasks, %d tasks max, %d bytes each, %d bytes ext data\n",
+		       t, t, KERN_TASK_COUNT, TASK__Sz * sizeof(int), kernel_task_extdata_size);
+
+	///
+	// Stage 2: setup opcode handlers
+	// - These allow us to extend C4(m) functionality even further by directly
+	//   modifying register values.
+	// - Call the init functions of all kernel extensions.
+	///
+	// Install the bare necesseties requires to run the kernel
+	install_custom_opcode(OP_REQUEST_SYMBOL, (int *)&op_request_symbol);
+	install_custom_opcode(OP_SCHEDULE, (int *)&op_schedule);
+	// printf("c4ke: installed OP_SCHEDULE using handler 0x%x\n", (int *)&op_schedule);
+	install_custom_opcode(OP_TASK_FINISH, (int *)&op_task_finish);
+	// printf("c4ke: installed OP_TASK_FINISH using handler 0x%x\n", (int *)&op_task_finish);
+	install_custom_opcode(OP_TASK_EXIT, (int *)&op_task_exit);
+	install_custom_opcode(OP_TASK_EXEC, (int *)&op_task_exec);
+	install_custom_opcode(OP_TASK_FOCUS, (int *)&op_task_focus);
+	install_custom_opcode(OP_PEEK_BP, (int *)&op_peek_bp);
+	install_custom_opcode(OP_PEEK_SP, (int *)&op_peek_sp);
+	install_custom_opcode(OP_C4INFO, (int *)&op_c4info);
+	install_custom_opcode(OP_AWAIT_PID, (int *)&op_await_pid);
+	install_custom_opcode(OP_USER_SLEEP, (int *)&op_user_sleep);
+	// Install various functions used by u0.h to communicate with the kernel
+	install_custom_opcode(OP_TASK_CYCLES, (int *)&op_task_cycles);
+	install_custom_opcode(OP_SHUTDOWN, (int *)&op_shutdown);
+	install_custom_opcode(OP_HALT, (int *)&op_halt);
+	// printf("c4ke: installed OP_HALT using handler 0x%x\n", (int *)&op_halt);
+	install_custom_opcode(OP_TIME, (int *)&op_time);
+	//install_custom_opcode(OP_KERN_PRINT_TASK_STATE, (int *)&op_kern_print_task_state);
+	//install_custom_opcode(OP_KERN_GETLEN_TASK_STATE, (int *)&op_kern_getlen_task_state);
+	install_custom_opcode(OP_KERN_TASK_CURRENT_ID, (int *)&op_kern_task_current_id);
+	install_custom_opcode(OP_KERN_TASK_RUNNING, (int *)&op_kern_task_running);
+	install_custom_opcode(OP_KERN_TASK_COUNT, (int *)&op_kern_task_count);
+	install_custom_opcode(OP_KERN_TASKS_MAX, (int *)&op_kern_tasks_max);
+	install_custom_opcode(OP_KERN_TASKS_EXPORT, (int *)&op_kern_tasks_export);
+	install_custom_opcode(OP_KERN_TASKS_EXPORT_UPDATE, (int *)&op_kern_tasks_export_update);
+	install_custom_opcode(OP_KERN_TASKS_EXPORT_FREE, (int *)&op_kern_tasks_export_free);
+	install_custom_opcode(OP_KERN_TASKS_RUNNING, (int *)&op_kern_tasks_running);
+	install_custom_opcode(OP_USER_START_C4R, (int *)&op_user_start_c4r);
+	install_custom_opcode(OP_VFS_PUT, (int *)&op_vfs_put);
+	install_custom_opcode(OP_VFS_GET, (int *)&op_vfs_get);
+	install_custom_opcode(OP_VFS_UNLINK, (int *)&op_vfs_unlink);
+	install_custom_opcode(OP_VFS_COUNT, (int *)&op_vfs_count);
+	install_custom_opcode(OP_VFS_NAME, (int *)&op_vfs_name);
+	install_custom_opcode(OP_USER_PID, (int *)&op_user_pid);
+	install_custom_opcode(OP_USER_PARENT, (int *)&op_user_parent);
+	install_custom_opcode(OP_USER_SIGNAL, (int *)&op_user_signal);
+	install_custom_opcode(OP_USER_KILL, (int *)&op_user_kill);
+	install_custom_opcode(OP_CURRENTTASK_UPDATE_NAME, (int *)&op_currenttask_update_name);
+	install_custom_opcode(OP_AWAIT_MESSAGE, (int *)&op_await_message);
+	install_custom_opcode(OP_DEBUG_PRINTSTACK, (int *)&op_debug_printstack);
+	install_custom_opcode(OP_DEBUG_KERNELSTATE, (int *)&op_debug_kernelstate);
+	install_custom_opcode(OP_KERN_REQUEST_EXCLUSIVE, (int *)&op_request_exclusive);
+	install_custom_opcode(OP_KERN_RELEASE_EXCLUSIVE, (int *)&op_release_exclusive);
+
+	///
+	// Stage 3: setup tasks
+	// The builtin kernel task as well as the idle task / reaper are essential.
+	// If the '-t' option is given, two test print loop tasks are started.
+	// The init process, defaulting to 'init', is started here.
+	// Note that "started" means a task with entry task_loadc4r is created. That
+	// task may take some time to load and patch the .c4r file given.
+	///
+
+	// Kernel task, which is the currently executing code. The kernel calls await_pid()
+	// on the init task, and will be woken when the init process exits or something signals
+	// the kernel to shut down (eg, the signal handler.)
+	// On a task switch, time (cycles) spent searching for the next task to run,
+	// and saving/loading register state, are assigned to this kernel task to
+	// gain an understanding of how much work the kernel is doing.
+	if (kernel_verbosity >= VERB_MAX)
+		printf("c4ke: creating kernel task...\n");
+	kernel_task_current = kernel_tasks;
+	kernel_task_current[TASK_ID]     = 0;
+	kernel_task_current[TASK_NICE]   = kernel_task_current[TASK_NICE_BASE] = 0;
+	kernel_task_current[TASK_STATE]  = STATE_LOADED | STATE_RUNNING;
+	kernel_task_current[TASK_REG_A]  = 0;
+	kernel_task_current[TASK_REG_BP] = __c4_opcode(OP_PEEK_BP); //0;
+	kernel_task_current[TASK_REG_SP] = 0;
+	kernel_task_current[TASK_REG_PC] = 0;
+	kernel_task_current[TASK_BASE]   = 0; // no base to free
+	kernel_task_current[TASK_PRIVS]  = PRIV_KERNEL;
+	kernel_task_current[TASK_SIGHANDLERS] = (int)kmalloc((t = sizeof(int) * SIGH__Sz * SIGNAL_MAX));
+	if (!kernel_task_current[TASK_SIGHANDLERS]) {
+		printf("c4ke: unable to allocate kernel sig handler\n");
+		return -1;
+	}
+	kernel_task_set_sighandlers(kernel_task_current);
+	kernel_task_current[TASK_SIGPENDING] = 0;
+	kernel_task_current[TASK_ARGC]  = kernel_task_current[TASK_ARGV] = 0;
+	kernel_task_current[TASK_ARGV_DATA] = 0;
+	kernel_task_current[TASK_PARENT] = 0;
+	kernel_task_current[TASK_WAITSTATE] = kernel_task_current[TASK_WAITARG] = 0;
+	kernel_task_current[TASK_ENTRY] = 0;
+	kernel_task_current[TASK_EXIT_CODE] = 0;
+	kernel_task_current[TASK_TIMEMS] = 0;
+	kernel_task_current[TASK_CYCLES] = __c4_cycles();
+	kernel_task_current[TASK_CYCLES_HI] = 0;
+	kernel_task_current[TASK_TRAPS] = 0;
+	kernel_task_current[TASK_C4R] = 0;
+	kernel_task_current[TASK_MBOX] = kernel_task_current[TASK_MBOX_SZ] = 0;
+	kernel_task_current[TASK_MBOX_COUNT] = 0;
+	kernel_task_current[TASK_NAME]   = (int)k_strcpy_alloc("kernel");
+	if (kernel_verbosity >= VERB_MAX)
+		printf("c4ke: task name updated\n");
+	if (!kernel_task_current[TASK_NAME]) {
+		printf("c4ke: string allocation failure\n");
+		kernel_task_current[TASK_NAME] = (int)"kernel";
+	}
+	kernel_task_current[TASK_NAMELEN] = _strlen((char *)kernel_task_current[TASK_NAME]);
+	kernel_task_current[TASK_EXTDATA] = 0;
+	++kernel_tasks_loaded;
+	++kernel_tasks_running;
+	if (kernel_verbosity >= VERB_MAX)
+		kernel_print_task(kernel_task_current);
+
+	// Allocate a temporary argv for use with start_task_builtin()
+	// TODO: Why was tmp_argv so small? (wasn't multiplied)
+	if (!(tmp_argv = malloc((t = sizeof(char **) * 32)))) {
+		printf("c4ke: Unable to allocate some memory (%ld bytes)\n", t);
+		return -4;
+	}
+	memset(tmp_argv, 0, t);
+
+	// Idle task, essential for task reaping. Also performs system halt via sleep()
+	if (kernel_verbosity >= VERB_MAX)
+        printf("c4ke: creating idle task..\n");
+	tmp_argv[0] = "idle";
+	if (!(kernel_task_idle = start_task_builtin((int *)&task_idle, 1, tmp_argv, "kernel/idle", PRIV_KERNEL))) {
+		printf("Unable to create idle task!\n");
+		return -3;
+	}
+	kernel_task_set_sighandlers(kernel_task_idle);
+	if (kernel_verbosity >= VERB_MED)
+		printf("c4ke: kernel_task_idle at 0x%x\n", kernel_task_idle);
+	kernel_task_idle[TASK_NICE] = kernel_task_idle[TASK_NICE_BASE] = NICE_NORMAL;
+
+	// Run kernel extension start callbacks
+	if (kernel_ext_count) {
+			if (kernel_verbosity >= VERB_MED)
+				printf("c4ke: running kernel extensions start for %d extensions...\n", kernel_ext_count);
+		kext_run_all(KEXT_START);
+	}
+
+	// Test tasks, using kernel functions as entry points.
+	if (enable_test_tasks) {
+		tmp_argv[0] = "printloop1";
+		if (!(tsk = start_task_builtin((int *)&task_printloop_1, 1, tmp_argv, "printloop1", PRIV_USER))) {
+			printf("c4ke: Unable to start first printloop\n");
+		} else {
+			if (kernel_verbosity >= VERB_MED)
+				printf("c4ke: task_print_loop_1 started at 0x%x\n", tsk);
+			tsk[TASK_NICE] = tsk[TASK_NICE_BASE] = NICE_NORMAL;
+		}
+		tmp_argv[0] = "printloop2";
+		if (!(tsk = start_task_builtin((int *)&task_printloop_2, 1, tmp_argv, "printloop2", PRIV_USER))) {
+			printf("c4ke: Unable to start second printloop\n");
+		} else {
+			if (kernel_verbosity >= VERB_MED)
+				printf("c4ke: task_print_loop_2 started at 0x%x\n", tsk);
+			tsk[TASK_NICE] = tsk[TASK_NICE_BASE] = NICE_NORMAL;
+		}
+	}
+
+	// Init process
+	if (!kernel_init_argv) {
+		// No argc or argv given, synthesize
+		tmp_argv[0] = kernel_init;
+		kernel_init_argc = 1;
+		kernel_init_argv = tmp_argv;
+	}
+    if (kernel_verbosity >= VERB_MED)
+        printf("c4ke: kernel_init_argc = %i, kernel_init_argv = 0x%x\n", kernel_init_argc, kernel_init_argv);
+	if (!(kernel_init_task = start_task_builtin((int *)&task_loadc4r, kernel_init_argc, kernel_init_argv, "init", PRIV_KERNEL))) {
+		// Launch emergency shell external
+		printf("c4ke: Unable to start init process, starting emergency shell\n");
+		tmp_argv[0] = "eshell.c4r";
+		if (!(kernel_init_task = start_task_builtin((int *)&task_loadc4r, 1, tmp_argv, "eshell", PRIV_KERNEL))) {
+			printf("c4ke: Unable to start emergency shell\n");
+		}
+		if (kernel_verbosity >= VERB_MED)
+			printf("c4ke: emergency shell started at 0x%x\n", kernel_init_task);
+	}
+	if (kernel_verbosity >= VERB_MED)
+		printf("c4ke: init process '%s' started at 0x%x\n", *kernel_init_argv, kernel_init_task);
+	// Set focus to the init task
+	kernel_task_focus = kernel_init_task;
+
+	// Get rid of tmp_argv
+	free(tmp_argv);
+
+	///
+	// Stage 4: begin executing tasks
+	// - Install the main opcode trap handler
+	// - Install the signal handler
+	// - Save some details about the kernel startup state
+	// - Configure the cycle interrupt handler and then call await_pid(), which will
+	//   sleep the calling code until the init process finishes.
+	//   This is the last code executed by the kernel before it begins executing
+	//   the tasks it has. All setup is complete and all tasks may now run.
+	///
+
+	// Install the main trap handler
+	install_trap_handler((int *)&trap_handler);
+	if (kernel_verbosity >= VERB_MAX)
+		printf("c4ke: installed trap handler at 0x%lx, previous = 0x%lx\n",
+	           (int *)&trap_handler, last_trap_handler);
+
+	if (kernel_verbosity >= VERB_MAX)
+		printf("c4ke: configure signal handlers...\n");
+	old_sig_int  = __c4_signal(__c4_sigint(), (int *)&signal_forwarder);
+	// old_sig_segv = __c4_signal(SIGSEGV, (int *)&sig_segv_handler);
+	if (kernel_verbosity >= VERB_MAX)
+		printf("c4ke: old sig int handler: 0x%lx\n", old_sig_int);
+	if (kernel_verbosity >= VERB_MAX) {
+		printf("c4ke: configuring interrupts...\n");
+		printf("c4ke: configure cycle interrupt handler to 0x%lx\n", (int *)&ih_cycle);
+	}
+	__c4_configure(C4KE_CONF_CYCLE_INTERRUPT_HANDLER, (int *)&ih_cycle);
+	if (kernel_verbosity >= VERB_MIN) {
+		if (kernel_pit_ms)
+			printf("c4ke: arm the interval timer at %dms\n", kernel_pit_ms);
+		else
+			printf("c4ke: configure cycle interrupt interval to %d\n", kernel_cycles_count);
+	}
+	critical_path_end();
+	kernel_schedule_time = __time();
+	// Save cycle count
+	kernel_last_cycle = __c4_cycles() - measurement_cycles;
+	kernel_tasks[TASK_CYCLES] = kernel_last_cycle;
+	kernel_tasks[TASK_CYCLES_HI] = 0;
+	if (kernel_verbosity >= VERB_MIN) {
+		printf("c4ke: Kernel ready in %ldms after ", kernel_schedule_time - kernel_start_time);
+		print_int_readable(kernel_last_cycle);
+		printf(" cycles, entering task scheduling...\n\n");
+	}
+	kernel_last_cycle = __c4_cycles();
+	if (kernel_pit_ms) *(int *)C4KE_PIT_REG = kernel_pit_ms;
+	else __c4_configure(C4KE_CONF_CYCLE_INTERRUPT_INTERVAL, kernel_cycles_count);
+	// No longer in early boot
+	kernel_running = 1;
+
+	//
+	// Setup kernel to wait on init task to finish.
+	// This calls schedule() which transfers control to other tasks.
+	// It will not return until the init task completes.
+	//
+	init_result = await_pid(kernel_init_task[TASK_ID]);
+
+	///
+	// Stage 5: begin shutdown
+	// The init process has ended, begin kernel shutdown.
+	// First sends TERM signal to tasks, followed by KILL after a delay.
+	///
+	kernel_shutdown_time = __time();
+	kernel_shutdown = 1;
+	if (kernel_verbosity >= VERB_MIN)
+		printf("c4ke: init task completed with exit code %d, settling...\n", init_result);
+	__c4_opcode(100, OP_USER_SLEEP); // sleep(100);
+	if (kernel_verbosity >= VERB_MIN)
+		printf("c4ke: shutting down...\n");
+	kernel_finish_tasks();
+
+	///
+	// Stage 6: stop multitasking and finish the kernel.
+	// Once satisfied all tasks are complete, removes the cycle interrupt handler
+	// and clears all tasks.
+	// Getting interrupted at this stage would be bad, so ensure any cleanup code
+	// only runs after the cycle interrupt is disabled.
+	// Before exiting, old cycle interrupt, trap handlers, and signal handlers
+	// are restored.
+	///
+	if (kernel_ext_count) {
+		// Run kernel extensions for shutdown
+		if (kernel_verbosity >= VERB_MED)
+			printf("c4ke: running kernel extensions shutdown for %d extensions...\n", kernel_ext_count);
+		kext_run_all(KEXT_SHUTDOWN);
+	}
+	if (kernel_verbosity >= VERB_MED)
+		printf("c4ke: halting cycle interrupt...\n");
+	// Stop the timer BEFORE clearing the flag, or the flag is cleared
+	// while the timer is still live and nothing ever turns it off --
+	// which on the board means a trap into a handler whose tasks have
+	// all been freed.
+	if (kernel_pit_ms) {
+		*(int *)C4KE_PIT_REG = 0;
+		kernel_pit_ms = 0;
+	}
+	__c4_configure(C4KE_CONF_CYCLE_INTERRUPT_INTERVAL, 0);
+	if (kernel_verbosity >= VERB_MED)
+		printf("c4ke: cleaning up all tasks...\n");
+	i = 1; // Skip kernel task (cleaned later)
+	while (++i < KERN_TASK_COUNT) {
+		kernel_clean_task(kernel_tasks + (TASK__Sz * i));
+	}
+	if (kernel_verbosity >= VERB_MAX)
+		printf("c4ke: tasks shutdown\n");
+	if (kernel_verbosity >= VERB_MAX)
+		printf("c4ke: cleaning up kernel task\n");
+	kernel_clean_task(kernel_tasks); // clean the kernel task now
+	if (kernel_verbosity >= VERB_MAX)
+		printf("c4ke: unloading memory\n");
+	free(custom_opcodes);
+	free(kernel_tasks);
+	free(kernel_extensions);
+	if (old_ih_cycle_handler) {
+		if (kernel_verbosity >= VERB_MED)
+			printf("c4ke: restoring old cycle interrupt handler @ 0x%lx\n", old_ih_cycle_handler);
+		__c4_configure(C4KE_CONF_CYCLE_INTERRUPT_HANDLER, old_ih_cycle_handler);
+	}
+	if (old_ih_cycle_interval) {
+		if (kernel_verbosity >= VERB_MED)
+			printf("c4ke: restoring old cycle interrupt interval @ %ld\n", old_ih_cycle_interval);
+		__c4_configure(C4KE_CONF_CYCLE_INTERRUPT_INTERVAL, old_ih_cycle_interval);
+	}
+	if (last_trap_handler) {
+		if (kernel_verbosity >= VERB_MIN)
+			printf("c4ke: unloading trap handler, restoring 0x%lx\n", last_trap_handler);
+		install_trap_handler(last_trap_handler);
+	}
+	if (old_sig_int) {
+		if (kernel_verbosity >= VERB_MED)
+			printf("c4ke: restoring old signal handler @ 0x%lx\n", old_sig_int);
+		__c4_signal(__c4_sigint(), old_sig_int);
+	}
+	// Always, at any verbosity: a task that overran its stack corrupted
+	// the heap, and every result produced after that point is suspect.
+	if (kernel_stack_overruns)
+		printf("c4ke: WARNING: %d task(s) overran their stack this session.\n",
+		       kernel_stack_overruns);
+	if (kernel_verbosity >= VERB_MED)
+		printf("c4ke: %d timer ticks, %d re-entrant, %d starved, thinnest run %d cycles.\n",
+		       kernel_ih_ticks, kernel_ih_reentry, kernel_ih_starved, kernel_ih_minrun);
+	if (kernel_verbosity >= VERB_MED) {
+		t = __time();
+		printf("c4ke: clean shutdown in ");
+		print_time_readable(t - kernel_shutdown_time);
+		printf("s, init process ran for ");
+		print_time_readable(kernel_shutdown_time - kernel_schedule_time);
+		printf("s, total C4KE runtime ");
+		print_time_readable(t - kernel_start_time);
+		printf("s\nHave a nice day :)\n");
+	}
+
+	return init_result;
+}
+
+// When compiled with a preprocessor, include all the extensions:
+#include "src/c4ke/extensions/c4ke_ipc.c"
+#include "src/c4ke/extensions/c4ke_plus.c"
+#include "src/c4ke/extensions/c4ke_pm.c"
+#include "src/c4ke/extensions/c4ke_dos.c"
+#include "src/c4ke/extensions/c4ke_mbox.c"
+
+#endif // ifndef C4KE

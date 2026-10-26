@@ -1,0 +1,223 @@
+// bare.c -- libc's system layer (sys.h) with no C4IX under it: on the
+// bare machine (libjs booting the program itself), or as a C4DOS transient.
+//
+// libc is built on libc4ix's syscall functions. A program linked
+// statically with libc and this file instead runs where there is no
+// kernel to call: what the machine does itself, it does with its own
+// opcodes -- OPEN, READ and CLOS on its drives, PUTC to the console, USLP,
+// EXIT -- and what it cannot, it says so (-1). Under C4DOS, which writes
+// its API table into __c4dos_api when it loads the program (include/
+// c4dos.h), files are written to DOS's RAM disk and read back from it, and
+// exit returns to the A> prompt instead of stopping the machine.
+//
+// DOS's functions are called through the table as function pointers:
+// c4dos.h's slot-and-stub calls are for c4cc, which has none.
+//
+// A file opened for reading is read whole into memory when it opens, from
+// the drive or from DOS, and read and lseek work there: the machine has no
+// seek, and Doom reads its WAD a lump at a time from wherever the lump is.
+//
+// Compiled WITHOUT -fno-builtin, as opcodes.c is, so open, read, close,
+// putchar, malloc and exit here are the opcodes. Everything here is the
+// subset the whole machine family has: no file the machine itself can
+// write, no directories but the one, no processes.
+
+int *__c4dos_api;        // the loader's, under C4DOS; 0 on the bare machine
+
+enum {
+    DOS_MAGIC_SLOT = 0, DOS_EXIT = 1, DOS_CREATE = 2, DOS_WRITE = 3, DOS_CLOSE = 4,
+    DOS_VERSION = 5, DOS_OPEN = 6, DOS_READ = 7, DOS_RCLOSE = 8,
+    DOS_CONWRITE = 16, DOS_CONREAD = 17, DOS_MAGIC = 4404292,          // include/c4dos.h's
+    FD_MAX = 32,
+    F_MEM = 1, F_DOSW = 3
+};
+
+// a descriptor past the console's three: what it is; a file being written
+// has DOS's handle, one being read its bytes, how many, and where it is
+static int fd_kind[FD_MAX];
+static int fd_h[FD_MAX];
+static char *fd_buf[FD_MAX];
+static int fd_len[FD_MAX];
+static int fd_pos[FD_MAX];
+static char *empty_env[1];
+
+static int dos() { return __c4dos_api && __c4dos_api[DOS_MAGIC_SLOT] == DOS_MAGIC; }
+static int dos1(int slot, int a) {
+    int (*f)(int);
+    if (!__c4dos_api[slot]) return 0 - 1;
+    f = (int (*)(int))__c4dos_api[slot];
+    return f(a);
+}
+static int dos3(int slot, int a, int b, int c) {
+    int (*f)(int, int, int);
+    if (!__c4dos_api[slot]) return 0 - 1;
+    f = (int (*)(int, int, int))__c4dos_api[slot];
+    return f(a, b, c);
+}
+// DOS v4's console slot (a function's address), or 0 when the console is
+// the machine's own
+static int dos_con(int slot) {
+    if (!dos() || __c4dos_api[DOS_VERSION] < 4) return 0;
+    return __c4dos_api[slot];
+}
+
+static int fd_new(int kind, int h) {
+    int fd;
+    fd = 3;
+    while (fd < FD_MAX && fd_kind[fd]) ++fd;
+    if (fd == FD_MAX) return 0 - 1;
+    fd_kind[fd] = kind;
+    fd_h[fd] = h;
+    return fd;
+}
+
+// The whole of a file, from DOS (h a handle) or the drive: its bytes, and
+// their count in *n; 0 if memory runs out
+static char *slurp(int fromdos, int h, int *n) {
+    char *b, *nb;
+    int cap, got;
+    cap = 65536;
+    if (!(b = (char *)malloc(cap))) return 0;
+    *n = 0;
+    while (1) {
+        if (*n == cap) {
+            if (!(nb = (char *)malloc(cap * 2))) { free(b); return 0; }
+            memcpy(nb, b, *n);
+            free(b);
+            b = nb;
+            cap = cap * 2;
+        }
+        got = fromdos ? dos3(DOS_READ, h, (int)(b + *n), cap - *n) : read(h, b + *n, cap - *n);
+        if (got <= 0) break;
+        *n = *n + got;
+    }
+    return b;
+}
+
+// open(2)'s flags as libc.h has them: the low two bits are the access
+int uopen(char *path, int flags) {
+    int h, fd, n, fromdos;
+    char *b;
+    if ((flags & 3) != 0) {
+        // writing: only DOS's RAM disk takes it
+        if (!dos() || (h = dos1(DOS_CREATE, (int)path)) < 0) return 0 - 1;
+        return fd_new(F_DOSW, h);
+    }
+    // a file written this session is on the RAM disk; the rest on the drive
+    fromdos = 0;
+    if (dos() && __c4dos_api[DOS_OPEN] && (h = dos1(DOS_OPEN, (int)path)) >= 0) fromdos = 1;
+    else if ((h = open(path, 0)) < 0) return 0 - 1;
+    b = slurp(fromdos, h, &n);
+    if (fromdos) dos1(DOS_RCLOSE, h); else close(h);
+    if (!b) return 0 - 1;
+    if ((fd = fd_new(F_MEM, 0)) < 0) { free(b); return 0 - 1; }
+    fd_buf[fd] = b;
+    fd_len[fd] = n;
+    fd_pos[fd] = 0;
+    return fd;
+}
+
+// The console, fd 0 to 2: under DOS v4 it is DOS's (slots 16 and 17), so
+// DOS decides where it goes -- the screen, or a window of a shell's --
+// and a line typed ahead of the program is the program's. Elsewhere it
+// is the machine's own, READ and PUTC.
+int uread(int fd, char *buf, int len) {
+    int n;
+    int (*con)(char *, int);
+    if (fd == 0) {
+        if ((con = (int (*)(char *, int))dos_con(DOS_CONREAD))) return con(buf, len);
+        return read(0, buf, len);
+    }
+    if (fd < 3 || fd >= FD_MAX || fd_kind[fd] != F_MEM) return 0 - 1;
+    n = fd_len[fd] - fd_pos[fd];
+    if (n > len) n = len;
+    if (n <= 0) return 0;
+    memcpy(buf, fd_buf[fd] + fd_pos[fd], n);
+    fd_pos[fd] = fd_pos[fd] + n;
+    return n;
+}
+
+int ulseek(int fd, int off, int whence) {
+    int at;
+    if (fd < 3 || fd >= FD_MAX || fd_kind[fd] != F_MEM) return 0 - 1;
+    if (whence == 0) at = off;
+    else if (whence == 1) at = fd_pos[fd] + off;
+    else if (whence == 2) at = fd_len[fd] + off;
+    else return 0 - 1;
+    if (at < 0) return 0 - 1;
+    fd_pos[fd] = at;
+    return at;
+}
+
+int write(int fd, char *buf, int len) {
+    int i;
+    int (*con)(char *, int);
+    if (fd == 1 || fd == 2) {
+        if ((con = (int (*)(char *, int))dos_con(DOS_CONWRITE))) return con(buf, len);
+        i = 0;
+        while (i < len) { putchar(buf[i] & 255); ++i; }
+        return len;
+    }
+    if (fd < 3 || fd >= FD_MAX || fd_kind[fd] != F_DOSW) return 0 - 1;
+    return dos3(DOS_WRITE, fd_h[fd], (int)buf, len);
+}
+
+int uclose(int fd) {
+    if (fd < 3 || fd >= FD_MAX || !fd_kind[fd]) return 0 - 1;
+    if (fd_kind[fd] == F_MEM) free(fd_buf[fd]);
+    else dos1(DOS_CLOSE, fd_h[fd]);
+    fd_kind[fd] = 0;
+    return 0;
+}
+
+// exit: back to DOS's prompt, or the machine stops
+int uexit(int code) {
+    if (dos() && __c4dos_api[DOS_EXIT]) dos1(DOS_EXIT, code);
+    exit(code);
+    return 0;
+}
+
+// stat: a file is there if it opens, and its size is what it reads
+int ustat2(char *path, int *out, int n) {
+    int fd, size, i;
+    if ((fd = uopen(path, 0)) < 0) return 0 - 1;
+    size = fd_len[fd];
+    uclose(fd);
+    i = 0;
+    while (i < n) { out[i] = 0; ++i; }
+    if (n > 0) out[0] = 2;               // a file (ST_TYPE)
+    if (n > 1) out[1] = size;            // ST_SIZE
+    if (n > 6) out[6] = 420;             // ST_MODE: 0644
+    if (n > 5) out[5] = 1;               // ST_NLINK
+    return 0;
+}
+int ustat(char *path, int *out) { return ustat2(path, out, 3); }
+int ufstat(int fd, int *out, int n) {
+    int i;
+    if (fd < 0 || fd >= FD_MAX || (fd >= 3 && !fd_kind[fd])) return 0 - 1;
+    i = 0;
+    while (i < n) { out[i] = 0; ++i; }
+    if (n > 0) out[0] = fd < 3 ? 3 : 2;  // the console, or a file
+    if (n > 1 && fd >= 3 && fd_kind[fd] == F_MEM) out[1] = fd_len[fd];
+    return 0;
+}
+
+int umsleep(int ms) { if (ms > 0) __c4_usleep(ms * 1000); return 0; }
+int ugetcwd(char *buf, int len) { if (len < 2) return 0 - 1; buf[0] = '/'; buf[1] = 0; return 1; }
+int uchdir(char *path) { return (path[0] == '/' || path[0] == '.') && !path[1] ? 0 : 0 - 1; }
+int getpid() { return 1; }
+char **uenviron() { return empty_env; }
+
+// what the machine has no way to do
+int ureaddir(char *path, int index, char *name) { return 0 - 1; }
+int umkdir(char *path) { return 0 - 1; }
+int uunlink(char *path) { return 0 - 1; }
+int urename(char *path, char *newname) { return 0 - 1; }
+int udup(int fd) { return 0 - 1; }
+int udup2(int oldfd, int newfd) { return 0 - 1; }
+int upipe(int *fds) { return 0 - 1; }
+int uexecve(char *path, char **argv, char **envp) { return 0 - 1; }
+int uwaitpid(int pid, int *st, int opts) { return 0 - 1; }
+int ulink(char *path, char *newpath) { return 0 - 1; }
+int uftruncate(int fd, int len) { return 0 - 1; }
+int vfork() { return 0 - 1; }

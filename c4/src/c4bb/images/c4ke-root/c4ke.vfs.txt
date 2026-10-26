@@ -1,0 +1,148 @@
+# C4KE VFS file listing - the manifest vfsload.c reads at boot to
+# populate the kernel's RAM filesystem (see c4ke.c's ramfs_*, and
+# vfsload.c for exactly which parts of this format are implemented).
+#
+# This is the curated, working descendant of the original c4ke.vfs.txt
+# prototype at the repo root (which documents the full intended
+# grammar in comments) - trimmed to reference only files vfsload can
+# actually find on the c4bb disk, and with its one syntax slip (a
+# missing line-continuation backslash in BIN_TEST) fixed.
+#
+# This file is SOURCE, not a build artifact: build-images.sh copies it
+# onto the disk directory, but the disk directory itself is rebuilt
+# from scratch freely (rm -rf src/c4bb/images && ...), so it must not
+# live there.
+
+#
+# Definitions
+#
+BIN_CORE  = c4 c4m c4cc
+BIN_BENCH = bench benchtop innerbench
+BIN_C4R   = c4rdump c4rlink
+BIN_UTIL  = type xxd top ls ps echo cat kill spin c4le
+# c4ke itself is deliberately NOT in here: it's a kernel, not an
+# application, and installs kernel-exclusive VM state (the one trap
+# handler slot, the custom-opcode table) that a nested copy running
+# under a running C4KE would fight the parent for. Its source is
+# still browsable, just added by hand below rather than through the
+# automatic each($BIN_ALL) machinery every other entry goes through.
+BIN_C4KE  = c4ke.vfs init vfsload
+BIN_SHELL = c4sh eshell
+BIN_ALL   = $(BIN_CORE) $(BIN_BENCH) $(BIN_C4R) \
+            $(BIN_UTIL) $(BIN_C4KE) $(BIN_SHELL)
+BIN_TEST  = hello tests factorial multifun \
+            test-order test-ptrs test_continue test_args test_exit \
+            test_printloop test_basic test_malloc test_float mandel rps raycast
+
+#
+# Filesystem tree
+#
+/: root
+	each($BIN_ALL):
+		# Until eshell/c4sh updated to use PATH environment variable, make
+		# the files available in the root directory.
+		$1: ilink(/bin/$1)  # c4 -> /bin/c4.c4r, invisible symlink
+		bin/:
+			$1: $1.c4r # c4 -> c4.c4r, invisible symlink
+	home/:
+		user/:
+			each($BIN_TEST):
+				# The tests will live here
+				$1: $1.c4r
+				# As will their source files
+				$1.c: $1.c
+	usr/
+		src/
+			bin/
+				# Add the source files for the binaries
+				each($BIN_ALL): $1.c
+			include/:
+				# Add the headers
+				c4.h
+				c4ke.h
+				c4m.h
+				service.h
+			# the kernel's own source - browsable, not runnable (see
+			# the note by BIN_C4KE above)
+			c4ke.c
+# c4ke-dev.vfs.txt - the DEVELOPER half of the C4KE manifest.
+#
+# build-images.sh concatenates c4ke.vfs.txt and this file into the
+# c4ke.vfs.txt on the c4ke-root disk (vfsload reads that name by
+# default). Concatenated rather than duplicated so the base manifest
+# stays the single description of C4KE proper and this cannot drift
+# from it; the format is indentation-driven, so these lines simply
+# continue the "/: root" tree the base file opened.
+#
+# What it adds: the toolchain that builds C4IX, and C4IX's own
+# sources. Both are physically on the disk already and neither was
+# named in any manifest, so from inside C4KE they did not exist -
+# "ls /usr/src" showed a machine that could not see what it is for.
+#
+# It is deliberately NOT added to the shared disk's manifest: ~45
+# more entries against RAMFS_MAX (256) and test-c4bb's cycle budget,
+# for files only a build needs.
+
+	usr/
+		src/
+			# c4sp: the Lisp machine c4lc runs on. Its image is
+			# c4sp.c4r at the top level; this is the source.
+			c4sp.c: src/c4sp/c4sp.c
+			# C4IX, the thing the ladder is climbing towards. The
+			# disk keys hold slashes, so these map a short name in
+			# the tree to the real path on the disk.
+			c4ix/:
+				boot.c: src/c4ix/boot.c
+				console.c: src/c4ix/console.c
+				va.c: src/c4ix/va.c
+				host.c: src/c4ix/host.c
+				sl4b.c: src/c4ix/sl4b.c
+				task.c: src/c4ix/task.c
+				sched.c: src/c4ix/sched.c
+				vfs.c: src/c4ix/vfs.c
+				sys.c: src/c4ix/sys.c
+				c4ke.c: src/c4ix/c4ke.c
+				loader.c: src/c4ix/loader.c
+				init.c: src/c4ix/init.c
+				c4ix.h: src/c4ix/c4ix.h
+				libc4ix.c: src/c4ix/lib/libc4ix.c
+				c4ix_user.h: src/c4ix/include/c4ix_user.h
+				vfsload.c: src/c4ix/user/vfsload.c
+		lib/:
+			# u0.h is what a C4KE program is compiled against.
+			u0.h: u0.h
+		lisp/:
+			# c4lc, the C compiler, is not an image: it is Lisp that
+			# c4sp reads at runtime BY BARE FILENAME from the working
+			# directory, which on this machine is the disk. So these
+			# are on the disk whether or not they are listed here --
+			# the listing is what makes them visible to ls inside the
+			# machine, which is the difference between a toolchain
+			# being present and being findable.
+			arguments.lisp: arguments.lisp
+			c4lc-ast.lisp: c4lc-ast.lisp
+			c4lc-eq.lisp: c4lc-eq.lisp
+			c4lc-gen.lisp: c4lc-gen.lisp
+			c4lc-lex.lisp: c4lc-lex.lisp
+			c4lc.lisp: c4lc.lisp
+			c4lc-parse.lisp: c4lc-parse.lisp
+			c4lc-ppdump.lisp: c4lc-ppdump.lisp
+			c4lc-pp.lisp: c4lc-pp.lisp
+			c4lc-tokens.lisp: c4lc-tokens.lisp
+			c4lc-tree.lisp: c4lc-tree.lisp
+			c4opt.lisp: c4opt.lisp
+			c4opt-run.lisp: c4opt-run.lisp
+			c4r.lisp: c4r.lisp
+			c4r-roundtrip.lisp: c4r-roundtrip.lisp
+			callcc.lisp: callcc.lisp
+			deeprec.lisp: deeprec.lisp
+			fac.lisp: fac.lisp
+			floats.lisp: floats.lisp
+			gcloop.lisp: gcloop.lisp
+			listadd.lisp: listadd.lisp
+			macros.lisp: macros.lisp
+			quote.lisp: quote.lisp
+			set.lisp: set.lisp
+			seval.lisp: seval.lisp
+			switch.lisp: switch.lisp
+			truthy.lisp: truthy.lisp
