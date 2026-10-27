@@ -244,6 +244,10 @@ cp src/c4bb/fs/c4ke.vfs.txt $DISK/
 cp load-c4r.c $DISK/load-c4r.c
 mkdir -p $DISK/src/c4ke
 cp src/c4ke/c4ke.c $DISK/src/c4ke/c4ke.c
+# The same for `c4 c4m.c clock.c`, the check that c4m.c under plain c4
+# has a clock: there it reads /proc/uptime, which C4IX, C4KE and this
+# disk's device provide (libjs/tests/test-libjs.sh).
+cp src/tests/clock.c $DISK/clock.c
 BIN_ALL_SRC="c4 c4m c4cc bench benchtop innerbench c4rdump c4rlink \
              type xxd top ls ps echo cat kill spin c4le \
              c4ke c4ke.vfs init vfsload c4sh eshell"
@@ -314,11 +318,12 @@ done
 PB=$OUT/build
 keep() { cp "$1" "$PB/$2"; }
 # Rebuilt when ANY of C4IX changed -- kernel, libc4ix, headers, user
-# programs -- or the display header its programs include, or IMG_G. This used to
-# list four kernel files, so an edit to sys.c, vfs.c or a user program
-# was silently not built.
+# programs -- or the display header its programs include, or IMG_G, or
+# the linker (it drops unreached functions, so what it writes changes
+# with it). This used to list four kernel files, so an edit to sys.c,
+# vfs.c or a user program was silently not built.
 if [ ! -f $OUT/c4ix32.c4r ] || [ ! -f $PB/c4ix.c4r ] || \
-   [ -n "$(find src/c4ix src/winkit libjs/guest/gui.h libjs/guest/gui.c libjs/guest/snd.h libjs/guest/snd.c $(ls .img_g 2>/dev/null) -newer $OUT/c4ix32.c4r -type f -print -quit)" ]; then
+   [ -n "$(find src/c4ix src/winkit libjs/guest/gui.h libjs/guest/gui.c libjs/guest/snd.h libjs/guest/snd.c $(ls .img_g 2>/dev/null) c4rlink32 -newer $OUT/c4ix32.c4r -type f -print -quit)" ]; then
     say "C4IX, compiled $G (c4lc)"
     rm -rf $PB
     mkdir -p $PB/kernel $PB/lib $PB/libc $PB/user $PB/desktop $PB/bin
@@ -487,17 +492,30 @@ for g in $GAMES; do . $g/c4-images.sh c4ix; done
 
 # ... and with no C4IX under them: the bare machine, and C4DOS (c4's bare
 # libc, make libc-bare-objs). The same game objects, but for the C4IX
-# platform's (plat-bare.c, dg-bare.c), linked whole with libc. Their disk,
-# $OUT/games, has the games' files unpacked, since neither the bare
-# machine nor DOS can write to a drive, and C4DOS's own files, so it boots
-# C4DOS too.
+# platform's (plat-bare.c, dg-bare.c), with libc. Their disk, $OUT/games,
+# has the games' files unpacked, since neither the bare machine nor DOS
+# can write to a drive, and C4DOS's own files, so it boots C4DOS too.
 GAMESDISK=$OUT/games
 GAMES_ON_DISK=
-rm -rf $OUT/wolf3d $GAMESDISK
+GAMEFILES=$OUT/.gamefiles
+rm -rf $OUT/wolf3d $GAMESDISK $GAMEFILES
+mkdir -p $GAMEFILES
+# A bare program carries what it uses of libc and no more: c4rlink drops
+# every function nothing reaches, in every link (docs/c4dos-design.md
+# "Linking a bare program").
 if [ -n "$GAMES" ] && ls .libc-bare/*.c4o > /dev/null 2>&1; then
     mkdir -p $GAMESDISK
     step "linking the games for the bare machine and C4DOS:"
-    for g in $GAMES; do . $g/c4-images.sh bare; done
+    # The games disk stays flat (the bare machine has no directories), but
+    # the page's C4DOS disks give each game a directory of its own
+    # (\GAMES\DOOM), so what each one put here is noted: $GAMEFILES/NAME.
+    for g in $GAMES; do
+        (cd $GAMESDISK && find . -type f | LC_ALL=C sort) > $GAMEFILES.before
+        . $g/c4-images.sh bare
+        (cd $GAMESDISK && find . -type f | LC_ALL=C sort) | LC_ALL=C comm -13 $GAMEFILES.before - | sed 's|^\./||' \
+            > $GAMEFILES/$(basename $g | tr a-z A-Z)
+    done
+    rm -f $GAMEFILES.before
     echo
 fi
 if [ -n "$GAMES_ON_DISK" ]; then
@@ -677,38 +695,57 @@ fi
 # A>, where GRIN starts it again), and the games with their data, linked
 # from the games disk where the filesystem allows. CONFIG.SYS is its own:
 # HEAP.SYS, because libjs's heap keeps generations and a game's memory
-# goes back when it quits. DRIVES.SYS HOME=B: (G4) and REDIR.SYS TAP (G5)
-# join it in later milestones. grin is linked whole with the bare libc,
-# as the games are, from the objects make grin-objs compiled.
+# goes back when it quits; DRIVES.SYS HOME=B:, so that a file saved with
+# no drive goes to B:, which the page keeps in the browser (the c4dos
+# store), and is still there at the next visit; REDIR.SYS TAP, so that
+# > >> < and | work at A> and in grin's DOS Prompt windows, for c4cc
+# programs too (the machine's console tap). grin is linked whole with the
+# bare libc, as the games are, from the objects make grin-objs compiled.
+#
+# The page disks' directories: listings, lj_put, game_of, games_put,
+# games_dirs and disk_indexes, in page-disks.sh (climb-disks.sh uses
+# them too, when the Makefile runs it on its own).
+. src/c4bb/tests/page-disks.sh
+
 LJDOS=libjs/images/dos
 rm -rf $LJDOS
+# Its directories: GRIN (grin and its applications), BIN (DOS programs),
+# GAMES\NAME (each game and its data); at the root only C4DOS and its two
+# files. AUTOEXEC.BAT puts GRIN and BIN on the PATH.
 if ls .grin/*.c4o > /dev/null 2>&1 && ls .libc-bare/*.c4o > /dev/null 2>&1 && [ -f $OUT/c4dos32.c4r ]; then
     say "the page's C4DOS disk, booting into grin: $LJDOS"
-    mkdir -p $LJDOS
-    ./c4rlink32 .grin/*.c4o .libc-bare/libc-*.c4o -o $LJDOS/grin.c4r > /dev/null
+    mkdir -p $LJDOS/GRIN $LJDOS/BIN
+    # libc's objects as library members: only those it needs
+    ./c4rlink32 .grin/*.c4o --start-lib .libc-bare/libc-*.c4o -o $LJDOS/GRIN/grin.c4r > /dev/null
+    # its applications (docs/grin-plan.md 3.4): main, the kit's class, and
+    # import.c in the kit's place; EXITKEY is test-grin's
+    for app in clock calc notepad exitkey; do
+        [ -f .grinapp/$app.c4o ] || continue
+        kit=; [ -f .grinapp/wk-$app.c4o ] && kit=.grinapp/wk-$app.c4o
+        ./c4rlink32 .grinapp/$app.c4o $kit .grinapp/import.c4o --start-lib .libc-bare/libc-*.c4o -o $LJDOS/GRIN/$app.c4r > /dev/null
+    done
+    # DOS programs for trying redirection with, and test-grin's: ASKLINE
+    # (bare.c: reads a line through DOS), DOSFILT (a filter; -r is a plain
+    # c4cc program's READ and printf, the tap's) and HELLO (c4cc's printf)
+    [ -f .grinapp/askline.c4o ] && ./c4rlink32 .grinapp/askline.c4o --start-lib .libc-bare/libc-*.c4o -o $LJDOS/BIN/askline.c4r > /dev/null
+    $CC -o $LJDOS/BIN/dosfilt.c4r include/c4dos.h src/tests/dosfilt.c > /dev/null
+    cp $OUT/hello32.c4r $LJDOS/BIN/hello.c4r
     cp $OUT/c4dos32.c4r $LJDOS/
-    if [ -d $GAMESDISK ]; then
-        (cd $GAMESDISK && find . -type f ! -name config.sys ! -name autoexec.bat ! -name c4dos.dir \
-            ! -name manifest.json ! -name index.json | sed 's|^\./||') | while read f; do
-            mkdir -p "$LJDOS/$(dirname "$f")"
-            ln "$GAMESDISK/$f" "$LJDOS/$f" 2> /dev/null || cp "$GAMESDISK/$f" "$LJDOS/$f"
-        done
-    fi
+    if [ -d $GAMESDISK ]; then games_put $LJDOS; fi
     sed 's/SIZE=[0-9]*/SIZE=16777216/' src/c4dos/fs/CONFIG.SYS > $LJDOS/config.sys
-    printf 'DEVICE=CONSOLE.SYS FLUSH\nDEVICE=DRIVES.SYS\nDEVICE=HEAP.SYS\n' >> $LJDOS/config.sys
+    printf 'DEVICE=CONSOLE.SYS FLUSH\nDEVICE=DRIVES.SYS HOME=B:\nDEVICE=HEAP.SYS\nDEVICE=REDIR.SYS TAP\n' >> $LJDOS/config.sys
     list=$(echo $GAMES_ON_DISK | sed 's/ /, /g')
     {
-        printf '@ECHO OFF\nECHO Welcome to C4DOS\nVER\n'
-        if [ -n "$list" ]; then printf 'ECHO The games on this disk: %s.\n' "$list"; fi
-        # (C4DOS splits a line into at most 15 words, so ECHO says 14)
-        printf 'ECHO Starting grin: its File menu has Exit grin, back to A>.\nGRIN\n'
+        printf '@ECHO OFF\nECHO Welcome to C4DOS\nVER\nPATH \\GRIN;\\BIN\n'
+        if [ -n "$list" ]; then
+            printf 'ECHO The games on this disk, each in its directory in \\GAMES: %s.\n' "$list"
+            printf 'ECHO CD \\GAMES\\DOOM, then DOOM, plays Doom; CD \\ comes back.\n'
+        fi
+        # (no > in an ECHO here: REDIR.SYS would take it for a redirection)
+        printf 'ECHO Starting grin: its File menu has Exit grin, back to the prompt.\nGRIN\n'
     } > $LJDOS/autoexec.bat
-    (cd $LJDOS && ls -p | grep -v '/$' | grep -v '^manifest.json$' > c4dos.dir)
-    (cd $LJDOS && find . -type f -not -name manifest.json | sed 's|^\./||') | \
-        awk 'BEGIN{printf "["} NR>1{printf ","} {printf "\"%s\"", $0} END{print "]"}' > $LJDOS/manifest.json
-    (cd $LJDOS && find . -type f -not -name manifest.json -not -name index.json -printf '%s %P\n' | sort -k2) | \
-        awk 'BEGIN{printf "["} NR>1{printf ","} {n=$0; sub(/^[0-9]+ /,"",n); printf "[\"%s\",%s]", n, $1} END{print "]"}' \
-        > $LJDOS/index.json
+    listings $LJDOS
+    disk_indexes $LJDOS
 fi
 
 # c4sc, the compiled c4lc, so C4IX can rebuild itself: /usr's
@@ -874,57 +911,12 @@ fi
 # belong to the other two systems instead -- what is left is by
 # construction everything C4KE's manifest can ask for.
 cp -r $DISK/. $ROOTDISK/
-# --- the climb disk, for the browser ---------------------------------
-# The web front-end fetches media out of images/, and the whole ladder
-# lives on c4dos-c4ix32 at the repo root, which it cannot reach. So a
-# copy, with the manifest the browser reads. It is the SAME disk the
-# CLI climb test boots, deliberately: two ladders that differ by which
-# front-end you used would be one ladder and one demo.
-CLIMBDISK=$OUT/climb
-rm -rf $CLIMBDISK
-CLIMBSRC=
-for root in ../../../c4dos-c4ix32 c4dos-c4ix32; do
-    if [ -d $root ]; then
-        mkdir -p $CLIMBDISK
-        cp -r $root/. $CLIMBDISK/
-        CLIMBSRC=$root
-        break
-    fi
-done
-if [ -d $CLIMBDISK ]; then
-    # SAY SO IF WHAT WE JUST COPIED IS OLDER THAN ITS SOURCE.
-    #
-    # This block COPIES; it does not build. c4dos-c4ix32 is made by its
-    # own Makefile target, and nothing here ever checked whether that
-    # target had been run since the sources changed. So a person who
-    # rebuilt "the images" got a fresh corpus and a two-day-old climb
-    # disk, booted the BIOS, and found a C4DOS that had never heard of
-    # the drive letters that landed yesterday -- with nothing anywhere
-    # saying which half was stale. That is a whole afternoon.
-    #
-    # A warning rather than an error: rebuilding the climb disk is
-    # expensive (it builds c4sc), this script has other reasons to run,
-    # and a person who knows the ladder is stale is allowed to carry on.
-    # Against the SOURCE image, never against the copy: cp gives the
-    # copy this moment's timestamp, so comparing with it says "fresh"
-    # for a disk built any time at all. (Written that way first, which
-    # is why the note is here.)
-    for src in src/c4dos/c4dos.c src/c4ke/c4ke.c src/c4ix/sched.c; do
-        [ -f "$src" ] || continue
-        [ -n "$CLIMBSRC" ] && [ -f "$CLIMBSRC/c4dos32.c4r" ] || continue
-        if [ "$src" -nt "$CLIMBSRC/c4dos32.c4r" ]; then
-            echo "c4bb: WARNING: the climb disk is older than $src." >&2
-            echo "c4bb:          It is COPIED here, not built -- run 'make c4dos-c4ix32'" >&2
-            echo "c4bb:          and then this script again, or the browser's BIOS boot" >&2
-            echo "c4bb:          will keep running the old ladder." >&2
-            break
-        fi
-    done
-    rm -f $CLIMBDISK/manifest.json
-    (cd $CLIMBDISK && find . -type f -not -name manifest.json | sed 's|^\./||') | \
-        awk 'BEGIN{printf "["} NR>1{printf ","} {printf "\"%s\"", $0} END{print "]"}' > $CLIMBDISK/manifest.json
-    echo "c4bb: browser climb disk: $CLIMBDISK ($(ls $CLIMBDISK | wc -l) entries)"
-fi
+# --- the climb disk and the page's ladder disk ------------------------
+# Copies of the climb floppy, in climb-disks.sh, which the Makefile's
+# c4bb-images runs again on its own after it has remade the floppy from
+# what this script built. The games on the disk are written down for it.
+echo "$GAMES_ON_DISK" > $OUT/.games-on-disk
+. src/c4bb/tests/climb-disks.sh
 
 rm -f $ROOTDISK/manifest.json $ROOTDISK/c4dos.dir
 rm -f $ROOTDISK/config.sys $ROOTDISK/autoexec.bat $ROOTDISK/build.bat

@@ -184,11 +184,14 @@ fi
 # when the kernel looks at exit -- "44 bytes used, guard broken" was
 # read as a stray write when the climb's case was c4sc recursing. And
 # the shell must survive both, the recursion stopping inside the guard.
+# Where the deep one is found depends on the timer: at a switch, once the
+# PIT preempts the task mid-recursion, or as it exits when nothing did
+# (before await_pid stopped holding the PIT, every run was the second).
 c4ke_deep_out=$(printf 'overrun.c4r\necho survived-the-overrun\n\\q\n' | timeout 300 $C4BB -c 200000000 -d $IMAGES/disk $IMAGES/c4ke32.c4r 2>/dev/null)
 c4ke_stray_out=$(printf 'overrun.c4r stray\necho survived-the-overrun\n\\q\n' | timeout 300 $C4BB -c 60000000 -d $IMAGES/disk $IMAGES/c4ke32.c4r 2>/dev/null)
 if echo "$c4ke_deep_out" | grep -qF "OVERRAN ITS STACK" && \
    echo "$c4ke_deep_out" | grep -qF "its stack is used to the bottom" && \
-   echo "$c4ke_deep_out" | grep -qF "found as it exited" && \
+   echo "$c4ke_deep_out" | grep -qE "found as it exited|found at a switch" && \
    echo "$c4ke_deep_out" | grep -qF "survived-the-overrun" && \
    echo "$c4ke_stray_out" | grep -qF "1 of 64 guard words broken" && \
    echo "$c4ke_stray_out" | grep -qF "its stack was never used below" && \
@@ -370,7 +373,7 @@ if [ -f $IMAGES/c4dos32.c4r ]; then
     dos_out=$(printf 'VER\nTIME\nRUN raycast.c4r 15x15 -s 3 -d -n 2 -g 40x12\nECHO dos-ok\nEXIT\n' \
         | timeout 300 $C4BB -c 900000000 -d $IMAGES/disk $IMAGES/c4dos32.c4r 2>/dev/null)
     dos_rows=$(echo "$dos_out" | grep -c '48;5;')
-    if echo "$dos_out" | grep -q "clock device installed" \
+    if echo "$dos_out" | grep -q "installed: TIME" \
        && [ "$dos_rows" = 24 ] \
        && echo "$dos_out" | grep -q "dos-ok" \
        && echo "$dos_out" | grep -q "system halted"; then

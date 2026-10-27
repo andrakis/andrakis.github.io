@@ -1,0 +1,17 @@
+include/
+lib/
+user/
+boot.c
+c4dos.dir
+c4ix.h
+c4ke.c
+console.c
+host.c
+init.c
+loader.c
+sched.c
+sl4b.c
+sys.c
+task.c
+va.c
+vfs.c

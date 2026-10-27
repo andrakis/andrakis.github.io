@@ -84,7 +84,7 @@ C4R_C4CC_SRCS := $(U0) include/c4dos.h load-c4r.c $(SRCS)/c4cc/c4cc.c $(SRCS)/c4
 C4KE_SRCS := load-c4r.c $(SRCS)/c4ke/c4ke.c \
              $(SRCS)/c4ke/extensions/c4ke_ipc.c $(SRCS)/c4ke/extensions/c4ke_plus.c \
              $(SRCS)/c4ke/extensions/c4ke_pm.c $(SRCS)/c4ke/extensions/c4ke_dos.c \
-             $(SRCS)/c4ke/extensions/c4ke_mbox.c
+             $(SRCS)/c4ke/extensions/c4ke_mbox.c $(SRCS)/c4ke/extensions/c4ke_boot.c
 C4KE_HDRS := $(INCLUDE)/c4.h $(INCLUDE)/c4m.h
 C4KE_C4R  := c4ke.c4r
 BIN_D     := $(SRCS)/c4ke/bin
@@ -359,6 +359,7 @@ C4KE_KIT := src/c4ke/c4ke.c:c4ke.c \
             src/c4ke/extensions/c4ke_pm.c:src/c4ke/extensions/c4ke_pm.c \
             src/c4ke/extensions/c4ke_dos.c:src/c4ke/extensions/c4ke_dos.c \
             src/c4ke/extensions/c4ke_mbox.c:src/c4ke/extensions/c4ke_mbox.c \
+            src/c4ke/extensions/c4ke_boot.c:src/c4ke/extensions/c4ke_boot.c \
             src/c4ke/bin/ps.c:ps.c \
             src/c4ke/bin/eshell.c:eshell.c \
             src/c4ke/services/init.c:init.c \
@@ -750,7 +751,7 @@ $(C4DOS_IX_DISK): c4dos32.c4r dostar32.c4r cpp32.c4r c4cc32.c4r dosload32.c4r \
                   b4ke32.c4r tar32.c4r ls32.c4r ps32.c4r \
                   bbsave32.c4r save32.c4r raycast-dos32.c4r reboot32.c4r \
                   install32.c4r $(SRCS)/c4dos/fs/install.lst \
-                  kinstall32.c4r $(SRCS)/c4ke/fs/c4ix.lst \
+                  kinstall32.c4r kboot32.c4r $(SRCS)/c4ke/fs/c4ix.lst \
                   $(SRCS)/c4bb/fs/c4ke-climb.vfs.txt \
                   $(SRCS)/c4bb/fs/c4ix-climb.vfs.txt \
                   c4-dos32.c4r c4m-dos32.c4r mandel-dos32.c4r rps-dos32.c4r \
@@ -791,6 +792,9 @@ $(C4DOS_IX_DISK): c4dos32.c4r dostar32.c4r cpp32.c4r c4cc32.c4r dosload32.c4r \
 	@cp ls32.c4r       $(C4DOS_IX_DISK)/ls.c4r
 	@cp ps32.c4r       $(C4DOS_IX_DISK)/ps.c4r
 	@cp $(BIN_D)/c4ix.b4k $(C4DOS_IX_DISK)/
+	@# ...and boots it, with no reboot: C4KE stops and runs the image
+	@# (extensions/c4ke_boot.c), as dosload does one rung down.
+	@cp kboot32.c4r    $(C4DOS_IX_DISK)/kboot.c4r
 	@cp reboot32.c4r   $(C4DOS_IX_DISK)/reboot.c4r
 	@# What makes this medium bootable to the BIOS (docs/c4bb-storage.md
 	@# M10). A name rather than a second copy of the image: the disk
@@ -1043,7 +1047,7 @@ test-c4sc-lex: c4sc-host c4sp
 	head -n -1 $(SRCS)/c4sp/tests/expected/c4lc-tokens.txt | cmp - .c4sc_lex.txt
 	./c4sc-host tokens -conforming $(TESTS)/c4lc_lex_sample.c > .c4sc_lex.txt
 	head -n -1 $(SRCS)/c4sp/tests/expected/c4lc-tokens-conforming.txt | cmp - .c4sc_lex.txt
-	./c4sc-host tokens -count $(SRCS)/c4cc/c4cc.c | grep -q "^tokens 15126$$"
+	./c4sc-host tokens -count $(SRCS)/c4cc/c4cc.c | grep -q "^tokens 15147$$"
 	@fail=0; for f in $(C4SC_LEX_SWEEP); do \
 	   ./c4sp -R -c 33554432 $(SRCS)/c4sp/lisp/c4lc-tokens.lisp $$f > .c4sc_i.txt 2>&1; \
 	   head -n -1 .c4sc_i.txt > .c4sc_i2.txt; \
@@ -1180,7 +1184,7 @@ c4sc.c4r: c4sp $(C4LC_LISP) $(C4RLINK) $(C4SC_GEN) src/c4sc/c4sc-main.c \
 test-c4sc-image: c4sc.c4r c4sc-host $(C4M) c4sp
 	@# the image runs, and computes what the interpreter computes
 	$(C4M) load-c4r.c -- c4sc.c4r -c 4000000 tokens -count $(SRCS)/c4cc/c4cc.c \
-	  | grep -q "^tokens 15126$$"
+	  | grep -q "^tokens 15147$$"
 	@echo "  hosted lex: tokens 15125"
 	@# a real compile, hosted: the image it produces has to be the size
 	@# the native build produces. Bare c4m has no write syscall -- the
@@ -1699,7 +1703,7 @@ test-c4fc: c4th c4th.c4r $(C4M) c4sp c4mp c4 c4l.c $(C4RDUMP)
 	head -n -1 src/c4sp/tests/expected/c4lc-tokens.txt | cmp - .c4fc_lex.txt
 	./c4th $(C4FC_LIB) -e ': GO 4194304 ARENA-INIT 1 CONFORMING ! S" src/tests/c4lc_lex_sample.c" LEX-FILE DUMP-TOKENS ; GO' > .c4fc_lex.txt
 	head -n -1 src/c4sp/tests/expected/c4lc-tokens-conforming.txt | cmp - .c4fc_lex.txt
-	./c4th $(C4FC_LIB) -e ': GO 33554432 ARENA-INIT S" src/c4cc/c4cc.c" LEX-FILE COUNT-TOKENS ; GO' | grep -q "^tokens 15126$$"
+	./c4th $(C4FC_LIB) -e ': GO 33554432 ARENA-INIT S" src/c4cc/c4cc.c" LEX-FILE COUNT-TOKENS ; GO' | grep -q "^tokens 15147$$"
 	@for f in $(C4FC_LEX_SWEEP); do \
 	   ./c4sp src/c4sp/lisp/c4lc-tokens.lisp $$f > .c4fc_a.txt 2>&1; \
 	   ./c4th $(C4FC_LIB) -e ": GO 67108864 ARENA-INIT S\" $$f\" LEX-FILE DUMP-TOKENS ; GO" > .c4fc_b.txt 2>&1; \
@@ -2353,6 +2357,10 @@ install32.c4r: c4cc32 include/c4dos.h include/c4bb.h $(SRCS)/c4dos/install.c
 # The same job one rung up, as a C4KE task rather than a C4DOS
 # transient. It has its own name because the DOS one is on the same
 # floppy and cannot run here -- it talks to a DOS that is gone.
+# kboot: C4KE stops and boots another kernel, the C4IX b4ke just built
+# (extensions/c4ke_boot.c). The climb without a BIOS to reboot into.
+kboot32.c4r: c4cc32 $(U0) $(BIN_D)/kboot.c
+	./c4cc32 -o $@ $(U0) $(BIN_D)/kboot.c > /dev/null
 kinstall32.c4r: c4cc32 $(U0) include/c4bb.h $(BIN_D)/install.c
 	./c4cc32 -o $@ $(U0) include/c4bb.h $(BIN_D)/install.c > /dev/null
 save32.c4r: c4cc32 $(U0) include/c4bb.h $(BIN_D)/save.c
@@ -2391,8 +2399,21 @@ c4bb-32bit: c4cc32 c4m32 c4sp32 c4rlink32
 # c4sc32-fused.c4r is the disk's compiler (c4sc.c4r), which C4IX
 # rebuilds itself with: named here, a change to c4lc remakes it rather
 # than leaving yesterday's compiler on the disk.
+#
+# The climb floppy (c4dos-c4ix32) is made here too, AFTER build-images.sh,
+# and then the disks that copy it are made again: the two feed each other.
+# The floppy carries the C4IX userland and vfsload that script builds, and
+# the script's climb and ladder disks are copies of the floppy (the ladder
+# disk lays it over the shared disk's userland, so a floppy made first
+# would put the last build's C4IX back). Nothing else rebuilt the floppy,
+# so after a kernel change the ladder disk's BUILD went on compiling the
+# old C4KE from its c4ke-src.tar. Both steps only copy: the floppy's
+# recipe takes archives and images that are targets of their own, and
+# climb-disks.sh is the copying end of build-images.sh.
 c4bb-images: c4bb-32bit $(C4LC_LISP) .img_g c4th32.c4r cpp c4sc32-fused.c4r
-	IMG_G=$(IMG_G) bash src/c4bb/tests/build-images.sh
+	IMG_G=$(IMG_G) C4BB_CLIMB_AGAIN=1 bash src/c4bb/tests/build-images.sh
+	@$(MAKE) --no-print-directory $(C4DOS_IX_DISK)
+	@bash src/c4bb/tests/climb-disks.sh
 
 # Source maps in the images (docs/c4-explorer.md, track S): the games
 # below and C4IX (build-images.sh) are compiled -g, so that the Code
@@ -2418,7 +2439,7 @@ GAME_OBJS  :=
 GAME_TESTS :=
 include $(wildcard games/*/c4.mk)
 GAMES_ALL  := wolf3d doom tyrian rott
-c4bb-images: libc-bare-objs grin-objs $(GAME_OBJS)
+c4bb-images: libc-bare-objs grin-objs grin-apps $(GAME_OBJS)
 $(filter-out $(GAME_TESTS),$(GAMES_ALL:%=test-%)):
 	@echo "$@: skipped, games/$(@:test-%=%) is not here (games/README.md)"
 PHONY += $(GAMES_ALL:%=test-%)
@@ -2446,9 +2467,9 @@ PHONY += libc-bare-objs
 # the desktop's are; grin's own with it, so that its files go through
 # libc and bare.c to C4DOS. build-images.sh links it onto the page's
 # C4DOS disk, libjs/images/dos, which boots into it. test-grin drives it.
-GRIN       := grin progman tasklist control
-GRIN_KIT   := draw ui wmcore dialog look95 look31 savers
-GRIN_HDRS  := $(wildcard src/grin/*.h src/winkit/*.h) libjs/guest/gui.h libjs/guest/gui.c
+GRIN       := grin apps progman tasklist control filemgr disk dosprmpt fwin
+GRIN_KIT   := draw ui wmcore dialog look95 look31 savers textgrid
+GRIN_HDRS  := $(wildcard src/grin/*.h src/winkit/*.h) libjs/guest/gui.h libjs/guest/gui.c libjs/guest/snd.h libjs/guest/snd.c
 GRIN_CC    := ./c4sp32 -c 400000 src/c4sp/lisp/c4lc.lisp -O $(IMG_G) -c -I src/winkit -I .
 grin-objs: $(GRIN:%=.grin/%.c4o) $(GRIN_KIT:%=.grin/wk-%.c4o)
 .grin/wk-%.c4o: src/winkit/%.c $(GRIN_HDRS) $(C4LC_LISP) .img_g | c4sp32
@@ -2458,16 +2479,42 @@ grin-objs: $(GRIN:%=.grin/%.c4o) $(GRIN_KIT:%=.grin/wk-%.c4o)
 	@mkdir -p .grin
 	$(GRIN_CC) -fno-builtin -I src/c4ix/libc/include $< $@ > /dev/null
 PHONY += grin-objs
+# grin's applications (docs/grin-plan.md 3.4): each a C4DOS program of its
+# own, linked by build-images.sh from its main (src/grin/apps), the kit's
+# class it shows (src/winkit), src/grin/import.c in the kit's place, and
+# the bare libc. All of them are compiled with -D WK_IMPORT, which makes
+# winkit.h's wk grin's (import.c), and kept apart from grin's own objects.
+# askline is test-grin's DOS program, not an application: build-images.sh
+# links it with the bare libc alone.
+GRIN_APPS  := clock calc exitkey notepad askline
+GRIN_APPKIT := clock calc notepad
+grin-apps: $(GRIN_APPS:%=.grinapp/%.c4o) $(GRIN_APPKIT:%=.grinapp/wk-%.c4o) .grinapp/import.c4o
+.grinapp/wk-%.c4o: src/winkit/%.c $(GRIN_HDRS) $(C4LC_LISP) .img_g | c4sp32
+	@mkdir -p .grinapp
+	$(GRIN_CC) -D WK_IMPORT $< $@ > /dev/null
+.grinapp/import.c4o: src/grin/import.c $(GRIN_HDRS) $(wildcard src/c4ix/libc/include/*.h) $(C4LC_LISP) .img_g | c4sp32
+	@mkdir -p .grinapp
+	$(GRIN_CC) -D WK_IMPORT -fno-builtin -I src/c4ix/libc/include -I src/grin $< $@ > /dev/null
+.grinapp/%.c4o: src/grin/apps/%.c $(GRIN_HDRS) $(wildcard src/c4ix/libc/include/*.h) $(C4LC_LISP) .img_g | c4sp32
+	@mkdir -p .grinapp
+	$(GRIN_CC) -D WK_IMPORT -fno-builtin -I src/c4ix/libc/include -I src/grin $< $@ > /dev/null
+PHONY += grin-apps
 test-grin: c4bb-images
 	node libjs/tests/test-grin.mjs
 PHONY += test-grin
+# test-persist: the saves that outlast the page (docs/grin-plan.md 3.8):
+# Doom on the bare machine saves to drive 1 and loads it back on the next
+# boot; Doom under C4DOS saves to B: (HOME=B:), and the stores stay apart
+test-persist: c4bb-images
+	node libjs/tests/test-persist.mjs
+PHONY += test-persist
 
 # test-libc-bare: libc's scanf, fseek and fread (src/c4ix/libc/tests/
 # scantest.c) on the bare machine, against gcc's build of the same.
-test-libc-bare: libc-bare-objs $(C4LC_LISP) | c4sp32
+test-libc-bare: libc-bare-objs c4rlink32 $(C4LC_LISP) | c4sp32
 	@rm -rf .libc_t && mkdir -p .libc_t && cp src/c4ix/libc/tests/scantest.c .libc_t/
 	@./c4sp32 -c 400000 src/c4sp/lisp/c4lc.lisp -O -fno-builtin -c -I src/c4ix/libc/include .libc_t/scantest.c .libc_t/scantest.c4o > /dev/null
-	@./c4rlink32 .libc_t/scantest.c4o .libc-bare/libc-*.c4o -o .libc_t/scantest.c4r > /dev/null
+	@./c4rlink32 .libc_t/scantest.c4o --start-lib .libc-bare/libc-*.c4o -o .libc_t/scantest.c4r > /dev/null
 	@gcc -m32 -w -o .libc_t/scantest-host .libc_t/scantest.c
 	@cd .libc_t && ./scantest-host scantest.c > host.txt && node ../libjs/cli.js -m 64 -d . scantest.c4r scantest.c > c4.txt
 	@cmp -s .libc_t/host.txt .libc_t/c4.txt || { echo "test-libc-bare: differs from gcc's:"; diff .libc_t/c4.txt .libc_t/host.txt; exit 1; }
@@ -2505,6 +2552,15 @@ test-c4bb: c4bb-images $(C4M) $(TESTS_C4R)
 # own; the suite diffs against native c4m32/c4m and boots both kernels.
 test-libjs: c4bb-images $(C4M) $(TESTS_C4R) c4sp32
 	bash libjs/tests/test-libjs.sh
+
+# The Build Ladder on libjs, headless (docs/c4dos-ladder.md): the page's
+# ladder disk boots C4DOS, which plays Doom and builds C4KE; C4KE plays
+# Doom and rps, builds C4IX with b4ke and boots it with kboot; C4IX plays
+# Doom and exits, back through C4KE to A>. One machine, no reset, about
+# seventy seconds. The disk is copied from the climb floppy, which
+# c4bb-images remakes.
+test-libjs-ladder: c4bb-images
+	node libjs/tests/test-c4dos-ladder.mjs
 
 # C4IX on several processors (docs/c4ix-smp.md S3): test-libjs's C4IX
 # checks that say whether the kernel holds together with several CPUs in
@@ -3557,9 +3613,13 @@ test-task-mem: c4ke-pm.c4r c4ke32-pm.c4r c4ke32-nopm.c4r $(C4M) $(C4CC) c4cc32 $
 
 # Linking test: compile two modules separately, link both ways, run each,
 # and exercise library mode (-r) with a relink of the written library.
+# A third module nothing names is left out as a library member
+# (--start-lib), and its function dropped when it is linked plainly (the
+# default; --no-gc keeps it): both images are test_link.c4r.
 test-link: c4m $(C4CC) $(C4RLINK)
 	$(C4CC) -o tla.c4o src/tests/test_link_a.c
 	$(C4CC) -o tlb.c4o src/tests/test_link_b.c
+	$(C4CC) -o tlc.c4o src/tests/test_link_member.c
 	$(C4RLINK) tla.c4o tlb.c4o -o test_link.c4r
 	$(C4M) load-c4r.c -- test_link.c4r
 	$(C4RLINK) tlb.c4o tla.c4o -o test_link2.c4r
@@ -3567,7 +3627,15 @@ test-link: c4m $(C4CC) $(C4RLINK)
 	$(C4RLINK) -r tla.c4o -o tla.c4l
 	$(C4RLINK) tla.c4l tlb.c4o -o test_link3.c4r
 	$(C4M) load-c4r.c -- test_link3.c4r
-	rm -f tla.c4o tlb.c4o tla.c4l test_link.c4r test_link2.c4r test_link3.c4r
+	$(C4RLINK) tla.c4o --start-lib tlb.c4o tlc.c4o -o test_link4.c4r
+	cmp test_link.c4r test_link4.c4r
+	$(C4RLINK) tla.c4o tlb.c4o tlc.c4o -o test_link5.c4r
+	cmp test_link.c4r test_link5.c4r
+	$(C4M) load-c4r.c -- test_link5.c4r
+	$(C4RLINK) --no-gc tla.c4o tlb.c4o tlc.c4o -o test_link6.c4r
+	! cmp -s test_link.c4r test_link6.c4r
+	$(C4M) load-c4r.c -- test_link6.c4r
+	rm -f tla.c4o tlb.c4o tlc.c4o tla.c4l test_link.c4r test_link2.c4r test_link3.c4r test_link4.c4r test_link5.c4r test_link6.c4r
 	@echo "test-link: OK"
 clean-c4rs:
 	rm -rf $(C4RS) $(BIN) *.c4r c4ke.pre.c .tm_disk .tm_leak.c4r
@@ -3597,7 +3665,7 @@ c4rs: pre
 
 # Marking the below rules as PHONY using singular .PHONY rule
 PHONY  = pre all clean-c4rs clean
-PHONY += test-libjs test-c4ix-smp serve-libjs pages test-libjs-web test-c4tui test-c4th-bb run-c4dos-c4fc test-c4dos-c4fc
+PHONY += test-libjs test-libjs-ladder test-c4ix-smp serve-libjs pages test-libjs-web test-c4tui test-c4th-bb run-c4dos-c4fc test-c4dos-c4fc
 PHONY += run-c4dos-build32 test-c4dos-build32 run-c4dos-c4ix32 test-c4dos-c4ix32 test-c4cc-for test-respfile test-b4ke test-c4bb-storage test-c4bb-baseops test-c4bb-rungs test-c4bb-install test-c4bb-climb test-c4bb-web test-c4bb-firmware
 PHONY += test-c4sc test-c4sc-run test-c4sc-lex test-c4sc-front test-c4sc-back test-c4sc-chain
 PHONY += test-c4sc-image test-c4sc-self test-c4sc-board

@@ -24,6 +24,13 @@ fail=0
 ok ()   { echo "test-libjs: $1 OK"; }
 bad ()  { echo "test-libjs: $1 FAILED"; fail=1; }
 
+# The lines of /proc/uptime's format, each with its second number ten
+# times its first (to the hundredth both are cut to): Linux's two
+# numbers, with the same clock in tenths where Linux has its idle time
+# (src/c4ix/vfs.c, vfs_proc).
+uptimes () { grep -E '^[0-9]+\.[0-9]{2} [0-9]+\.[0-9]{2}$' |
+             awk '{ d = $2 - 10 * $1; if (d < 0) d = -d; if (d < 0.105) print }'; }
+
 check () {
     name="$1"; shift
     a=$(timeout 300 $LIBJS "$@" 2>/dev/null | sed "$FILTER" | sed "$NORM")
@@ -65,6 +72,8 @@ node libjs/tests/test-desktop.mjs || fail=1
 node libjs/tests/test-boot-desktop.mjs || fail=1
 node libjs/tests/test-c4dos-heap.mjs || fail=1   # C4DOS HEAP.SYS: Doom five times at A>
 node libjs/tests/test-grin.mjs || fail=1         # grin, C4DOS's graphical shell, on the page's DOS disk
+node libjs/tests/test-persist.mjs || fail=1      # saves kept in a store per system: Doom bare and under C4DOS
+node libjs/tests/test-c4dos-ladder.mjs || fail=1 # the Build Ladder: C4DOS -> C4KE -> C4IX (skips without its disk)
 node libjs/tests/test-c4ix-zombie.mjs || fail=1
 node libjs/tests/test-c4ix-cpu.mjs || fail=1
 node libjs/tests/test-c4ix-c4m.mjs || fail=1
@@ -165,6 +174,20 @@ else bad "c4ke survives a task killed on a bad opcode"; echo "$out" | tail -10; 
 out=$(c4ke 'cat /usr/src/bin/vfsload.c\n\\q\n')
 if echo "$out" | grep -qF "C4KE boot-time filesystem loader"; then ok "c4ke-vfs cat real content"
 else bad "c4ke-vfs cat real content"; fi
+# /proc/uptime, twice over: cat reads the kernel's (its RAM filesystem,
+# vfs_get), type the machine's (a task's open() goes to the disk device,
+# not the kernel). Both clocks move. And c4m.c under plain c4, whose
+# clock is that file (innerbench -c), sees its clock move.
+out=$(c4ke 'cat /proc/uptime\ntype /proc/uptime\nls /proc\nc4 c4m.c clock.c\ncat /proc/uptime\ntype /proc/uptime\n\\q\n' 2000000000)
+u=$(echo "$out" | uptimes)
+if [ "$(echo "$u" | wc -l)" = 4 ] &&
+   echo "$u" | awk 'NR == 1 { k = $1 } NR == 2 { m = $1 } NR == 3 && $1 <= k { exit 1 } NR == 4 && $1 <= m { exit 1 }'; then
+    ok "c4ke /proc/uptime, the kernel's and the machine's, both moving"
+else bad "c4ke /proc/uptime, the kernel's and the machine's, both moving"; echo "$out" | grep -E '^[0-9. ]+$|proc|Failed' | head -8; fi
+if echo "$out" | grep -qE "^uptime *$" && echo "$out" | grep -qF "1 entry in /proc/"; then ok "c4ke ls /proc"
+else bad "c4ke ls /proc"; echo "$out" | grep -A3 "ls /proc" | head -5; fi
+if echo "$out" | grep -qE "^clock: moved [0-9]+ ms"; then ok "c4ke: c4 c4m.c has a clock"
+else bad "c4ke: c4 c4m.c has a clock"; echo "$out" | grep -E "clock|uptime" | head -4; fi
 
 # ---- C4IX ----------------------------------------------------------------
 # Each boot has the page's 64 MB arena (libjs/page.js), not the CLI's 32:
@@ -182,6 +205,28 @@ done
 if echo "$out" | grep -qE '[4-9][0-9]/[4-9][0-9] entries loaded from c4ix\.vfs\.txt'; then
     ok "c4ix-vfs manifest mostly loaded ($(echo "$out" | grep -oE '[0-9]+/[0-9]+ entries loaded'))"
 else bad "c4ix-vfs manifest mostly loaded"; echo "$out" | grep -E 'entries loaded|cannot open' | head -5; fi
+
+# /proc/uptime (src/c4ix/vfs.c): made when it is read, so two reads
+# apart differ; and it is the clock c4m.c reads under plain c4.
+out=$(printf 'cat /proc/uptime\nls /proc\nc4 c4m.c clock.c\ncat /proc/uptime\nexit\n' | \
+      timeout 300 $LIBJS -m 64 -c 4000000000 -d $IMAGES/disk $IMAGES/c4ix32.c4r 2>/dev/null)
+u=$(echo "$out" | uptimes)
+if [ "$(echo "$u" | wc -l)" = 2 ] && echo "$u" | awk 'NR == 1 { a = $1 } NR == 2 && $1 <= a { exit 1 }' &&
+   echo "$out" | grep -qx "uptime"; then
+    ok "c4ix /proc/uptime, moving"
+else bad "c4ix /proc/uptime, moving"; echo "$out" | grep -E '^[0-9. ]+$|uptime' | head -5; fi
+if echo "$out" | grep -qE "^clock: moved [0-9]+ ms"; then ok "c4ix: c4 c4m.c has a clock"
+else bad "c4ix: c4 c4m.c has a clock"; echo "$out" | grep -E "clock|uptime" | head -4; fi
+
+# A nested C4KE asked for `bench` in C4IX's root, where /bench is C4IX's
+# own: its loader refuses an image with words left for a linker, names
+# what it wanted, and goes on to bench.c4r, C4KE's. It used to run
+# C4IX's, whose first call went to address 0, and spin in the ROM.
+out=$(printf 'c4m load-c4r.c -- c4ke bench\nexit\n' | \
+      timeout 300 $LIBJS -m 64 -c 4000000000 -d $IMAGES/disk $IMAGES/c4ix32.c4r 2>/dev/null)
+if echo "$out" | grep -qF "lc4r: 'bench' needs 'ucycles'" && echo "$out" | grep -qF "Benchmark complete"; then
+    ok "c4ix: a nested C4KE refuses C4IX's bench and runs its own"
+else bad "c4ix: a nested C4KE refuses C4IX's bench and runs its own"; echo "$out" | grep -E 'lc4r|Benchmark|libjs' | head -5; fi
 
 # The root archive (c4ix-root.tgz, build-images.sh) unpacks in the
 # background as task 4, which "wait 4" blocks on. Then a file deep in

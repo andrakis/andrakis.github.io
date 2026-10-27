@@ -135,6 +135,7 @@ c4th.c4r
 callcc.lisp
 cat.c
 cat.c4r
+clock.c
 config.sys
 cpp.c4r
 deeprec.lisp

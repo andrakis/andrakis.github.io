@@ -49,7 +49,15 @@ struct wk_env {
     int desk, face, light, shadow;    // the scheme's colours (Settings)
     int title, title2, ititle, ititle2, sel;
 };
+// A grin application (compiled with -D WK_IMPORT, src/grin/import.c) has
+// no wk of its own: it reads grin's, through the pointer grin publishes
+// in its table, so that every C_FACE below is a load through it.
+#ifdef WK_IMPORT
+extern struct wk_env *wk_import_env;
+#define wk (*wk_import_env)
+#else
 extern struct wk_env wk;
+#endif
 
 // colours: these never change...
 enum { C_DARK = 0x000000, C_WHITE = 0xffffff, C_GREEN = 0x00ff00 };
@@ -232,6 +240,7 @@ int  wk_dirty();                      // 1 if anything waits to be drawn
 int  wk_next_timer();                 // ms until a timer is due, or -1 for none
 void wk_drawn();                      // after the frame was shown: drawn hooks
 void wk_repoint();                    // the display's pointer is an arrow again (it was away)
+int  wk_menu_open();                  // 1 while a drop-down menu is open
 void wk_screen(int w, int h);         // ask for a new screen size (gui_size) and relayout
 void wk_set_area(int x, int y, int w, int h);
 void wk_close_all();                  // every window, at once (shutting down)
@@ -265,6 +274,7 @@ extern char *notepad_name;            // in its titles ("Notepad"; the desktop's
 extern char *notepad_about;           // its Help > About line
 extern char *notepad_home;            // where Open starts
 extern char *notepad_untitled;        // where Save As offers to put a new document
+extern int notepad_filebox;           // 1: Open and Save As are file boxes (grin's); 0: typed paths
 int  wk_clock();                      // the host's time of day, in seconds since midnight
 
 // ---- screen savers (savers.c) ----------------------------------------------
@@ -7171,6 +7181,7 @@ char *notepad_name = "Notepad";
 char *notepad_about = "Notepad: edits plain text.";
 char *notepad_home = "/";                         // where Open starts
 char *notepad_untitled = "untitled.txt";          // where Save As offers to put a new one
+int notepad_filebox = 0;                          // Open and Save As: the kit's file box, not a typed path
 
 struct note {
     char path[WK_PATH];
@@ -7420,7 +7431,8 @@ static void note_key(int w, int down, int code, int ch, int mods) {
 
 static void save_as(int w, struct note *n) {
     ui_ncpy(n->ask, n->path[0] ? n->path : notepad_untitled, WK_PATH);
-    wk_inputbox(w, D_SAVEAS, "Save As", "Save as:", n->ask, WK_PATH);
+    if (notepad_filebox) wk_filebox(w, D_SAVEAS, 1, "*", n->ask, WK_PATH);
+    else wk_inputbox(w, D_SAVEAS, "Save As", "Save as:", n->ask, WK_PATH);
 }
 
 static void note_command(int w, int id) {
@@ -7432,7 +7444,8 @@ static void note_command(int w, int id) {
     if (item == N_NEW) { empty(n); n->path[0] = 0; retitle(w); }
     else if (item == N_OPEN) {
         ui_ncpy(n->ask, n->path[0] ? n->path : notepad_home, WK_PATH);
-        wk_inputbox(w, D_OPEN, "Open", "File to open:", n->ask, WK_PATH);
+        if (notepad_filebox) wk_filebox(w, D_OPEN, 0, "*", n->ask, WK_PATH);
+        else wk_inputbox(w, D_OPEN, "Open", "File to open:", n->ask, WK_PATH);
     } else if (item == N_SAVE) {
         if (!n->path[0]) save_as(w, n);
         else if (!save(n)) say(w, "Cannot save that file.");
@@ -9308,6 +9321,8 @@ static int shape_at(int x, int y) {
     return PTR_ARROW;
 }
 void wk_repoint() { ptr_shape = PTR_ARROW; }
+// a drop-down menu is open (keys are its, not a window's: grin's game window)
+int wk_menu_open() { return menu_win != 0; }
 
 static void pointer(int x, int y) {
     int s;

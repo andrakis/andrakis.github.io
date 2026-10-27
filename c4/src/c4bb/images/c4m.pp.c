@@ -10,8 +10,11 @@
 //
 // Why any of this exists: c4 and c4m have no write syscall, and c4bb's
 // disk controller is read-only. A tool that wants to produce a file
-// asks DOS to put it on the RAM disk (DEVICE=RAMDISK.SYS). There is no
-// '>' redirection on this system by decision -- tools write directly.
+// asks DOS to put it on the RAM disk (DEVICE=RAMDISK.SYS), or, since v5,
+// on a drive that can be written: "B:NAME" names one, and a plain name
+// goes to the home drive when CONFIG.SYS gives one (DEVICE=DRIVES.SYS
+// HOME=B:). There is no '>' redirection on this system by decision --
+// tools write directly.
 //
 // The calls go through the invoke stub, which is c4l.c's trick: a
 // function rewrites its own first instruction to JMP <target>, so
@@ -36,11 +39,12 @@ enum { C4DOS_MAGIC = 4404292 };
 // API table slots. Slots 0-8 are v1; 9-14 are v2 and MUST be gated on
 // dos_version() >= 2, because a v1 DOS allocated a 16-word table and
 // filled only the first nine -- the rest was uninitialised heap. 15 is
-// v3 (the clock) and 16-25 are v4 (below); the table is 32 words.
+// v3 (the clock), 16-27 v4, 28-29 v5, 30 v6 and 31-34 v7 (below); the
+// table is 40 words (32 before v7).
 enum {
   C4DOS_SLOT_MAGIC   = 0,
   C4DOS_SLOT_EXIT    = 1,   // dos_exit(status): return to the prompt
-  C4DOS_SLOT_CREATE  = 2,   // create(name) -> handle, or -1
+  C4DOS_SLOT_CREATE  = 2,   // create(name) -> handle, or -1 (on a drive: there once closed)
   C4DOS_SLOT_WRITE   = 3,   // write(handle, buf, len) -> len
   C4DOS_SLOT_CLOSE   = 4,   // close(handle)
   C4DOS_SLOT_VERSION = 5,
@@ -311,7 +315,7 @@ enum { C4DOS_API_V4 = 4 };
 enum {
   C4DOS_SLOT_CONWRITE = 16, // conwrite(buf, n) -> n: console output
   C4DOS_SLOT_CONREAD  = 17, // conread(buf, n) -> bytes, at most a line; 0 at end
-  C4DOS_SLOT_UNLINK   = 18, // unlink(name) -> 0, or -1
+  C4DOS_SLOT_UNLINK   = 18, // unlink(name) -> 0, or -1: the RAM disk's, or a drive's (v5)
   C4DOS_SLOT_EXEC     = 19, // exec(cmdline) -> its status, as the prompt runs it
   C4DOS_SLOT_LOAD     = 20, // load(path) -> handle, constructors run; 0 on failure
   C4DOS_SLOT_START    = 21, // start(h, argc, argv) -> main's status; h stays loaded
@@ -378,6 +382,92 @@ int dos_gen (int h) {
 int dos_setgen (int g) {
   if (!dos_v4(C4DOS_SLOT_SETGEN) || !__c4dos_arm()) return 0 - 1;
   return __c4dos_call1((int *)__c4dos_api[C4DOS_SLOT_SETGEN], g);
+}
+
+// ---- v5: drives that can be written ---------------------------------------
+//
+// create, write and close reach a writable drive (DEVICE=DRIVES.SYS):
+// "B:NAME" there, and a plain name on the home drive (HOME=B:) when
+// there is one. unlink takes a file off either. DOS keeps each drive's
+// c4dos.dir, which DIR B: types. These two say where things are.
+enum { C4DOS_API_V5 = 5 };
+enum {
+  C4DOS_SLOT_HOME   = 28,   // home() -> the home drive, 0 = A:; -1 for none
+  C4DOS_SLOT_DRIVES = 29    // drives() -> how many drives (1 without DRIVES.SYS)
+};
+int dos_home () {
+  if (dos_version() < C4DOS_API_V5 || !__c4dos_api[C4DOS_SLOT_HOME] || !__c4dos_arm()) return 0 - 1;
+  return __c4dos_call1((int *)__c4dos_api[C4DOS_SLOT_HOME], 0);
+}
+int dos_drives () {
+  if (dos_version() < C4DOS_API_V5 || !__c4dos_api[C4DOS_SLOT_DRIVES] || !__c4dos_arm()) return 1;
+  return __c4dos_call1((int *)__c4dos_api[C4DOS_SLOT_DRIVES], 0);
+}
+
+// ---- v6: redirection, and the prompt's drive -------------------------------
+//
+// With DEVICE=REDIR.SYS a command line takes > >> < and |; conwrite and
+// conread (16, 17) follow them, so a program that uses them is
+// redirected with nothing more to do (docs/c4dos-design.md
+// "Redirection"). The prompt's drive is DOS's, one for every caller: a
+// DOS Prompt window asks it after each line it runs.
+enum { C4DOS_API_V6 = 6 };
+enum { C4DOS_SLOT_DRIVE = 30 };   // drive() -> the drive the prompt is on, 0 = A:
+int dos_drive () {
+  if (dos_version() < C4DOS_API_V6 || !__c4dos_api[C4DOS_SLOT_DRIVE] || !__c4dos_arm()) return 0;
+  return __c4dos_call1((int *)__c4dos_api[C4DOS_SLOT_DRIVE], 0);
+}
+
+// ---- v7: directories --------------------------------------------------------
+//
+// Every drive has a current directory, and every name DOS takes is a
+// path: "GAMES\DOOM\DOOM.C4R", "..\X", "\X" from the root, "B:X" in B:'s
+// current directory, "/" as good as "\" (docs/c4dos-design.md
+// "Directories"). open, create and unlink (6, 2, 18) and load (20) take
+// them as they are; these four are CD, getting it back, MD and RD.
+enum { C4DOS_API_V7 = 7 };
+enum {
+  C4DOS_SLOT_CHDIR  = 31,   // chdir(path) -> 0, or -1: path's drive's current directory
+  C4DOS_SLOT_GETCWD = 32,   // getcwd(drive) -> char *: "\GAMES\DOOM"; drive -1 the prompt's
+  C4DOS_SLOT_MKDIR  = 33,   // mkdir(path) -> 0, or -1
+  C4DOS_SLOT_RMDIR  = 34    // rmdir(path) -> 0, or -1: an empty directory
+};
+int dos_v7 (int slot) {
+  if (dos_version() < C4DOS_API_V7) return 0;
+  return __c4dos_api[slot] != 0 && __c4dos_arm();
+}
+int dos_chdir (char *path) {
+  if (!dos_v7(C4DOS_SLOT_CHDIR)) return 0 - 1;
+  return __c4dos_call1((int *)__c4dos_api[C4DOS_SLOT_CHDIR], (int)path);
+}
+// DOS's own buffer, good until the next call; 0 before v7
+char *dos_getcwd (int drive) {
+  if (!dos_v7(C4DOS_SLOT_GETCWD)) return 0;
+  return (char *)__c4dos_call1((int *)__c4dos_api[C4DOS_SLOT_GETCWD], drive);
+}
+int dos_mkdir (char *path) {
+  if (!dos_v7(C4DOS_SLOT_MKDIR)) return 0 - 1;
+  return __c4dos_call1((int *)__c4dos_api[C4DOS_SLOT_MKDIR], (int)path);
+}
+int dos_rmdir (char *path) {
+  if (!dos_v7(C4DOS_SLOT_RMDIR)) return 0 - 1;
+  return __c4dos_call1((int *)__c4dos_api[C4DOS_SLOT_RMDIR], (int)path);
+}
+
+// ---- v8: whose code is running ---------------------------------------------
+//
+// The image DOS counts as running is the parent of what it loads, the
+// owner of the files it opens for writing, and gen(0)'s answer. A shell
+// whose code a child calls directly, not through DOS, says "this is mine
+// now" with image(its own handle) and gives the old one back after:
+// grin's game window, whose poll runs grin's loop for the game
+// (docs/grin-plan.md 3.6). image(0) only asks; it is the caller's own
+// handle when asked from its main.
+enum { C4DOS_API_V8 = 8 };
+enum { C4DOS_SLOT_IMAGE = 35 };   // image(h) -> the image that was running (h = 0: no change)
+int dos_image (int h) {
+  if (dos_version() < C4DOS_API_V8 || !__c4dos_api[C4DOS_SLOT_IMAGE] || !__c4dos_arm()) return 0;
+  return __c4dos_call1((int *)__c4dos_api[C4DOS_SLOT_IMAGE], h);
 }
 // c4m.c - C4 Multiload, an extension of C4, supporting multiple source
 //         files and some bells and whistles whilst still running under
@@ -1301,6 +1391,7 @@ char *p, *lp, // current position in source code
      *data;   // data/bss pointer
 
 int *e, *le,  // current position in emitted code
+    *e_end,   // where the text area ends, less a statement's worth (stmt)
     *id,      // currently parsed identifier
     *sym,     // symbol table (simple list of identifiers)
     tk,       // current token
@@ -1833,6 +1924,14 @@ void stmt()
   int *a, *b, t;
   int *swv, *swa, *tbl, *b3, *b4, *bend, *bdef;
   int  swn, swdef, swmin, swmax, swrange, i2, v2, neg2, brk_base;
+
+  // Nothing checked the text area's end: code past it went into
+  // whatever was allocated next, harmlessly as it happened under
+  // glibc, into live memory under C4KE's heap, and the program crashed
+  // later. The kernel compiled from source (innerbench) had come within
+  // 300 words of it at 64 bits. One statement emits well under the
+  // margin e_end leaves.
+  if (e >= e_end) { printf("%d: code area full; c4m -PP doubles it\n", line); exit(-1); }
 
   if (tk == If) {
     next();
@@ -2599,7 +2698,7 @@ int c4m_close (int fd) {
 
 int c4m_main(int argc, char **argv)
 {
-  int fd, bt, ty, poolsz, printsyms;
+  int fd, bt, ty, poolsz, printsyms, textsz;
   int *pc, *sp, *bp, a; // vm registers
   int i, *t, r; // temps
   char*_p, *_data;       // initial pointer locations
@@ -2651,7 +2750,12 @@ int c4m_main(int argc, char **argv)
   if (!(sym = _sym = malloc(poolsz))) { printf("could not malloc(%d) symbol area\n", poolsz); return -1; }
   idmax = sym + (poolsz / sizeof(int)); // end of symbol table
   idmax = idmax - Idsz;                 // minus one element
-  if (!(le = e = _e = malloc(poolsz))) { printf("could not malloc(%d) text area\n", poolsz); return -1; }
+  // The text area counts words, so it is sized in them: 64K at the
+  // default pool, whatever the word size (256 KB at 32 bits, as it
+  // always was; 512 KB at 64, where poolsz bytes held only 32K).
+  textsz = poolsz / 4 * sizeof(int);
+  if (!(le = e = _e = malloc(textsz))) { printf("could not malloc(%d) text area\n", textsz); return -1; }
+  e_end = e + textsz / sizeof(int) - 1024;
   if (!(data = _data = malloc(poolsz))) { printf("could not malloc(%d) data area\n", poolsz); return -1; }
   if (!(sp = _sp = malloc(poolsz))) { printf("could not malloc(%d) stack area\n", poolsz); return -1; }
   if (!(brk_slots = malloc(BRK_MAX * sizeof(int)))) { printf("could not malloc break stack\n"); return -1; }
@@ -2660,7 +2764,7 @@ int c4m_main(int argc, char **argv)
   if ((i = __c4_signal_init())) { printf("c4m: signal init failed with reason %d\n", i); return -1; }
 
   memset(sym,  0, poolsz);
-  memset(e,    0, poolsz);
+  memset(e,    0, textsz);
   memset(data, 0, poolsz);
 
 

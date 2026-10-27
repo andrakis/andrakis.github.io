@@ -8,6 +8,12 @@
 // cycle counter (CYCLES_PER_MS cycles = 1 simulated millisecond) plus
 // an offset that USLP advances, so a run is a pure function of its
 // inputs and every run of the same image produces identical timing.
+//
+// /proc/uptime: the disk controller opens that name as the HOST's file,
+// the way Linux's is for a native c4m -- made from TIME_MS, the clock the
+// TIME opcode reads, at each open, so it advances. Everything that opens
+// files through this controller sees it: C4DOS, a bare-machine program,
+// a C4KE task (whose open() never reaches its kernel). See diskOpen.
 
 export const UART_TX   = 0x100;
 export const UART_RX   = 0x104;
@@ -101,6 +107,44 @@ export const HEAP_USED = 0x1c0;    // r
 export const HEAP_GEN     = 0x1c4;  // r/w: the generation new blocks get
 export const HEAP_RELEASE = 0x1c8;  // w: free every block of generation N
                                     // r: bytes the last release freed
+// The write head's last register: a file taken off a writable drive.
+// Written the address of a name ("1:name", or a name on the selected
+// drive, as DISK_WNAME takes it); reads back 0, or -1 when the drive
+// cannot be written or has no such file. C4DOS's unlink (slot 18) and
+// bare.c's use it on a drive the page keeps, so a delete reaches the
+// page's store as a save does (the drive's `remove`).
+export const DISK_UNLINK = 0x1cc;   // w: name address -> r: 0, or -1
+// The console tap (C4DOS's DEVICE=REDIR.SYS TAP; docs/c4dos-design.md
+// "The console tap"). A c4cc program prints with PRTF, PUTC and PUTS and
+// reads fd 0 with READ, all straight to the host, so an operating system
+// that wants to redirect it needs the machine's help. While CON_TAP is
+// 1, every byte the console would have sent -- those opcodes, UART_TX
+// and the block write alike -- goes into a buffer the host keeps instead,
+// and the guest drains it: CON_ADDR a buffer, then CON_LEN N copies up to
+// N held bytes there and reads back how many. CON_IN N makes fd 0's
+// READs take the N bytes at CON_ADDR (copied when it is written), then
+// end of input; -1 gives fd 0 back to the keyboard. Reading CON_TAP
+// gives how many bytes are held, CON_IN how many are left to read (-1:
+// the keyboard). Announced, never probed: C4DOS is told by CONFIG.SYS.
+export const CON_TAP  = 0x1d0;   // r/w: 1 capture, 0 the console again (held bytes stay)
+export const CON_ADDR = 0x1d4;   // w: buffer address for CON_LEN and CON_IN
+export const CON_LEN  = 0x1d8;   // w: drain up to N -> r: bytes copied
+export const CON_IN   = 0x1dc;   // w: feed N bytes to fd 0 (-1: the keyboard) -> r: left
+const TAP_MAX = 16 << 20;        // held bytes past this are dropped (and counted)
+// Directories (C4DOS's CD and APPEND; docs/c4dos-design.md "Directories").
+// A drive's files are keyed by their paths from its root ("GAMES/DOOM/
+// doom.c4r"), and a name the machine is asked for that starts with a
+// slash ("A:/GAMES/DOOM/doom.c4r") is one of those. Any other is
+// relative: it is looked for in each directory of the drive's search
+// list, in order, and then at the root. DISK_DIRS is written the address
+// of that list for the selected drive -- "GAMES/DOOM;BUILD", the
+// directories from the root separated by ';', an empty one the root --
+// and reads back how many it holds. C4DOS writes it when its current
+// directory or APPEND changes; it opens every file of its own from the
+// root, so the list is for programs that know nothing of directories
+// (C4KE, C4IX's vfsload, a c4cc program's open()). A drive nobody has
+// told looks from the root, as before there were directories.
+export const DISK_DIRS = 0x1e0;  // w: list address -> r: directories in the selected drive's list
 
 // c4_info() capability bits (c4m.c:206)
 export const C4I_WHOWROTE = 0x1000;   // the provenance port is fitted
@@ -114,7 +158,13 @@ export const C4I_C4M = 0x2, C4I_HRT = 0x10, C4I_SIG = 0x20,
              C4I_PIT = 0x800,
 // The mailbox is fitted (MBOX_BASE/LEN/BELL). Same rule as the PIT: a
 // guest asks INFO first and never pokes 0x1b4 on a machine without it.
-             C4I_MBOX = 0x2000;
+             C4I_MBOX = 0x2000,
+// The drive registers are fitted: DISK_DRIVE, DISK_W* and DISK_COUNT to
+// DISK_RO, and DISK_UNLINK. A program with no operating system under it
+// (libc's bare.c) asks here before it writes a file to drive 1, since
+// under native c4m those addresses are its own memory. (0x20000 is
+// libjs's C4I_PAR.)
+             C4I_DRV = 0x40000;
 
 // How fast the machine thinks it is. This was 1000 -- a 1 MHz machine --
 // while the simulator actually executes fifteen to twenty million
@@ -175,6 +225,17 @@ export function setOpnames (names) { OPNAMES = names; }
 const O_NONBLOCK = 0x800;
 const FD_KEYBOARD = 0, FD_FIRST = 3;
 
+// /proc/uptime as Linux words it, for MS milliseconds since power-on:
+// seconds with two decimals, then -- where Linux has its idle time --
+// the same clock in tenths of a second, which is how c4m.c's default
+// reading takes that number (c4_time_host). C4IX writes its own the
+// same way (src/c4ix/vfs.c, vfs_proc).
+function procUptime (ms) {
+  const fix = (whole, cents) => whole + '.' + String(cents).padStart(2, '0');
+  return new TextEncoder().encode(fix(Math.floor(ms / 1000), Math.floor(ms % 1000 / 10)) + ' ' +
+                                  fix(Math.floor(ms / 100), ms % 100) + '\n');
+}
+
 export class Devices {
   constructor(arena, opts = {}) {
     this.arena = arena;
@@ -229,6 +290,54 @@ export class Devices {
     this.diskFd = 0;
     this.diskAddr = 0;
     this.diskResult = 0;
+    // the console tap (CON_TAP ..): capturing, what is held, the feed
+    this.tapOn = 0;
+    this.tapBuf = new Uint8Array(4096);
+    this.tapLen = 0;
+    this.tapDropped = 0;
+    this.tapAddr = 0;
+    this.tapResult = 0;
+    this.tapIn = null;                // fd 0's bytes while fed, else the keyboard
+    this.tapInPos = 0;
+  }
+
+  // A byte for the console: the UART, or the tap while it is capturing.
+  // Everything the console sends comes through here or conBytes.
+  conByte (b) {
+    if (this.tapOn) this.tapPush(b);
+    else if (this.onByte) this.onByte(b);
+  }
+  conBytes (bytes) {
+    if (this.tapOn) { for (let i = 0; i < bytes.length; i++) this.tapPush(bytes[i]); return; }
+    const f = this.onByte;
+    if (f) for (let i = 0; i < bytes.length; i++) f(bytes[i]);
+  }
+  tapPush (b) {
+    if (this.tapLen === this.tapBuf.length) {
+      if (this.tapLen >= TAP_MAX) { this.tapDropped++; return; }
+      const nb = new Uint8Array(Math.min(TAP_MAX, this.tapBuf.length * 2));
+      nb.set(this.tapBuf);
+      this.tapBuf = nb;
+    }
+    this.tapBuf[this.tapLen++] = b;
+  }
+  // up to n held bytes to the guest at CON_ADDR, oldest first
+  tapDrain (n) {
+    n = Math.max(0, Math.min(n | 0, this.tapLen));
+    const a = this.tapAddr >>> 0;
+    if (a >= this.arena.size) return 0;
+    n = Math.min(n, this.arena.size - a);
+    for (let i = 0; i < n; i++) this.arena.write8(a + i, this.tapBuf[i]);
+    this.tapBuf.copyWithin(0, n, this.tapLen);
+    this.tapLen -= n;
+    return n;
+  }
+  // fd 0 while it is fed: what is left of the feed, then end of input
+  tapRead (addr, len) {
+    const n = Math.max(0, Math.min(len | 0, this.tapIn.length - this.tapInPos));
+    for (let i = 0; i < n; i++) this.arena.write8(addr + i, this.tapIn[this.tapInPos + i]);
+    this.tapInPos += n;
+    return n;
   }
 
   // What `files` meant before there was more than one drive. Kept as a
@@ -259,19 +368,37 @@ export class Devices {
       if (raw) this.rawKbd++;
       return fd;
     }
+    // The host's /proc/uptime, as Linux has one for a native c4m: c4m.c
+    // run by plain c4 (innerbench -c, the C4DOS floppies' c4m) reads its
+    // time from it, and a C4DOS, bare or C4KE program's open() comes
+    // straight here -- no kernel sees it. Made from TIME_MS (simMs) at
+    // each open, so two opens apart see two times.
+    if (name === '/proc/uptime') {
+      const fd = this.nextFd++;
+      this.fds.set(fd, { data: procUptime(Math.max(0, this.simMs())), pos: 0 });
+      return fd;
+    }
     const { drv, rest } = this.resolveDrive(name);
     const media = this.drives[drv];
     if (!media) return -1;
     const files = media.files;
     const clean = rest.startsWith('./') ? rest.slice(2) : rest;
-    let data = files.get(clean) ?? files.get(rest);
+    let data;
+    // "/GAMES/x" is from the root; "x" is looked for along the drive's
+    // search list (DISK_DIRS), then at the root
+    if (clean.startsWith('/')) data = files.get(clean.replace(/^\/+/, '')) ?? files.get(clean);
+    else {
+      for (const d of media.dirs || []) if ((data = files.get(d ? `${d}/${clean}` : clean))) break;
+      if (!data) data = files.get(clean) ?? files.get(rest);
+    }
     // The disk is flat, but ls/cat show the vfs.txt tree's hierarchical
     // paths (e.g. "/home/user/hello.c") since that's what ramfs holds -
     // real disk-I/O tools like c4cc never learned that vocabulary and
     // ask for the path verbatim. Falling back to the basename here,
     // once, transparently to every guest program, means "cat" showing
     // you a path is also a path you can hand to any other tool.
-    if (!data && rest.includes('/')) {
+    // (Not for C4DOS's "A:/DIR/NAME", which means that file and no other.)
+    if (!data && rest.includes('/') && !(rest !== name && rest.startsWith('/'))) {
       const base = rest.slice(rest.lastIndexOf('/') + 1);
       data = files.get(base);
     }
@@ -323,7 +450,8 @@ export class Devices {
   diskRead(len) {
     this.diskActivity++;
     const f = this.fds.get(this.diskFd);
-    if (this.diskFd === FD_KEYBOARD) return this.kbdRead(this.diskAddr, len, false);
+    if (this.diskFd === FD_KEYBOARD)
+      return this.tapIn ? this.tapRead(this.diskAddr, len) : this.kbdRead(this.diskAddr, len, false);
     if (!f) return -1;
     if (f.kbd) return this.kbdRead(this.diskAddr, len, f.nonblock, f.raw);
     const n = Math.min(len, f.data.length - f.pos);
@@ -340,8 +468,18 @@ export class Devices {
     const media = this.drives[drv];
     if (!media || !media.writable || !media.sink) return -1;
     const fd = this.nextFd++;
-    this.fds.set(fd, { w: { media, name: rest, chunks: [], len: 0 } });
+    this.fds.set(fd, { w: { media, name: this.wPath(media, rest), chunks: [], len: 0 } });
     return fd;
+  }
+
+  // Where a name written or deleted is: "/x" from the root, any other in
+  // the first directory of the drive's search list (DISK_DIRS: the
+  // current directory C4DOS last told it), "./" or not.
+  wPath (media, rest) {
+    const clean = rest.startsWith('./') ? rest.slice(2) : rest;
+    if (clean.startsWith('/')) return clean.replace(/^\/+/, '');
+    const d = media.dirs && media.dirs[0];
+    return d ? `${d}/${clean}` : clean;
   }
 
   diskWrite (len) {
@@ -353,6 +491,22 @@ export class Devices {
     f.w.chunks.push(buf);
     f.w.len += n;
     return n;
+  }
+
+  // Take a file off a writable drive: out of what the machine sees at
+  // once, and off the host's copy through the drive's `remove` when it
+  // has one (the page's store, the CLI's directory). A drive with a sink
+  // and no remove forgets the file for this session only.
+  diskUnlink (nameAddr) {
+    const name = this.arena.cstring(nameAddr >>> 0, 256);
+    const { drv, rest } = this.resolveDrive(name);
+    const media = this.drives[drv];
+    if (!media || !media.writable || !media.sink) return -1;
+    const clean = this.wPath(media, rest);
+    if (!media.files.has(clean)) return -1;
+    media.files.delete(clean);
+    if (media.remove) { try { media.remove(clean); } catch { return -1; } }
+    return 0;
   }
 
   // The UART's block write: N bytes from the TXADDR latch, in order.
@@ -377,7 +531,7 @@ export class Devices {
     const u8 = this.arena.u8;
     for (let a = addr; a < end; a++) {
       this.uartActivity++;
-      if (this.onByte) this.onByte(u8[a]);
+      this.conByte(u8[a]);
     }
     return end - addr;
   }
@@ -435,7 +589,7 @@ export class Devices {
         // here and stays away from those addresses otherwise, which
         // matters because under native c4m they are its own memory.
         // A cold path -- INFO is read once at boot.
-        return C4I_C4M | C4I_HRT | C4I_SIG | C4I_FLT | C4I_PROT | C4I_PIT |
+        return C4I_C4M | C4I_HRT | C4I_SIG | C4I_FLT | C4I_PROT | C4I_PIT | C4I_DRV |
                (this.noFpu ? 0 : 0x10000 /* C4I_FPU, fpu.js */) |
                (this.mbox ? C4I_MBOX : 0) |
                (this.arena && this.arena.writer ? C4I_WHOWROTE : 0) |
@@ -464,6 +618,15 @@ export class Devices {
       case DISK_WNAME:   return this.diskResult | 0;
       case DISK_WLEN:    return this.diskResult | 0;
       case DISK_WCLOSE:  return this.diskResult | 0;
+      case DISK_UNLINK:  return this.diskResult | 0;
+      case DISK_DIRS: {
+        const m = this.drives[this.drive];
+        return m && m.dirs ? m.dirs.length : 0;
+      }
+      case CON_TAP:      return this.tapLen | 0;
+      case CON_ADDR:     return this.tapAddr | 0;
+      case CON_LEN:      return this.tapResult | 0;
+      case CON_IN:       return this.tapIn ? (this.tapIn.length - this.tapInPos) | 0 : -1;
       case MBOX_BASE:    return this.mbox ? this.mbox.base | 0 : 0;
       case MBOX_LEN:     return this.mbox ? this.mbox.len | 0 : 0;
       case MBOX_BELL: {  const n = this.mboxIrq | 0; this.mboxIrq = 0; return n; }
@@ -479,7 +642,7 @@ export class Devices {
     switch (addr) {
       case UART_TX:
         this.uartActivity++;
-        if (this.onByte) this.onByte(val & 0xff);
+        this.conByte(val & 0xff);
         return;
       case UART_TXADDR: this.uartTxAddr = val | 0; return;
       case UART_TXLEN:  this.uartTxResult = this.uartWrite(val | 0); return;
@@ -542,6 +705,23 @@ export class Devices {
       case DISK_WADDR:  this.diskAddr = val | 0; return;
       case DISK_WLEN:   this.diskResult = this.diskWrite(val | 0); return;
       case DISK_WCLOSE: this.diskResult = this.diskWClose(val | 0); return;
+      case DISK_UNLINK: this.diskResult = this.diskUnlink(val); return;
+      case DISK_DIRS: {
+        const m = this.drives[this.drive];
+        if (m) m.dirs = this.arena.cstring(val >>> 0, 1024).split(';');
+        return;
+      }
+      case CON_TAP:  this.tapOn = (val | 0) ? 1 : 0; return;
+      case CON_ADDR: this.tapAddr = val | 0; return;
+      case CON_LEN:  this.tapResult = this.tapDrain(val | 0); return;
+      case CON_IN: {
+        const n = val | 0;
+        if (n < 0) { this.tapIn = null; return; }
+        const a = this.tapAddr >>> 0;
+        this.tapIn = this.arena.u8.slice(a, Math.min(a + n, this.arena.size));
+        this.tapInPos = 0;
+        return;
+      }
       case DISK_EJECT: {
         const m = this.drives[val | 0];
         if (m) { m.files = new Map(); m.ejected = true; }

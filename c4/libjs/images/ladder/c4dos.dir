@@ -1,0 +1,12 @@
+BIN/
+BUILD/
+C4IX/
+C4KE/
+GAMES/
+GRIN/
+src/
+autoexec.bat
+c4dos.dir
+c4dos32.c4r
+config.sys
+ladder.txt
