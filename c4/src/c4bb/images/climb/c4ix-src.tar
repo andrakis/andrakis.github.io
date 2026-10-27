@@ -64,7 +64,7 @@ int main(int argc, char **argv) {
     kprintf("c4ix: shutdown complete, %d tasks remain\n", task_count());
     return 0;
 }
-src/c4ix/console.c 9016
+src/c4ix/console.c 10692
 //
 // C4IX console: kputc, kputs, kprintf, and console input.
 //
@@ -245,25 +245,51 @@ int kputs(char *s) {
     return n;
 }
 
-// Digits of v in base, minus sign for negative decimal. Returns the
-// character count. (Most-negative int wraps on negation; kernel
-// prints don't go there.)
-static int kputnum(int v, int base) {
+// Digits of v in base: decimal signed, with a minus sign; hex unsigned,
+// as printf's %x (the shift's top nibble masked, as kputptr does, so a
+// word above 0x80000000 is its digits, not a minus sign). WIDTH pads to
+// that many characters: with zeros after the sign when ZERO, with spaces
+// on the right when LEFT, else spaces on the left. Returns the character
+// count. (Most-negative int wraps on negation; kernel prints don't go
+// there.)
+static int kputnum(int v, int base, int width, int zero, int left) {
     char buf[24];
     char *digits;
-    int i, n;
+    int i, n, neg, mask;
 
     digits = "0123456789abcdef";
     i = 0;
-    n = 0;
-    if (v < 0) { con_out('-'); ++n; v = -v; }
-    if (v == 0) { buf[i] = '0'; ++i; }
-    while (v) {
-        buf[i] = digits[v % base]; ++i;
-        v = v / base;
+    neg = 0;
+    if (base == 16) {
+        mask = ~(15 << (sizeof(int) * 8 - 4));
+        if (v == 0) { buf[i] = '0'; ++i; }
+        while (v) { buf[i] = digits[v & 15]; ++i; v = (v >> 4) & mask; }
+    } else {
+        if (v < 0) { neg = 1; v = -v; }
+        if (v == 0) { buf[i] = '0'; ++i; }
+        while (v) {
+            buf[i] = digits[v % base]; ++i;
+            v = v / base;
+        }
     }
-    n = n + i;
+    n = i + neg;
+    if (!left && !zero) while (n < width) { con_out(' '); ++n; }
+    if (neg) con_out('-');
+    if (!left && zero) while (n < width) { con_out('0'); ++n; }
     while (i) { --i; con_out(buf[i]); }
+    if (left) while (n < width) { con_out(' '); ++n; }
+    return n;
+}
+
+// s, padded to WIDTH with spaces, on the right when LEFT
+static int kputpad(char *s, int width, int left) {
+    int n, len;
+    len = 0;
+    while (s[len]) ++len;
+    n = len;
+    if (!left) while (n < width) { con_out(' '); ++n; }
+    kputs(s);
+    if (left) while (n < width) { con_out(' '); ++n; }
     return n;
 }
 
@@ -286,7 +312,9 @@ static int kputptr(int v) {
     return n;
 }
 
-// %d %x %p %s %c %%. Anything else prints verbatim. Returns characters
+// %d %x %p %s %c %%, with printf's width and its 0 and - flags on %d,
+// %x and %s: "0x%08x" is eight hex digits, zeros first; "%-12s" a name
+// in twelve columns. Anything else prints verbatim. Returns characters
 // written, printf-style.
 //
 // va_end must see ap exactly where va_start left it -- it re-reads
@@ -298,7 +326,7 @@ static int kputptr(int v) {
 int kprintf(char *fmt, ...) {
     va_list ap;    // one declarator per line: va_list is `int *`, so
     va_list walk;  // `va_list a, b` would make b a plain int
-    int n, c;
+    int n, c, width, zero, left;
 
     sched_lock();
     va_start(ap, fmt);
@@ -309,14 +337,21 @@ int kprintf(char *fmt, ...) {
         if (c != '%') { con_out(c); ++n; }
         else if (*fmt == 0) { con_out('%'); ++n; }
         else {
-            c = *fmt; ++fmt;
-            if (c == 'd')      n = n + kputnum(va_arg(walk, int), 10);
-            else if (c == 'x') n = n + kputnum(va_arg(walk, int), 16);
+            // flags and a width: %08x, %-12s
+            zero = 0; left = 0; width = 0;
+            while (*fmt == '0' || *fmt == '-') { if (*fmt == '0') zero = 1; else left = 1; ++fmt; }
+            while (*fmt >= '0' && *fmt <= '9') { width = width * 10 + (*fmt - '0'); ++fmt; }
+            if (left) zero = 0;
+            c = *fmt;
+            if (c) ++fmt;
+            if (c == 'd')      n = n + kputnum(va_arg(walk, int), 10, width, zero, left);
+            else if (c == 'x') n = n + kputnum(va_arg(walk, int), 16, width, zero, left);
             else if (c == 'p') n = n + kputptr(va_arg(walk, int));
-            else if (c == 's') n = n + kputs(va_arg(walk, char *));
+            else if (c == 's') n = n + kputpad(va_arg(walk, char *), width, left);
             else if (c == 'c') { con_out(va_arg(walk, int)); ++n; }
             else if (c == '%') { con_out('%'); ++n; }
-            else { con_out('%'); con_out(c); n = n + 2; }
+            else if (c) { con_out('%'); con_out(c); n = n + 2; }
+            else { con_out('%'); ++n; }
         }
     }
     va_end(ap);
@@ -1058,7 +1093,7 @@ int task_count() {
 void task_shutdown() {
     while (task_head) task_release(task_head);
 }
-src/c4ix/sched.c 64959
+src/c4ix/sched.c 65360
 //
 // C4IX scheduler.
 //
@@ -2423,6 +2458,7 @@ void sched_init(int interval) {
         smp_ncpu = __c4_cpu_count();
         if (smp_ncpu > CPU_MAX) smp_ncpu = CPU_MAX;
     }
+    kprintf("c4ix: %d processor%s\n", smp_ncpu, (smp_ncpu > 1) ? "s" : "");
     if (smp_ncpu > 1) {
         // The boot CPU's state moves into the window, where it is its
         // own: a word at a time, since memcpy is the host's and writes the
@@ -2475,6 +2511,7 @@ void sched_init(int interval) {
         sched_interval = interval;
         __c4_configure(C4IX_CONF_HANDLER, (int)&sched_trap);
         __c4_configure(C4IX_CONF_INTERVAL, interval);
+        kprintf("c4ix: cycle interval set to %dk\n", interval / 1024);
     }
 
     // and the other CPUs, each on a stack of its own
@@ -2485,6 +2522,7 @@ void sched_init(int interval) {
             exit(-1);
         }
         __c4_cpu_start(k, (int)&smp_ap, smp_stack[k] + SMP_STACK_BYTES);
+        kprintf("c4ix: CPU %d stack allocated: 0x%08x, CPU booting\n", k, smp_stack[k]);
         ++k;
     }
     sched_banner();
@@ -2495,19 +2533,24 @@ void sched_init(int interval) {
 // the one heap, each with nothing of its own but its window (and, past
 // CPU 0, its idle task's stack, from the heap).
 static void sched_banner() {
-    int hb, he, mb;
+    int hb, he, mb, bs;
     if (host_has(C4IX_I_C4MJS)) {
         hb = *(int *)C4IX_HEAP_BASE;
         he = *(int *)C4IX_HEAP_END;
         // the heap ends a megabyte below the top, under the boot stack
-        mb = (he + 2 * 1048576 - 1) / 1048576;
-        kprintf("c4ix: %d MB of memory: the kernel below 0x%x, the heap to 0x%x (%d KB), the boot stack above\n",
-            mb, hb, he, (he - hb) / 1024);
+        bs = (he + 2 * 1048576 - 1);
+        mb = bs / 1048576;
+        kprintf("c4ix: %d MB of memory:\n", mb);
+        kprintf("  [mem 0x%08x-0x%08x] Kernel\n", 0, hb - 1);
+        kprintf("  [mem 0x%08x-0x%08x] Heap (%d MB)\n", hb, he - 1, ((he - hb) / 1024) / 1024);
+        kprintf("  [mem 0x%08x-0x%08x] Boot stack (%d MB)\n", he, bs, (((bs + 1) - he) / 1024) / 1024);
     }
-    if (smp_ncpu > 1)
-        kprintf("c4ix: %d processors, %s; they share all memory and the heap, each with a %d-byte window of its own at 0x%x\n",
-            smp_ncpu, host_has(C4IX_I_PAR) ? "a thread each, all at once" : "simulated, taking turns on one thread",
+    
+    if (smp_ncpu > 1) {
+        kprintf("  %s\n  CPUs share all memory and the heap\n  each with a %d-byte window of its own at 0x%08x\n",
+            host_has(C4IX_I_PAR) ? "a thread each, all at once" : "simulated, taking turns on one thread",
             256, CPU_WINDOW);
+    }
 }
 
 // Shutdown, from the kernel task: the other CPUs halt. Each takes the
@@ -5892,7 +5935,7 @@ void c4r_unload(struct c4r_image *img) {
 struct task *task_spawn(char *path, int argc, int argv) {
     return task_spawn_priv(path, argc, argv, PRIV_USER);
 }
-src/c4ix/init.c 15730
+src/c4ix/init.c 15742
 //
 // C4IX init: the first task, and the kernel's command line.
 //
@@ -6134,38 +6177,40 @@ static int init_is(char *s, char *opt) {
 // put whatever you named into every role in turn. Booting to a shell
 // now needs no arguments at all, and the tour is behind --demo.
 static void init_usage() {
-    kputs("c4ix -- a small Unix-like kernel for the C4 virtual machine\n");
-    kputs("\n");
-    kputs("usage: c4ix.c4r [OPTION] [PROGRAM [ARGUMENT]...]\n");
-    kputs("\n");
-    kputs("  (no arguments)     boot to an interactive shell\n");
-    kputs("  PROGRAM [ARG]...   boot, run PROGRAM with ARGs, shut down\n");
-    kputs("  --demo IMAGE...    run the built-in demonstrations, below\n");
-    kputs("  -h, --help         print this and shut down\n");
-    kputs("  -q                 accepted and ignored, so older command\n");
-    kputs("                     lines keep working\n");
-    kputs("\n");
-    kputs("PROGRAM is an image path as the host filesystem sees it. The\n");
-    kputs("SHELL expands a bare name to c4ix-NAME.c4r or NAME.c4r; init\n");
-    kputs("does not, so name the image in full here.\n");
-    kputs("\n");
-    kputs("--demo takes six images and uses each for a fixed role:\n");
-    kputs("  1  calls printf directly -- proves redirection reaches a\n");
-    kputs("     program that has never heard of C4IX\n");
-    kputs("  2  uses libc4ix syscalls\n");
-    kputs("  3  writer and 4 reader of a pipeline\n");
-    kputs("  5  a shell, and 6 a script for it to run\n");
-    kputs("Fewer than six still runs the stages it has arguments for,\n");
-    kputs("so a short list puts one image into several roles.\n");
-    kputs("\n");
-    kputs("  c4ix.c4r --demo c4ix-hello.c4r c4ix-uhello.c4r c4ix-echo.c4r \\\n");
-    kputs("           c4ix-wc.c4r c4ix-sh.c4r src/c4ix/user/test.sh\n");
-    kputs("\n");
-    kputs("  c4ix.c4r --desktop   the web page's boot: the root archive unpacks first,\n");
-    kputs("                       with a loading screen, then the shell runs\n");
-    kputs("                       \"desktop &\" and \"top\", as if they were typed\n");
-    kputs("  c4ix.c4r -e CMD      the shell runs CMD first, as if it were typed (up\n");
-    kputs("                       to four, after --desktop's own if both are given)\n");
+    kputs("c4ix -- a small Unix-like kernel for the C4 virtual machine\n"
+          "\n"
+          "usage: c4ix.c4r [OPTION] [PROGRAM [ARGUMENT]...]\n"
+          "\n"
+          "  (no arguments)     boot to an interactive shell\n"
+          "  PROGRAM [ARG]...   boot, run PROGRAM with ARGs, shut down\n"
+          "  --demo IMAGE...    run the built-in demonstrations, below\n"
+          "  -h, --help         print this and shut down\n"
+          "  -q                 accepted and ignored, so older command\n"
+          "                     lines keep working\n"
+          "\n"
+          "PROGRAM is an image path as the host filesystem sees it. The\n"
+          "SHELL expands a bare name to c4ix-NAME.c4r or NAME.c4r; init\n"
+          "does not, so name the image in full here.\n"
+          "\n"
+          "--demo takes six images and uses each for a fixed role:\n"
+          "  1  calls printf directly -- proves redirection reaches a\n"
+          "     program that has never heard of C4IX\n"
+          "  2  uses libc4ix syscalls\n"
+          "  3  writer and 4 reader of a pipeline\n"
+          "  5  a shell, and 6 a script for it to run\n"
+          "Fewer than six still runs the stages it has arguments for,\n"
+          "so a short list puts one image into several roles.\n"
+          "\n"
+          "  c4ix.c4r --demo c4ix-hello.c4r c4ix-uhello.c4r c4ix-echo.c4r \\\n"
+          "           c4ix-wc.c4r c4ix-sh.c4r src/c4ix/user/test.sh\n"
+          "\n"
+          "  c4ix.c4r --desktop   the web page's boot: the root archive\n"
+          "                       unpacks first, with a loading screen,\n"
+          "                       then the shell runs \"desktop &\" and\n"
+          "                       \"top\", as if they were typed\n"
+          "  c4ix.c4r -e CMD      the shell runs CMD first, as if it were\n"
+          "                       typed (up to four, after --desktop's own\n"
+          "                       if both are given)\n");
 }
 
 // The guided tour. argc/av are shifted past --demo, so av[1] is the
