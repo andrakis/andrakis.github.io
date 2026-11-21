@@ -1,0 +1,6 @@
+Makefile.bsd
+Makefrag
+c4dos.dir
+fortune.6.in
+fortune.c
+pathnames.h.in

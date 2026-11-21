@@ -1,0 +1,11 @@
+Makefile.bsd
+Makefrag
+bdinit.c
+bdisp.c
+c4dos.dir
+gomoku.6
+gomoku.h
+main.c
+makemove.c
+pickmove.c
+stoc.c

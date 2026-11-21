@@ -1,0 +1,10 @@
+datfiles/
+fortune/
+strfile/
+tools/
+unstr/
+Makefile.bsd
+Makefrag
+Notes
+README
+c4dos.dir

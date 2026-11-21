@@ -1,9 +1,91 @@
+Games/Cards|Solitaire|solitaire|window
+Games/Cards|Canfield|canfield|window
+Games/Cards|FreeCell|freecell|window
+Games/Cards|Golf|golf|window
+Games/Cards|Spider|spider|window
+Games/Cards|Thornq|thornq|window
+Games/Puzzles|Mastermind|mastermind|window
+Games/Puzzles|Merlin|merlin|window
+Games/Puzzles|Minesweeper|minesweeper|window
+Games/Puzzles|Pegged|pegged|window
+Games/Puzzles|Taipei|taipei|window
+Games/Text Adventures|Open Adventure|advent
+Games/BSD Games|Go Fish|fish
+Games/BSD Games|Hunt the Wumpus|wump
+Games/BSD Games|Pig|pig
+Games/BSD Games|Quiz|quiz
+Games/BSD Games|Adventure|adventure
+Games/BSD Games|Backgammon|backgammon
+Games/BSD Games|Star Trek|trek
+Games/BSD Games|Monopoly|monop
+Games/BSD Games|Hangman|hangman
+Games/BSD Games|Rain|rain
+Games/BSD Games|Worm|worm
+Games/BSD Games|Gomoku|gomoku
+Games/BSD Games|Snake|snake
+Games/BSD Games|Canfield|canfld
+Games/BSD Games|Robots|robots
+Games/BSD Games|Tetris|tetris
+Games/BSD Games|Cribbage|cribbage
+Games/BSD Games|Mille Bornes|mille
+Games/BSD Games|Boggle|boggle
+Games/BSD Games|Battlestar|battlestar
+Games/BSD Games|Air Traffic Control|atc
+Games/BSD Games|Sail|sail
 Games|Doom|doom
 Games/Doom (your files)|The Ultimate Doom|doom -home -iwad doom.wad
 Games/Doom (your files)|Doom II|doom -home -iwad doom2.wad
 Games/Doom (your files)|Final Doom: TNT Evilution|doom -home -iwad tnt.wad
 Games/Doom (your files)|Final Doom: The Plutonia Experiment|doom -home -iwad plutonia.wad
+Games|Duke Nukem 3D|duke3d
+Games|Duke Nukem 3D (your files)|duke3d -home
+Games/Text Adventures|Zork I|zork1
+Games/Text Adventures|Zork II|zork2
+Games/Text Adventures|Zork III|zork3
+Games/Puzzles|Black Box|blackbox|window
+Games/Puzzles|Bridges|bridges|window
+Games/Puzzles|Cube|cube|window
+Games/Puzzles|Dominosa|dominosa|window
+Games/Puzzles|Fifteen|fifteen|window
+Games/Puzzles|Filling|filling|window
+Games/Puzzles|Flip|flip|window
+Games/Puzzles|Flood|flood|window
+Games/Puzzles|Galaxies|galaxies|window
+Games/Puzzles|Guess|guess|window
+Games/Puzzles|Inertia|inertia|window
+Games/Puzzles|Keen|keen|window
+Games/Puzzles|Light Up|lightup|window
+Games/Puzzles|Loopy|loopy|window
+Games/Puzzles|Magnets|magnets|window
+Games/Puzzles|Map|map|window
+Games/Puzzles|Mines|mines|window
+Games/Puzzles|Mosaic|mosaic|window
+Games/Puzzles|Net|net|window
+Games/Puzzles|Netslide|netslide|window
+Games/Puzzles|Palisade|palisade|window
+Games/Puzzles|Pattern|pattern|window
+Games/Puzzles|Pearl|pearl|window
+Games/Puzzles|Pegs|pegs|window
+Games/Puzzles|Range|range|window
+Games/Puzzles|Rectangles|rect|window
+Games/Puzzles|Same Game|samegame|window
+Games/Puzzles|Signpost|signpost|window
+Games/Puzzles|Singles|singles|window
+Games/Puzzles|Sixteen|sixteen|window
+Games/Puzzles|Slant|slant|window
+Games/Puzzles|Solo|solo|window
+Games/Puzzles|Tents|tents|window
+Games/Puzzles|Towers|towers|window
+Games/Puzzles|Train Tracks|tracks|window
+Games/Puzzles|Twiddle|twiddle|window
+Games/Puzzles|Undead|undead|window
+Games/Puzzles|Unequal|unequal|window
+Games/Puzzles|Unruly|unruly|window
+Games/Puzzles|Untangle|untangle|window
+Games|Quake|quake
+Games|Quake (your files)|quake -home
 Games|Rise of the Triad|rott
 Games|Rise of the Triad (your files)|rottreg
+Games|Tyrian (your files)|tyrian --home
 Games|Wolfenstein 3D|wolf3d
 Games|Wolfenstein 3D (your files)|wolf3d6

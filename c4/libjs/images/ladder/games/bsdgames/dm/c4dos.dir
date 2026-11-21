@@ -1,0 +1,9 @@
+Makefile.bsd
+Makefrag
+c4dos.dir
+dm.8.in
+dm.c
+dm.conf.5.in
+pathnames.h.in
+utmpentry.c
+utmpentry.h

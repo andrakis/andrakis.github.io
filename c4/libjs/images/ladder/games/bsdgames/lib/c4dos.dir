@@ -1,0 +1,6 @@
+Makefrag
+c4dos.dir
+fgetln.c
+getloadavg.c
+getprogname.c
+strlcpy.c

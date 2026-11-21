@@ -1,0 +1,11 @@
+sys/
+c4dos.dir
+defs.h
+frz-story.c
+hash.h
+inttypes.h
+save.txt
+signal.h
+stdbool.h
+stdint.h
+walk.txt

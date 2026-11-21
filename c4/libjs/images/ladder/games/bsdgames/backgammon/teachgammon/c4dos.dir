@@ -1,0 +1,9 @@
+Makefile.bsd
+Makefrag
+c4dos.dir
+data.c
+teach.c
+ttext1.c
+ttext2.c
+tutor.c
+tutor.h

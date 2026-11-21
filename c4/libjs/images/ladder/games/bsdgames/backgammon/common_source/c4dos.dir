@@ -1,0 +1,14 @@
+Makefile.bsd
+Makefrag
+allow.c
+back.h
+board.c
+c4dos.dir
+check.c
+fancy.c
+init.c
+odds.c
+one.c
+save.c
+subs.c
+table.c

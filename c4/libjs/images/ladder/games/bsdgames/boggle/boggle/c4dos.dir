@@ -1,0 +1,13 @@
+Makefile.bsd
+Makefrag
+bog.c
+bog.h.in
+boggle.6
+c4dos.dir
+extern.h
+help.c
+helpfile
+mach.c
+prtable.c
+timer.c
+word.c

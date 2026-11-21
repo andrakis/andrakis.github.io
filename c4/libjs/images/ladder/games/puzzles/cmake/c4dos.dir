@@ -1,0 +1,7 @@
+platforms/
+c4dos.dir
+glob-symlinks.py
+nestedvm-toolchain.cmake
+setup.cmake
+toolchain-mingw.cmake
+windows-dummy-toolchain.cmake

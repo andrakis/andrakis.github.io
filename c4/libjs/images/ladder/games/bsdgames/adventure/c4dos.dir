@@ -1,0 +1,17 @@
+Makefile.bsd
+Makefrag
+adventure.6
+c4dos.dir
+crc.c
+done.c
+extern.h
+glorkz
+hdr.h
+init.c
+io.c
+main.c
+save.c
+setup.c
+subr.c
+vocab.c
+wizard.c

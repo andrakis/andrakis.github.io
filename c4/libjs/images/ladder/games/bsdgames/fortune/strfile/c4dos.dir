@@ -1,0 +1,6 @@
+Makefile.bsd
+Makefrag
+c4dos.dir
+strfile.8
+strfile.c
+strfile.h

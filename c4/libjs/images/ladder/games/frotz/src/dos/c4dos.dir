@@ -1,0 +1,17 @@
+fonts/
+Makefile
+c4dos.dir
+dosblorb.c
+dosblorb.h
+dosfrotz.h
+dosinit.c
+dosinput.c
+dosmouse.c
+dospic.c
+dossampl.c
+dosscrn.c
+dostext.c
+dparams.txt
+fontdata.h
+inline.h
+owfix.asm

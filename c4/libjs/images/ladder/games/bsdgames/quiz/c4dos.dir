@@ -1,0 +1,9 @@
+datfiles/
+Makefile.bsd
+Makefrag
+c4dos.dir
+pathnames.h.in
+quiz.6.in
+quiz.c
+quiz.h
+rxp.c

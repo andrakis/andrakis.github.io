@@ -1,0 +1,111 @@
+// tyr-c4ix.c -- OpenTyrian on C4IX: the display is the desktop's, which
+// gives it way until the game ends (include/display.h); the clock and the
+// sound card are the machine's. gui.h and snd.h for their declarations
+// only: video-c4.c and loudness-c4.c carry their functions.
+
+#include <stdint.h>
+#define C4IX_SHARED 1
+#include "gui.h"
+#include "snd.h"
+#undef C4IX_SHARED
+#include "display.h"
+#include "window.h"
+#include <stdlib.h>
+#include <string.h>
+
+// a game asks to be served sooner and longer than the rest (nice, sched.c)
+int unice(int id, int nice);            // libc4ix (c4ix_user.h)
+enum { TYR_NICE = -5 };
+
+int tyr_open_display(void) {
+	unice(0, TYR_NICE);
+	if (!gui_present()) return 0;
+	return udisplay_take(0);
+}
+void tyr_close_display(void) { udisplay_give(); }
+// --window, or the display taken: the Terminal window the game was
+// started from (window.h), as wolf3d --window plays. Two buffers: the
+// desktop reads the one it was given when it next draws, and says so
+// (WIN_FRAME); until then a newer frame waits in the other, and only the
+// newest is sent. Keys and the mouse come back in the display's own form,
+// for c4sdl.c: the mouse's place in the canvas's 640x400 as the display's
+// 640x480, and its buttons as they are. The game steers with the mouse, so
+// it asks for it locked to the window (win_lock): a click on the window
+// captures it, as the whole display's does, and its motion comes as
+// GUI_EV_REL, scaled the same way; Esc lets it go.
+static char *fbuf[2];
+static int *fpal[2];
+static int sent, waiting, pending, closed;
+
+int tyr_win_open(void) {
+	int i;
+	unice(0, TYR_NICE);
+	for (i = 0; i < 2; i++) {
+		fbuf[i] = (char *) calloc(320 * 200, 1);
+		fpal[i] = (int *) calloc(256, sizeof(int));
+		if (!fbuf[i] || !fpal[i]) return 0;
+	}
+	if (!win_open("Tyrian")) return 0;
+	win_lock(1);
+	return 1;
+}
+static void send_frame(int b) {
+	win_fb(fbuf[b], 320, 200, 320, fpal[b]);
+	win_present();
+	sent = b;
+	waiting = 1;
+}
+void tyr_win_draw(uint8_t *pixels, int pitch, uint32_t *palette) {
+	int b, y;
+	if (closed) return;
+	b = waiting ? 1 - sent : sent;
+	for (y = 0; y < 200; y++) memcpy(fbuf[b] + y * 320, pixels + y * pitch, 320);
+	memcpy(fpal[b], palette, 256 * sizeof(int));
+	if (waiting) pending = 1;
+	else send_frame(b);
+}
+int tyr_win_poll(int *ev) {
+	int w[3], k;
+	if (closed) return 0;
+	while (1) {
+		k = win_poll(w);
+		if (k == WIN_NONE) return 0;
+		// the window closed: the game ends, as when it is quit
+		if (k < 0) { closed = 1; exit(0); }
+		if (k == WIN_FRAME) {
+			waiting = 0;
+			if (pending) { pending = 0; send_frame(1 - sent); }
+			continue;
+		}
+		if (k == WIN_KEY || k == WIN_KEYUP) {
+			ev[0] = k == WIN_KEY ? GUI_EV_KEYDOWN : GUI_EV_KEYUP;
+			ev[1] = w[0]; ev[2] = w[1]; ev[3] = w[2];
+			return 1;
+		}
+		if (k == WIN_MOVE || k == WIN_DOWN || k == WIN_UP) {
+			ev[0] = k == WIN_MOVE ? GUI_EV_MOVE : k == WIN_DOWN ? GUI_EV_DOWN : GUI_EV_UP;
+			ev[1] = w[0] * 640 / WIN_W; ev[2] = w[1] * 480 / WIN_H;
+			ev[3] = w[2];
+			return 1;
+		}
+		if (k == WIN_REL) {
+			ev[0] = GUI_EV_REL;
+			ev[1] = w[0] * 640 / WIN_W; ev[2] = w[1] * 480 / WIN_H;
+			ev[3] = w[2];
+			if (ev[1] || ev[2]) return 1;
+		}
+	}
+}
+void tyr_win_close(void) { if (!closed) { win_close(); closed = 1; } }
+
+// the game in /usr/games/tyrian, its data in data/ there (c4ix.vfs.txt),
+// and its settings and saves beside it, as the other games keep theirs,
+// not in the directory it was started from (file.c)
+const char *tyr_base(void) { return "/usr/games/tyrian/"; }
+const char *tyr_user_dir(void) { return "/usr/games/tyrian"; }
+// --home: the person's own copy, which c4's page Uploads put in
+// /home/tyrian or /home (file.c, findDataFiles)
+const char *tyr_home_dir(int i) { return i == 0 ? "/home/tyrian" : i == 1 ? "/home" : 0; }
+int tyr_has_sound(void) { return snd_present(); }
+uint32_t plat_ms(void) { return __time(); }
+void plat_sleep(uint32_t ms) { if (ms) __c4_usleep(ms * 1000); }

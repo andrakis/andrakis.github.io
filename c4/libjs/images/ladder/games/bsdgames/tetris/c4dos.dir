@@ -1,0 +1,14 @@
+Makefile.bsd
+Makefrag
+c4dos.dir
+input.c
+input.h
+pathnames.h.in
+scores.c
+scores.h
+screen.c
+screen.h
+shapes.c
+tetris.6.in
+tetris.c
+tetris.h

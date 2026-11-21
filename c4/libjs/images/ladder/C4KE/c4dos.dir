@@ -27,6 +27,8 @@ c4sh.c4r
 cat.c
 cat.c4r
 clock.c
+duke3d-buildlic.txt
+duke3d-license.txt
 echo.c
 echo.c4r
 eshell.c

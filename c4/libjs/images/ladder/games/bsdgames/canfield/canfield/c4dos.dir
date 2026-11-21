@@ -1,0 +1,6 @@
+Makefile.bsd
+Makefrag
+c4dos.dir
+canfield.6.in
+canfield.c
+pathnames.h.in

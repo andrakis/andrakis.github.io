@@ -1,0 +1,7 @@
+src/
+Game.vcproj
+Game.vcxproj
+Game.vcxproj.filters
+Makefile.am
+c4dos.dir
+chocolateDukeResources.rc

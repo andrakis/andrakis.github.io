@@ -1,0 +1,9 @@
+Makefile.am
+Makefile.in
+c4dos.dir
+penguins.c
+test1.c
+test3.c
+test4.c
+test5.c
+test6.c

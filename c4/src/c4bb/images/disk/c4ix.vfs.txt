@@ -88,6 +88,54 @@ ARCHIVES = c4ix-root.tgz
 		# IDE's Code tab finds what a game's source map names: lazy files
 		# that only c4ix.sizes lists (docs/c4ix-desktop.md, part twenty-one)
 		games/: hostdir(games/)
+			# The Ace of Penguins (games/ace): its solitaires and puzzles, each a
+			# program with its images inside it. The card games are in the desktop's
+			# Go > Games > Cards, the others in Puzzles, each in a window of its own
+			# (games/README.md).
+			ace/:
+				solitaire.c4r: c4ix-ace.c4r
+				canfield.c4r: c4ix-ace-canfield.c4r
+				freecell.c4r: c4ix-ace-freecell.c4r
+				golf.c4r: c4ix-ace-golf.c4r
+				mastermind.c4r: c4ix-ace-mastermind.c4r
+				merlin.c4r: c4ix-ace-merlin.c4r
+				minesweeper.c4r: c4ix-ace-minesweeper.c4r
+				pegged.c4r: c4ix-ace-pegged.c4r
+				spider.c4r: c4ix-ace-spider.c4r
+				taipei.c4r: c4ix-ace-taipei.c4r
+				thornq.c4r: c4ix-ace-thornq.c4r
+			# Open Adventure (games/advent): the game, its dungeon
+			# compiled in
+			advent/:
+				advent.c4r: c4ix-advent.c4r
+			# The BSD games (games/bsdgames), and what they read, which is lazy (hostdir,
+			# vfsload.c)
+			bsdgames/:
+				fish.c4r: c4ix-bsdgames-fish.c4r
+				wump.c4r: c4ix-bsdgames-wump.c4r
+				pig.c4r: c4ix-bsdgames-pig.c4r
+				quiz.c4r: c4ix-bsdgames-quiz.c4r
+				adventure.c4r: c4ix-bsdgames-adventure.c4r
+				hangman.c4r: c4ix-bsdgames-hangman.c4r
+				rain.c4r: c4ix-bsdgames-rain.c4r
+				worm.c4r: c4ix-bsdgames-worm.c4r
+				backgammon.c4r: c4ix-bsdgames-backgammon.c4r
+				gomoku.c4r: c4ix-bsdgames-gomoku.c4r
+				snake.c4r: c4ix-bsdgames-snake.c4r
+				canfld.c4r: c4ix-bsdgames-canfield.c4r
+				robots.c4r: c4ix-bsdgames-robots.c4r
+				tetris.c4r: c4ix-bsdgames-tetris.c4r
+				cribbage.c4r: c4ix-bsdgames-cribbage.c4r
+				mille.c4r: c4ix-bsdgames-mille.c4r
+				boggle.c4r: c4ix-bsdgames-boggle.c4r
+				trek.c4r: c4ix-bsdgames-trek.c4r
+				monop.c4r: c4ix-bsdgames-monop.c4r
+				battlestar.c4r: c4ix-bsdgames-battlestar.c4r
+				atc.c4r: c4ix-bsdgames-atc.c4r
+				sail.c4r: c4ix-bsdgames-sail.c4r
+				phantasia.c4r: c4ix-bsdgames-phantasia.c4r
+				hack.c4r: c4ix-bsdgames-hack.c4r
+				data/: hostdir(bsdgames/)
 			# Doom (games/doom): the game and id's shareware WAD; and the person's
 			# own IWAD (doom.wad, doom2.wad, plutonia.wad, tnt.wad), which the page's
 			# Uploads put in /home/doom or /home (doom -home), one entry each: a
@@ -95,6 +143,84 @@ ARCHIVES = c4ix-root.tgz
 			doom/:
 				doom.c4r: c4ix-doom.c4r
 				doom1.wad
+			# Duke Nukem 3D (games/duke3d): the game and 3D Realms' shareware
+			# episode; and the full game from the person's own DUKE3D.GRP, which the
+			# page's Uploads put in /home/duke3d or /home (duke3d -home)
+			duke3d/:
+				duke3d.c4r: c4ix-duke3d.c4r
+				DUKE3DSW.GRP
+				DUKE.RTS
+				LICENSE.TXT: duke3d-license.txt
+				BUILDLIC.TXT: duke3d-buildlic.txt
+			# Frotz (games/frotz): the Z-machine, and Zork I, II and III, which are
+			# lazy (hostdir, vfsload.c). zork1, zork2 and zork3 are frotz again: a
+			# program with no story named plays the one its own name says (c4/frz-story.c)
+			frotz/:
+				frotz.c4r: c4ix-frotz.c4r
+				zork1.c4r: c4ix-frotz.c4r
+				zork2.c4r: c4ix-frotz.c4r
+				zork3.c4r: c4ix-frotz.c4r
+				data/: hostdir(frotz/)
+			# PDCurses (games/pdcurses): upstream's demos. The library goes into each program
+			# that uses it.
+			pdcurses/:
+				firework.c4r: c4ix-pdcurses-firework.c4r
+				xmas.c4r: c4ix-pdcurses-xmas.c4r
+				testcurs.c4r: c4ix-pdcurses-testcurs.c4r
+				ptest.c4r: c4ix-pdcurses-ptest.c4r
+				ozdemo.c4r: c4ix-pdcurses-ozdemo.c4r
+				tuidemo.c4r: c4ix-pdcurses-tuidemo.c4r
+			# Simon Tatham's Puzzles (games/puzzles): one image a game, which has no
+			# data, and `puzzles`, which lists them (c4/README.md). Each is in the
+			# desktop's Go > Games > Puzzles, in a window of its own (games/README.md).
+			puzzles/:
+				puzzles.c4r: c4ix-puzzles.c4r
+				blackbox.c4r: c4ix-puz-blackbox.c4r
+				bridges.c4r: c4ix-puz-bridges.c4r
+				cube.c4r: c4ix-puz-cube.c4r
+				dominosa.c4r: c4ix-puz-dominosa.c4r
+				fifteen.c4r: c4ix-puz-fifteen.c4r
+				filling.c4r: c4ix-puz-filling.c4r
+				flip.c4r: c4ix-puz-flip.c4r
+				flood.c4r: c4ix-puz-flood.c4r
+				galaxies.c4r: c4ix-puz-galaxies.c4r
+				guess.c4r: c4ix-puz-guess.c4r
+				inertia.c4r: c4ix-puz-inertia.c4r
+				keen.c4r: c4ix-puz-keen.c4r
+				lightup.c4r: c4ix-puz-lightup.c4r
+				loopy.c4r: c4ix-puz-loopy.c4r
+				magnets.c4r: c4ix-puz-magnets.c4r
+				map.c4r: c4ix-puz-map.c4r
+				mines.c4r: c4ix-puz-mines.c4r
+				mosaic.c4r: c4ix-puz-mosaic.c4r
+				net.c4r: c4ix-puz-net.c4r
+				netslide.c4r: c4ix-puz-netslide.c4r
+				palisade.c4r: c4ix-puz-palisade.c4r
+				pattern.c4r: c4ix-puz-pattern.c4r
+				pearl.c4r: c4ix-puz-pearl.c4r
+				pegs.c4r: c4ix-puz-pegs.c4r
+				range.c4r: c4ix-puz-range.c4r
+				rect.c4r: c4ix-puz-rect.c4r
+				samegame.c4r: c4ix-puz-samegame.c4r
+				signpost.c4r: c4ix-puz-signpost.c4r
+				singles.c4r: c4ix-puz-singles.c4r
+				sixteen.c4r: c4ix-puz-sixteen.c4r
+				slant.c4r: c4ix-puz-slant.c4r
+				solo.c4r: c4ix-puz-solo.c4r
+				tents.c4r: c4ix-puz-tents.c4r
+				towers.c4r: c4ix-puz-towers.c4r
+				tracks.c4r: c4ix-puz-tracks.c4r
+				twiddle.c4r: c4ix-puz-twiddle.c4r
+				undead.c4r: c4ix-puz-undead.c4r
+				unequal.c4r: c4ix-puz-unequal.c4r
+				unruly.c4r: c4ix-puz-unruly.c4r
+				untangle.c4r: c4ix-puz-untangle.c4r
+			# Quake (games/quake): the game and id's shareware pak; and the
+			# registered game from the person's own pak1.pak (and pak0.pak), which
+			# the page's Uploads put in /home/quake or /home (quake -home)
+			quake/:
+				quake.c4r: c4ix-quake.c4r
+				pak0.pak
 			# Rise of the Triad (games/rott): the game and Apogee's
 			# shareware episode, out of its package as it ships; and the registered
 			# game, rottreg, from the person's own DARKWAR files, which the page's
@@ -111,6 +237,16 @@ ARCHIVES = c4ix-root.tgz
 				DEMO3_3.DMO
 				DEMO4_3.DMO
 				VENDOR.DOC
+			# OpenTyrian (games/tyrian): the game, and Tyrian 2.1's
+			# data -- which may not be passed on, so it is on the disk
+			# only where build-images.sh found it to copy: whatever is
+			# in the disk's tyrian/, lazy (hostdir, vfsload.c). Tyrian
+			# is in the Go menu only where that is there; Tyrian (your
+			# files) plays the person's own copy, which the page's
+			# Uploads put in /home/tyrian or /home (tyrian --home)
+			tyrian/:
+				tyrian.c4r: c4ix-tyrian.c4r
+				data/: hostdir(tyrian/)
 			# Wolfenstein 3D (games/wolf3d): the game, and Apogee's shareware
 			# package as it was distributed, which the game unpacks here the
 			# first time it runs; and the registered game, wolf3d6, whose files
@@ -121,8 +257,98 @@ ARCHIVES = c4ix-root.tgz
 				1wolf14.zip
 			# and their programs by name, where the shell's PATH looks
 			bin/:
+				solitaire: ilink(/usr/games/ace/solitaire.c4r)
+				canfield: ilink(/usr/games/ace/canfield.c4r)
+				freecell: ilink(/usr/games/ace/freecell.c4r)
+				golf: ilink(/usr/games/ace/golf.c4r)
+				mastermind: ilink(/usr/games/ace/mastermind.c4r)
+				merlin: ilink(/usr/games/ace/merlin.c4r)
+				minesweeper: ilink(/usr/games/ace/minesweeper.c4r)
+				pegged: ilink(/usr/games/ace/pegged.c4r)
+				spider: ilink(/usr/games/ace/spider.c4r)
+				taipei: ilink(/usr/games/ace/taipei.c4r)
+				thornq: ilink(/usr/games/ace/thornq.c4r)
+				advent: ilink(/usr/games/advent/advent.c4r)
+				fish: ilink(/usr/games/bsdgames/fish.c4r)
+				wump: ilink(/usr/games/bsdgames/wump.c4r)
+				pig: ilink(/usr/games/bsdgames/pig.c4r)
+				quiz: ilink(/usr/games/bsdgames/quiz.c4r)
+				adventure: ilink(/usr/games/bsdgames/adventure.c4r)
+				hangman: ilink(/usr/games/bsdgames/hangman.c4r)
+				rain: ilink(/usr/games/bsdgames/rain.c4r)
+				worm: ilink(/usr/games/bsdgames/worm.c4r)
+				backgammon: ilink(/usr/games/bsdgames/backgammon.c4r)
+				gomoku: ilink(/usr/games/bsdgames/gomoku.c4r)
+				snake: ilink(/usr/games/bsdgames/snake.c4r)
+				canfld: ilink(/usr/games/bsdgames/canfld.c4r)
+				robots: ilink(/usr/games/bsdgames/robots.c4r)
+				tetris: ilink(/usr/games/bsdgames/tetris.c4r)
+				cribbage: ilink(/usr/games/bsdgames/cribbage.c4r)
+				mille: ilink(/usr/games/bsdgames/mille.c4r)
+				boggle: ilink(/usr/games/bsdgames/boggle.c4r)
+				trek: ilink(/usr/games/bsdgames/trek.c4r)
+				monop: ilink(/usr/games/bsdgames/monop.c4r)
+				battlestar: ilink(/usr/games/bsdgames/battlestar.c4r)
+				atc: ilink(/usr/games/bsdgames/atc.c4r)
+				sail: ilink(/usr/games/bsdgames/sail.c4r)
+				phantasia: ilink(/usr/games/bsdgames/phantasia.c4r)
+				hack: ilink(/usr/games/bsdgames/hack.c4r)
 				doom: ilink(/usr/games/doom/doom.c4r)
+				duke3d: ilink(/usr/games/duke3d/duke3d.c4r)
+				frotz: ilink(/usr/games/frotz/frotz.c4r)
+				zork1: ilink(/usr/games/frotz/zork1.c4r)
+				zork2: ilink(/usr/games/frotz/zork2.c4r)
+				zork3: ilink(/usr/games/frotz/zork3.c4r)
+				firework: ilink(/usr/games/pdcurses/firework.c4r)
+				xmas: ilink(/usr/games/pdcurses/xmas.c4r)
+				testcurs: ilink(/usr/games/pdcurses/testcurs.c4r)
+				ptest: ilink(/usr/games/pdcurses/ptest.c4r)
+				ozdemo: ilink(/usr/games/pdcurses/ozdemo.c4r)
+				tuidemo: ilink(/usr/games/pdcurses/tuidemo.c4r)
+				puzzles: ilink(/usr/games/puzzles/puzzles.c4r)
+				blackbox: ilink(/usr/games/puzzles/blackbox.c4r)
+				bridges: ilink(/usr/games/puzzles/bridges.c4r)
+				cube: ilink(/usr/games/puzzles/cube.c4r)
+				dominosa: ilink(/usr/games/puzzles/dominosa.c4r)
+				fifteen: ilink(/usr/games/puzzles/fifteen.c4r)
+				filling: ilink(/usr/games/puzzles/filling.c4r)
+				flip: ilink(/usr/games/puzzles/flip.c4r)
+				flood: ilink(/usr/games/puzzles/flood.c4r)
+				galaxies: ilink(/usr/games/puzzles/galaxies.c4r)
+				guess: ilink(/usr/games/puzzles/guess.c4r)
+				inertia: ilink(/usr/games/puzzles/inertia.c4r)
+				keen: ilink(/usr/games/puzzles/keen.c4r)
+				lightup: ilink(/usr/games/puzzles/lightup.c4r)
+				loopy: ilink(/usr/games/puzzles/loopy.c4r)
+				magnets: ilink(/usr/games/puzzles/magnets.c4r)
+				map: ilink(/usr/games/puzzles/map.c4r)
+				mines: ilink(/usr/games/puzzles/mines.c4r)
+				mosaic: ilink(/usr/games/puzzles/mosaic.c4r)
+				net: ilink(/usr/games/puzzles/net.c4r)
+				netslide: ilink(/usr/games/puzzles/netslide.c4r)
+				palisade: ilink(/usr/games/puzzles/palisade.c4r)
+				pattern: ilink(/usr/games/puzzles/pattern.c4r)
+				pearl: ilink(/usr/games/puzzles/pearl.c4r)
+				pegs: ilink(/usr/games/puzzles/pegs.c4r)
+				range: ilink(/usr/games/puzzles/range.c4r)
+				rect: ilink(/usr/games/puzzles/rect.c4r)
+				samegame: ilink(/usr/games/puzzles/samegame.c4r)
+				signpost: ilink(/usr/games/puzzles/signpost.c4r)
+				singles: ilink(/usr/games/puzzles/singles.c4r)
+				sixteen: ilink(/usr/games/puzzles/sixteen.c4r)
+				slant: ilink(/usr/games/puzzles/slant.c4r)
+				solo: ilink(/usr/games/puzzles/solo.c4r)
+				tents: ilink(/usr/games/puzzles/tents.c4r)
+				towers: ilink(/usr/games/puzzles/towers.c4r)
+				tracks: ilink(/usr/games/puzzles/tracks.c4r)
+				twiddle: ilink(/usr/games/puzzles/twiddle.c4r)
+				undead: ilink(/usr/games/puzzles/undead.c4r)
+				unequal: ilink(/usr/games/puzzles/unequal.c4r)
+				unruly: ilink(/usr/games/puzzles/unruly.c4r)
+				untangle: ilink(/usr/games/puzzles/untangle.c4r)
+				quake: ilink(/usr/games/quake/quake.c4r)
 				rott: ilink(/usr/games/rott/rott.c4r)
 				rottreg: ilink(/usr/games/rott/rottreg.c4r)
+				tyrian: ilink(/usr/games/tyrian/tyrian.c4r)
 				wolf3d: ilink(/usr/games/wolf3d/wolf3d.c4r)
 				wolf3d6: ilink(/usr/games/wolf3d/wolf3d6.c4r)

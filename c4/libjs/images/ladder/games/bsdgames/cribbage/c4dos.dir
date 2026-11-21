@@ -1,0 +1,16 @@
+Makefile.bsd
+Makefrag
+c4dos.dir
+cards.c
+crib.c
+cribbage.6.in
+cribbage.h
+cribbage.n
+cribcur.h
+deck.h
+extern.c
+instr.c
+io.c
+pathnames.h.in
+score.c
+support.c

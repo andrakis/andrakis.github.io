@@ -1,0 +1,16 @@
+Makefile.bsd
+Makefrag
+c4dos.dir
+endgame.c
+extern.c
+getguess.c
+getword.c
+hangman.6.in
+hangman.h
+main.c
+pathnames.h.in
+playgame.c
+prdata.c
+prman.c
+prword.c
+setup.c

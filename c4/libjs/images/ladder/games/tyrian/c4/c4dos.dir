@@ -1,0 +1,10 @@
+SDL.h
+SDL_endian.h
+SDL_types.h
+accel.mjs
+acceltest.c
+c4accel.h
+c4dos.dir
+inttypes.h
+stdbool.h
+stdint.h

@@ -1,0 +1,15 @@
+README.md
+c4dos.dir
+c4fe.h
+core.txt
+fe.c
+font.h
+games.txt
+host-math.c
+plat-bare.c
+plat-c4ix.c
+plat-host.c
+puzzles-list.c
+stdbool.h
+stdint.h
+tgmath.h

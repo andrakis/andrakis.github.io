@@ -1,0 +1,3 @@
+Makefile.am
+c4dos.dir
+sdl_midi.c

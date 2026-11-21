@@ -1,0 +1,10 @@
+Makefile.bsd
+Makefrag
+backgammon.6.in
+backlocal.h
+c4dos.dir
+extra.c
+main.c
+move.c
+text.c
+version.c

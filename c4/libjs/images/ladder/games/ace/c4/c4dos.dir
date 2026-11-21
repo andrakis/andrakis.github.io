@@ -1,0 +1,14 @@
+X11/
+scripts/
+c4dos.dir
+font.h
+imglib.py
+mkscript.py
+pcf2font.py
+plat-bare.c
+plat-c4ix.c
+plat-host.c
+plat.h
+text2c.py
+web-ace.mjs
+xwin-c4.c

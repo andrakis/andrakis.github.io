@@ -1,0 +1,7 @@
+Makefile.bsd
+Makefrag
+c4dos.dir
+fish.6
+fish.c
+fish.instr
+pathnames.h.in

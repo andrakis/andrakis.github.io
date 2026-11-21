@@ -1,0 +1,8 @@
+Makefile.bsd
+Makefrag
+c4dos.dir
+connect.c
+hunt.6.in
+hunt.c
+otto.c
+playit.c

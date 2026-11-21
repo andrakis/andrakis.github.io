@@ -1,0 +1,10 @@
+CMakeLists.txt
+README
+c4dos.dir
+group.c
+group.gap
+numgame.c
+path.c
+separate.c
+slide.c
+sokoban.c

@@ -1,0 +1,8 @@
+{
+  "what": "id1/pak0.pak, the shareware episode, from id's package quake106.zip as it was distributed: the -lh5- member ID1/PAK0.PAK of its resource.1 (c4's libjs/unpack.js, data/README.md)",
+  "from": "quake106.zip",
+  "member": "resource.1",
+  "lh5": [29041, 8612632],
+  "size": 18689235,
+  "sha256": "35a9c55e5e5a284a159ad2a62e0e8def23d829561fe2f54eb402dbc0a9a946af"
+}

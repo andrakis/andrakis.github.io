@@ -54,4 +54,12 @@ Rise of the Triad (registered)
     Start: grin, Full Games (Uploads) > Rise of the Triad, or
     \GAMES\ROTT\ROTTREG
 
+Tyrian 2.1
+    Needs: TYRIAN21.ZIP, as you downloaded it, from
+    https://camanis.net/tyrian/tyrian21.zip
+    Add the zip itself: the Uploads take its files out of it.
+    In: B:\TYRIAN (the Uploads folder /home/tyrian)
+    Start: grin, Full Games (Uploads) > Tyrian, or
+    \GAMES\TYRIAN\TYRIAN --home
+
 A game started without its files says which it wants, and stops.

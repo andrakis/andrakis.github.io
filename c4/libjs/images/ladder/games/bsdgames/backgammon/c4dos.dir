@@ -1,0 +1,7 @@
+backgammon/
+common_source/
+teachgammon/
+Makefile.bsd
+Makefile.inc.bsd
+Makefrag
+c4dos.dir

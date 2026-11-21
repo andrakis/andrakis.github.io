@@ -1,0 +1,6 @@
+Makefile.bsd
+Makefrag
+c4dos.dir
+pathnames.h.in
+snake.6.in
+snake.c

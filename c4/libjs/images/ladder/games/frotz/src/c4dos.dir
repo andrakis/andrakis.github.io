@@ -1,0 +1,10 @@
+blorb/
+common/
+curses/
+dos/
+dumb/
+misc/
+sdl/
+test/
+x11/
+c4dos.dir
