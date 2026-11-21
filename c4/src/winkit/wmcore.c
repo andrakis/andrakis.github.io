@@ -17,8 +17,15 @@ static int next_id;
 static int drag, drag_dx, drag_dy;        // a window's number while its title bar is dragged
 static int sizing, size_edges, size_w0, size_h0, size_x0, size_y0, size_wx, size_wy;
 static int down_win, down_t, down_x, down_y;   // for double clicks
+// a press on a scroll bar's arrow or track (ui_scroll_repeat), pressed
+// again while the button is held: after REP_WAIT, every REP_MS
+enum { REP_WAIT = 400, REP_MS = 50 };
+static int rep_win, rep_x, rep_y, rep_b, rep_next;
 static int menu_win, menu_idx, menu_hot;  // an open drop-down: its window, menu (-1 the
-                                          // system menu), hot item
+                                          // system menu, M_POPUP a pop-up's), hot item
+static char **pop_items;                  // a pop-up menu's items (wk_popup), and where it is
+static int pop_x, pop_y;
+enum { M_POPUP = 0 - 2 };
 static int ptr_shape;
 static char *clip_text;
 static int clip_n;
@@ -168,6 +175,27 @@ void wk_menu(int i, struct wk_menu *m, int n) {
     w->menus = m; w->nmenus = n;
 }
 
+static int drop_h(char **items);
+static int drop_w(char **items);
+
+// A pop-up menu at (x, y) in window I's client area, kept on the screen:
+// drawn and chosen from as a drop-down is, the item chosen reaching the
+// window's command hook as WK_CMD(WK_POPUP, item).
+void wk_popup(int i, int x, int y, char **items) {
+    struct win *w;
+    int h;
+    if (!(w = win_get(i)) || !items || !items[0]) return;
+    pop_items = items;
+    pop_x = wk_client_x(w) + x; pop_y = wk_client_y(w) + y;
+    h = drop_h(items);
+    if (pop_x + drop_w(items) > wk.sw) pop_x = wk.sw - drop_w(items);
+    if (pop_y + h > wk.sh) pop_y = pop_y - h;
+    if (pop_y < 0) pop_y = 0;
+    if (pop_x < 0) pop_x = 0;
+    menu_win = i; menu_idx = M_POPUP; menu_hot = 0 - 1;
+    wk_full = 1;
+}
+
 void wk_place(int i, int x, int y, int ww, int hh) {
     struct win *w;
     if (!(w = win_get(i))) return;
@@ -208,6 +236,19 @@ void wk_invalidate(int i, int x, int y, int ww, int hh) {
     if (!(w = win_get(i)) || w->min) return;
     if (ww <= 0) wk_dirty_rect(w->x, w->y, w->w, w->h);
     else wk_dirty_rect(wk_client_x(w) + x, wk_client_y(w) + y, ww, hh);
+}
+
+// ... and a part of them that its draw paints whole: a program's frame,
+// which in a game is every frame. When that is all the damage at the
+// next redraw (redraw_part), the window's own draw and the windows above
+// it make the picture there: the desktop, the windows under it and its
+// own frame are covered, and are not drawn. One part, the latest: two
+// windows' frames make damage that is in neither, and all is drawn.
+static int cover_win, cover_x, cover_y, cover_w, cover_h;
+void wk_invalidate_covered(int i, int x, int y, int ww, int hh) {
+    if (ww <= 0 || hh <= 0) { wk_invalidate(i, 0, 0, 0, 0); return; }
+    cover_win = i; cover_x = x; cover_y = y; cover_w = ww; cover_h = hh;
+    wk_invalidate(i, x, y, ww, hh);
 }
 
 // A dialog's answer: to the window that asked, raised first, or to the
@@ -276,6 +317,11 @@ int wk_next_timer() {
         }
         w = w->next;
     }
+    if (rep_win) {
+        d = rep_next - now;
+        if (d < 0) d = 0;
+        if (best < 0 || d < best) best = d;
+    }
     return best;
 }
 
@@ -311,6 +357,7 @@ int wk_menu_x(struct win *w, int k) {
 static int count_items(char **items) { int n; n = 0; while (items[n]) ++n; return n; }
 
 static char **drop_items(struct win *w) {
+    if (menu_idx == M_POPUP) return pop_items;
     if (menu_idx < 0) return w->dialog ? sys_dlg_items : sys_items;
     return w->menus[menu_idx].items;
 }
@@ -320,17 +367,60 @@ static int drop_h(char **items) {
     k = 0; while (items[k]) { if (items[k][0] == '-') mh = mh + 8; else mh = mh + 20; ++k; }
     return mh;
 }
+// A column's width: DROP_W, or the widest item's (text widths are guesses,
+// six pixels a letter, as elsewhere), the check mark's room and a margin
+static int drop_w(char **items) {
+    int k, n, w;
+    w = DROP_W;
+    k = 0;
+    while (items[k]) {
+        n = ui_len(items[k]);
+        if (items[k][0] == WK_CHECKED) --n;
+        if (n * 6 + 34 > w) w = n * 6 + 34;
+        ++k;
+    }
+    return w > wk.sw ? wk.sw : w;
+}
+// A drop-down taller than the screen below its top breaks into columns, as
+// 3.1's long menus did: item k's column and its top, from the drop-down's
+// top y; *cols, the columns, and *tall, the tallest one's height
+static int drop_lay(char **items, int y, int k, int *iy, int *cols, int *tall) {
+    int i, c, cy, h, limit, at;
+    limit = wk.sh - y - 3;
+    if (limit < 40) limit = 40;
+    c = 0; cy = 3; *tall = 6; at = 0;
+    i = 0;
+    while (items[i]) {
+        h = items[i][0] == '-' ? 8 : 20;
+        if (cy + h > limit && cy > 3) { c = c + 1; cy = 3; }
+        if (i == k) { at = c; *iy = y + cy; }
+        cy = cy + h;
+        if (cy + 3 > *tall) *tall = cy + 3;
+        ++i;
+    }
+    *cols = c + 1;
+    return at;
+}
 // A minimised window's control menu opens over its icon.
+static int drop_y(struct win *w);
 static int drop_x(struct win *w) {
-    int x, y;
+    int x, y, k, cw;
+    if (menu_idx == M_POPUP) return pop_x;
     if (menu_idx < 0 && w->min && wk_icons_on) {
         wk_icon_xy(w, &x, &y);
         return x + DROP_W > wk.sw ? wk.sw - DROP_W : x;
     }
-    return menu_idx < 0 ? w->x + BORDER : wk_menu_x(w, menu_idx);
+    if (menu_idx < 0) return w->x + BORDER;
+    // a menu bar's: kept on the screen, its columns and all
+    x = wk_menu_x(w, menu_idx);
+    drop_lay(drop_items(w), drop_y(w), 0 - 1, &y, &k, &cw);
+    cw = drop_w(drop_items(w)) * k;
+    if (x + cw > wk.sw) x = wk.sw - cw;
+    return x < 0 ? 0 : x;
 }
 static int drop_y(struct win *w) {
     int x, y;
+    if (menu_idx == M_POPUP) return pop_y;
     if (menu_idx < 0 && w->min && wk_icons_on) {
         wk_icon_xy(w, &x, &y);
         y = y - drop_h(drop_items(w));
@@ -339,25 +429,35 @@ static int drop_y(struct win *w) {
     return menu_idx < 0 ? w->y + BORDER + TITLE_H + 1 : w->y + BORDER + TITLE_H + 1 + MENU_H;
 }
 
+// the check mark left of a WK_CHECKED item
+static void check_mark(int x, int y, int rgb) {
+    int k;
+    k = 0;
+    while (k < 7) { gui_rect(x + k, y + (k < 2 ? 3 + k : 7 - k), 2, 2, rgb); ++k; }
+}
+
 static void draw_dropdown() {
     struct win *w;
     char **items;
-    int n, x, y, k, iy, mh;
+    char *s;
+    int n, x, y, k, iy, mh, dw, cols, cx;
     if (!(w = win_get(menu_win))) return;
     items = drop_items(w);
     n = count_items(items);
     x = drop_x(w); y = drop_y(w);
-    mh = drop_h(items);
-    gui_rect(x, y, DROP_W, mh, C_FACE);
-    d_bevel(x, y, DROP_W, mh, B_RAISED);
-    iy = y + 3;
+    dw = drop_w(items);
+    drop_lay(items, y, 0 - 1, &iy, &cols, &mh);
+    gui_rect(x, y, dw * cols, mh, C_FACE);
+    d_bevel(x, y, dw * cols, mh, B_RAISED);
     k = 0;
     while (k < n) {
-        if (items[k][0] == '-') { gui_rect(x + 3, iy + 3, DROP_W - 6, 1, C_SHADOW); gui_rect(x + 3, iy + 4, DROP_W - 6, 1, C_LIGHT); iy = iy + 8; }
+        cx = x + drop_lay(items, y, k, &iy, &cols, &mh) * dw;
+        if (items[k][0] == '-') { gui_rect(cx + 3, iy + 3, dw - 6, 1, C_SHADOW); gui_rect(cx + 3, iy + 4, dw - 6, 1, C_LIGHT); }
         else {
-            if (k == menu_hot) gui_rect(x + 3, iy, DROP_W - 6, 20, C_SEL);
-            d_text(x + 20, iy + 4, k == menu_hot ? C_WHITE : C_DARK, F_SANS, items[k]);
-            iy = iy + 20;
+            if (k == menu_hot) gui_rect(cx + 3, iy, dw - 6, 20, C_SEL);
+            s = items[k];
+            if (s[0] == WK_CHECKED) { check_mark(cx + 7, iy + 5, k == menu_hot ? C_WHITE : C_DARK); ++s; }
+            d_text(cx + 20, iy + 4, k == menu_hot ? C_WHITE : C_DARK, F_SANS, s);
         }
         ++k;
     }
@@ -367,17 +467,16 @@ static void draw_dropdown() {
 static int dropdown_hit(int px, int py) {
     struct win *w;
     char **items;
-    int n, x, k, iy;
+    int n, x, y, k, iy, dw, cx, cols, mh;
     if (!(w = win_get(menu_win))) return 0 - 1;
     items = drop_items(w);
     n = count_items(items);
-    x = drop_x(w);
-    if (px < x || px >= x + DROP_W) return 0 - 1;
-    iy = drop_y(w) + 3;
+    x = drop_x(w); y = drop_y(w);
+    dw = drop_w(items);
     k = 0;
     while (k < n) {
-        if (items[k][0] == '-') iy = iy + 8;
-        else { if (py >= iy && py < iy + 20) return k; iy = iy + 20; }
+        cx = x + drop_lay(items, y, k, &iy, &cols, &mh) * dw;
+        if (items[k][0] != '-' && px >= cx && px < cx + dw && py >= iy && py < iy + 20) return k;
         ++k;
     }
     return 0 - 1;
@@ -434,14 +533,46 @@ static void draw_window(struct win *w, int focused) {
     if (l->grip) l->grip(w);
 }
 
-static void draw_windows() {
-    struct win *w, *f;
+// The windows that reach into the damage, back to front, from w up
+static void draw_windows_from(struct win *w) {
+    struct win *f;
     f = focus();
-    w = zbot;
     while (w) {
         if (!w->min && wk_in_damage(w->x, w->y, w->w, w->h)) draw_window(w, w == f);
         w = w->above;
     }
+}
+static void draw_windows() { draw_windows_from(zbot); }
+
+// The window whose covered part (wk_invalidate_covered) holds all the
+// damage, inside its client area as it is now; or 0
+static struct win *covering() {
+    struct win *w;
+    int x0, y0, x1, y1, cx, cy;
+    if (!cover_win || !(w = win_get(cover_win)) || w->min || !w->cls->draw) return 0;
+    cx = wk_client_x(w); cy = wk_client_y(w);
+    x0 = cx + cover_x; y0 = cy + cover_y;
+    x1 = x0 + cover_w; y1 = y0 + cover_h;
+    if (x0 < cx) x0 = cx;
+    if (y0 < cy) y0 = cy;
+    if (x1 > cx + wk_client_w(w)) x1 = cx + wk_client_w(w);
+    if (y1 > cy + wk_client_h(w)) y1 = cy + wk_client_h(w);
+    if (wk_dmg_x0 < x0 || wk_dmg_y0 < y0 || wk_dmg_x1 > x1 || wk_dmg_y1 > y1) return 0;
+    return w;
+}
+
+// Its client area alone (and the size grip over its corner)
+static void draw_client(struct win *w, int focused) {
+    struct wk_look *l;
+    int cx, cy, cw, ch;
+    l = wk_look();
+    cx = wk_client_x(w); cy = wk_client_y(w); cw = wk_client_w(w); ch = wk_client_h(w);
+    wk_client_clip(cx, cy, cw, ch);
+    wk_origin(cx, cy);
+    w->cls->draw(w->id, cw, ch, focused);
+    wk_origin(0, 0);
+    wk_noclip();
+    if (l->grip) l->grip(w);
 }
 
 static void redraw() {
@@ -456,25 +587,35 @@ static void redraw() {
     gui_show();
     wk_full = 0;
     wk_dmg = 0;
+    cover_win = 0;
 }
 
 // Only the damage: the desktop under it, the windows that reach into it,
 // back to front, and what the shell has over them. A menu open is drawn
 // over everything, so that is still the whole scene.
 static void redraw_part() {
+    struct win *c;
     if (menu_win || (shell && shell->popup && shell->popup())) { redraw(); return; }
     wk_part = 1;
     wk_origin(0, 0);
     wk_noclip();
-    if (shell && shell->desktop) shell->desktop(wk_dmg_x0, wk_dmg_y0, wk_dmg_x1 - wk_dmg_x0, wk_dmg_y1 - wk_dmg_y0);
-    else gui_rect(wk_dmg_x0, wk_dmg_y0, wk_dmg_x1 - wk_dmg_x0, wk_dmg_y1 - wk_dmg_y0, C_DESK);
-    wk_icons_draw();
-    draw_windows();
+    // a program's frame, and nothing else: that window's picture, and
+    // whatever is over it
+    if ((c = covering())) {
+        draw_client(c, c == focus());
+        draw_windows_from(c->above);
+    } else {
+        if (shell && shell->desktop) shell->desktop(wk_dmg_x0, wk_dmg_y0, wk_dmg_x1 - wk_dmg_x0, wk_dmg_y1 - wk_dmg_y0);
+        else gui_rect(wk_dmg_x0, wk_dmg_y0, wk_dmg_x1 - wk_dmg_x0, wk_dmg_y1 - wk_dmg_y0, C_DESK);
+        wk_icons_draw();
+        draw_windows();
+    }
     if (shell && shell->front) shell->front();
     gui_noclip();
     gui_show();
     wk_part = 0;
     wk_dmg = 0;
+    cover_win = 0;
 }
 
 int wk_dirty() { return wk_full || wk_dmg; }
@@ -560,7 +701,8 @@ static void mouse_down(int x, int y, int button) {
         menu_win = 0; wk_full = 1;
         if (!w) return;
         if (k >= 0) {
-            if (i < 0) sys_command(w, k);
+            if (i == M_POPUP) { if (w->cls->command) w->cls->command(w->id, WK_CMD(WK_POPUP, k)); }
+            else if (i < 0) sys_command(w, k);
             else if (w->cls->command) w->cls->command(w->id, WK_CMD(i, k));
             return;
         }
@@ -623,7 +765,12 @@ static void mouse_down(int x, int y, int button) {
                 return;
             }
             if (ht == HT_CLIENT) {
+                ui_scroll_end();
                 client_mouse(w, E_DOWN, x, y, button);
+                // another button (a right click, which may open a pop-up):
+                // never half of a double click
+                if (button) { down_win = 0; wk_full = 1; return; }
+                if (ui_scroll_repeat()) { rep_win = i; rep_x = x; rep_y = y; rep_b = button; rep_next = wk_now() + REP_WAIT; }
                 if (w->used && down_win == i && t - down_t < 500 && x - down_x < 5 && down_x - x < 5 && y - down_y < 5 && down_y - y < 5) {
                     client_mouse(w, E_DBL, x, y, button);
                     down_win = 0;
@@ -719,7 +866,7 @@ static void mouse_move(int x, int y, int b) {
 
 static void mouse_up(int x, int y, int b) {
     struct win *w;
-    drag = 0; sizing = 0;
+    drag = 0; sizing = 0; rep_win = 0;
     ui_scroll_end();
     pointer(x, y);
     if ((w = focus())) client_mouse(w, E_UP, x, y, b);
@@ -783,4 +930,15 @@ void wk_tick() {
     w = first;
     while (w) { if (w->used && w->cls->idle) w->cls->idle(w->id); w = w->next; }
     timers();
+    // a scroll bar's arrow or track held: pressed again, as long as it
+    // still says it repeats (the thumb may have come under the pointer)
+    if (rep_win && wk_now() - rep_next >= 0) {
+        if ((w = win_get(rep_win)) && w->used && !w->min) {
+            ui_scroll_end();
+            client_mouse(w, E_DOWN, rep_x, rep_y, rep_b);
+            if (!ui_scroll_repeat()) rep_win = 0;
+            rep_next = wk_now() + REP_MS;
+            wk_invalidate(w->id, 0, 0, 0, 0);
+        } else rep_win = 0;
+    }
 }

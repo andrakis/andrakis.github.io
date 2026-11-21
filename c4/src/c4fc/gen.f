@@ -9,15 +9,15 @@
 :M GEN n_str   {: n -- :}  n >off @ n >slen @ D-STR, IMMD, ;M
 
 \ -- M4: the helpers -----------------------------------------------------
-\ Six small routines called where the VM has no opcode: a 16-bit load
-\ (sign- or zero-extending), a 16-bit store, unsigned word division and
-\ remainder, and a logical right shift by a run-time count. Each is laid
-\ down ONCE, after the last function, and only if something called it;
-\ a call is a JSR to an address in the same unit, so there is no symbol
-\ and nothing for c4rlink to know. c4lc-gen.lisp's g:helpbody is the
-\ same code, instruction for instruction.
-0 CONSTANT h_ld16s  1 CONSTANT h_ld16u  2 CONSTANT h_st16
-3 CONSTANT h_udiv   4 CONSTANT h_umod   5 CONSTANT h_lsr
+\ Two small routines called where the VM has no opcode: unsigned word
+\ division and remainder. Each is laid down ONCE, after the last
+\ function, and only if something called it; a call is a JSR to an
+\ address in the same unit, so there is no symbol and nothing for c4rlink
+\ to know. c4lc-gen.lisp's g:helpbody is the same code, instruction for
+\ instruction. The 16-bit loads and store and the logical right shift by
+\ a run-time count were helpers too; they are the VM's own now, LH LHU SH
+\ and LSR (docs/c4-16bit.md).
+0 CONSTANT h_udiv   1 CONSTANT h_umod
 CREATE HM-ID VEC ALLOT   CREATE HM-MK VEC ALLOT
 : HELP-RESET ( -- )  HM-ID 64 VEC-INIT  HM-MK 64 VEC-INIT ;
 HELP-RESET
@@ -31,18 +31,6 @@ HELP-RESET
 
 : L2, ( n -- )  oLEA OP2, ;
 : I2, ( n -- )  oIMM OP2, ;
-: H-LD16 ( signed -- ) {: sg -- :}
-   0 oENT OP2,
-   2 L2, oLI OP, oPSH OP, 1 I2, oADD OP, oLC OP,
-   sg 0= IF oPSH OP, 255 I2, oAND OP, THEN
-   oPSH OP, 8 I2, oSHL OP,
-   oPSH OP, 2 L2, oLI OP, oLC OP, oPSH OP, 255 I2, oAND OP, oOR OP, oLEV OP, ;
-: H-ST16 ( -- )
-   0 oENT OP2,
-   3 L2, oLI OP, oPSH OP, 2 L2, oLI OP, oSC OP,
-   3 L2, oLI OP, oPSH OP, 1 I2, oADD OP, oPSH OP,
-   2 L2, oLI OP, oPSH OP, 8 I2, oSHR OP, oSC OP,
-   2 L2, oLI OP, oLEV OP, ;
 : H-ULT, ( -- )                          \ A := stack (^MIN) vs b (^MIN), flag to come
    oPSH OP, WMIN I2, oXOR OP, oPSH OP, 2 L2, oLI OP, oPSH OP, WMIN I2, oXOR OP, ;
 : H-UDIV ( -- ) {: | m1 m2 -- :}
@@ -77,21 +65,9 @@ HELP-RESET
    -1 L2, oLI OP, oLEV OP,
    m4 >RES
    -1 L2, oLI OP, oPSH OP, 2 L2, oLI OP, oSUB OP, oLEV OP, ;
-: H-LSR ( -- ) {: | m -- :}
-   0 oENT OP2,
-   2 L2, oLI OP, oBZ BR, TO m
-   3 L2, oLI OP, oPSH OP, 2 L2, oLI OP, oSHR OP,
-   oPSH OP, -1 I2, oPSH OP, WBITS I2, oPSH OP, 2 L2, oLI OP, oSUB OP,
-   oSHL OP, oPSH OP, -1 I2, oXOR OP, oAND OP, oLEV OP,
-   m >RES
-   3 L2, oLI OP, oLEV OP, ;
 : EMIT-HELPERS ( -- )
-   h_ld16s HUSED? IF h_ld16s HRES -1 H-LD16 THEN
-   h_ld16u HUSED? IF h_ld16u HRES  0 H-LD16 THEN
-   h_st16  HUSED? IF h_st16  HRES H-ST16 THEN
    h_udiv  HUSED? IF h_udiv  HRES H-UDIV THEN
-   h_umod  HUSED? IF h_umod  HRES H-UMOD THEN
-   h_lsr   HUSED? IF h_lsr   HRES H-LSR  THEN ;
+   h_umod  HUSED? IF h_umod  HRES H-UMOD THEN ;
 
 \ -- M4: loads, stores and conversions by type ----------------------------
 : MASK, ( m -- )  oPSH OP, oIMM OP2, oAND OP, ;
@@ -104,15 +80,20 @@ HELP-RESET
 \ lives.
 : LOAD, ( ct -- ) {: t -- :}
    t t_char = t t_schar = OR IF oLC OP, EXIT THEN
-   t t_uchar = IF oLC OP, 255 MASK, EXIT THEN
-   t t_short = IF h_ld16s 1 HCALL EXIT THEN
-   t t_ushort = IF h_ld16u 1 HCALL EXIT THEN
+   t t_uchar = IF oLCU OP, EXIT THEN
+   t t_short = IF oLH OP, EXIT THEN
+   t t_ushort = IF oLHU OP, EXIT THEN
    t t_uint = W64? AND IF oLI OP, M32 MASK, EXIT THEN
    oLI OP, ;
 : STORE, ( ct -- ) {: t -- :}
    t T-BYTE? IF oSC OP, EXIT THEN
-   t T-HALF? IF h_st16 2 HCALL EXIT THEN
+   t T-HALF? IF oSH OP, EXIT THEN
    oSI OP, ;
+\ SC leaves in A the byte it stored as a signed char (c4's own rule, right for
+\ char), so the value of an assignment to an unsigned char, or of its ++ or
+\ --, has to be cut back to 0..255. n_expst says when nobody wants the value,
+\ so that `p[i] = c;` costs what it always did. As c4lc's g:vunused.
+VARIABLE VUNUSED   0 VUNUSED !
 
 \ The conversion code for a value of type f in A, to type t: only to an
 \ integer type, and nothing when it already fits (c4lc's g:convert!).
@@ -256,15 +237,43 @@ HELP-RESET
    n >rhs @ GEN-ADDR   oPSH OP,
    n >lhs @ CT T-SIZE oIMM OP2,   oPSH OP,
    oMCPY OP,   3 oADJ OP2, ;
-:M GEN n_asgn {: n -- :}
+\ A word-sized local, under -mfuse: the value and then STL, with no address on the
+\ stack while the value is worked out (c4lc's g:stl?).
+: STL? ( lhs -- f ) {: l | y t -- f :}
+   FUSE @ 0= IF 0 EXIT THEN
+   l >TAG n_var <> IF 0 EXIT THEN
+   l >sym @ TO y
+   y y.agg @ IF 0 EXIT THEN
+   y y.ct @ TO t
+   t T-BYTE? t T-HALF? OR t T-STRUCT? OR 0= ;
+: STL, ( lhs -- )  >sym @ y.val @ oSTL OP2, ;
+
+\ x, whose value nobody wants (c4lc's g:effect).
+: EFFECT ( x -- ) {: x -- :}
+   x >TAG n_preinc =  x >TAG n_predec = OR  x >TAG n_postinc = OR  x >TAG n_postdec = OR
+   IF 1 VUNUSED ! THEN
+   x >TAG n_asgn = IF x CT t_uchar = VUNUSED ! THEN
+   x GEN ;
+
+:M GEN n_asgn {: n | u -- :}
    n >lhs @ CT T-STRUCT? IF n STRUCT-ASGN EXIT THEN
+   VUNUSED @ TO u  0 VUNUSED !
    \ base and index both stay on the stack, unscaled, until the value is
    \ evaluated -- SXI wants all three, and computing the address first
    \ would need a slot to hold it across the right-hand side.
    n >lhs @ CISC-INDEX? IF
       n >lhs @ >lhs @ GEN  oPSH OP,
       n >lhs @ >rhs @ GEN  oPSH OP,
-      n >rhs @ GEN  oSXI OP, EXIT THEN
+      n >rhs @ GEN  oSXI OP,
+      u 0= n >lhs @ CT t_uchar = AND IF 255 MASK, THEN EXIT THEN
+   n >lhs @ STL? IF
+      n >lhs @ S" assignment" WCHECK
+      n >rhs @ GEN
+      n >rhs @ CT  n >lhs @ CT  SCONV,
+      n >lhs @ CT T-PTR? IF
+         n >lhs @ CQ  n >rhs @ CQ  DROPPED? IF S" assignment" QWARN THEN THEN
+      n >lhs @ STL,
+      EXIT THEN
    n >lhs @ GEN-ADDR
    n >lhs @ S" assignment" WCHECK
    oPSH OP,
@@ -272,7 +281,8 @@ HELP-RESET
    n >rhs @ CT  n >lhs @ CT  SCONV,
    n >lhs @ CT T-PTR? IF
       n >lhs @ CQ  n >rhs @ CQ  DROPPED? IF S" assignment" QWARN THEN THEN
-   n >lhs @ CT STORE, ;M
+   n >lhs @ CT STORE,
+   u 0= n >lhs @ CT t_uchar = AND IF 255 MASK, THEN ;M
 
 \ Pointer arithmetic scales by what the pointer points AT, and a step of
 \ one emits no multiply at all -- which is not an optimisation but what
@@ -325,7 +335,7 @@ HELP-RESET
          >rhs @ DUP NUM? IF
             >val @ oSHR OP,
             DUP 0> OVER WBITS < AND IF -1 WBITS ROT - LSHIFT INVERT MASK, ELSE DROP THEN
-         ELSE DROP h_lsr 2 HCALL THEN
+         ELSE DROP oLSR OP, THEN
          EXIT THEN
       >op @ OP, EXIT
    THEN
@@ -383,7 +393,9 @@ HELP-RESET
 :M CQ n_comma {: n -- q :}  n >args @ n >argn @ 1- CELLS + @ CQ ;M
 :M GEN n_comma {: n | v -- :}
    n >args @ TO v
-   n >argn @ 0 ?DO I CELLS v + @ GEN LOOP ;M
+   n >argn @ 0 ?DO
+      I CELLS v + @  I 1+ n >argn @ = IF GEN ELSE EFFECT THEN
+   LOOP ;M
 
 \ What a call compiles to is decided entirely by the CLASS of the name
 \ being called: an opcode for a builtin, JSR to a known address, JSRI
@@ -418,6 +430,32 @@ VARIABLE TMAX   0 TMAX !
    REPEAT
    TCUR !
    w ;
+
+\ L op= R whose L does something (n_opasgn), as c4lc-gen's g:oplower: L's
+\ address goes in a two-word temporary, once, and the rest is the plain
+\ assignment over *temporary, which already knows every type's load,
+\ conversion and store. Unlike STRUCT-PUSH's, this temporary is free
+\ again only when the STATEMENT ends -- each statement method puts TCUR
+\ back as it found it, which is c4lc's g:stmt -- so two in one statement
+\ take two, at the offsets c4lc gives them.
+:M GEN n_ltempv {: n -- :}  n >off @ oLEA OP2,  oLI OP, ;M
+:M CT  n_ltempv >nty @ ;M
+:M CQ  n_ltempv DROP 0 ;M
+:M CT  n_opasgn >lhs @ CT ;M
+\ c4lc's g:qualof knows neither, so neither does this: a const L is not
+\ refused here, as it is not there
+:M CQ  n_opasgn DROP 0 ;M
+:M GEN n_opasgn {: n | off t d b -- :}
+   2 TCUR +!   TCUR @ TMAX @ MAX TMAX !
+   NLOC @ TCUR @ + NEGATE TO off
+   off oLEA OP2,  oPSH OP,
+   n >lhs @ GEN-ADDR
+   oSI OP,
+   n_ltempv 3 CELLS NEW TO t   off t >off !   n >lhs @ CT 2 + t >nty !
+   t n_deref N1 TO d
+   n_bin 4 CELLS NEW TO b
+   d b >lhs !   n >rhs @ >rhs @ b >rhs !   n >rhs @ >op @ b >op !
+   d b n_asgn N2 GEN ;M
 \ the type argument i is passed as: its parameter's, when f says, or its own
 : ARG-TYPE ( arg i f -- t ) {: a i f -- t :}
    f IF f y.pt @ IF i f y.nfix @ < IF f y.pt @ i CELLS + @ EXIT THEN THEN THEN
@@ -517,21 +555,112 @@ VARIABLE UFN   0 UFN !
    UFN @ 0 ?DO  I CELLS UFL + @ i = IF I CELLS UFM + @ >RES THEN  LOOP
    n >body @ STMT ;M
 
+\ c4lc-gen's g:laddr: a local's address plus OFF -- LEA's own when it is
+\ word-aligned, else added to the base
+: LADDR, ( base off -- ) {: b o -- :}
+   o 1 CELLS 1- AND 0= IF b o 1 CELLS / + oLEA OP2, EXIT THEN
+   b oLEA OP2,  oPSH OP,  o oIMM OP2,  oADD OP, ;
+\ N bytes from OFF zeroed (c4lc-gen's g:lmset)
+: LMSET, ( base off n -- ) {: b o n -- :}
+   b o LADDR,  oPSH OP,  0 oIMM OP2,  oPSH OP,  n oIMM OP2,  oPSH OP,
+   oMSET OP,  3 oADJ OP2, ;
+
+\ A local's constants as a template (c4lc-array-init), c4lc-gen's
+\ g:ltemplate word for word. A record is parse.f's LREC, (offset type
+\ node value). With LTMPL stores or more, the constants -- a number, or a
+\ string's address for a pointer -- are written into the data, up to
+\ the last nonzero one (or the end, when no more than LTAIL words are
+\ left), and copied into the local with MCPY; the rest is zeroed with
+\ MSET, and only what is no constant is stored after. Records that go
+\ back, or a template over four words a constant, keep the stores.
+8 CONSTANT LTMPL   8 CONSTANT LTAIL
+: LR-CONST? ( r -- f ) {: r | e -- f :}
+   r 2 CELLS + @ TO e
+   e 0= IF -1 EXIT THEN
+   e @ n_str = IF r CELL+ @ T-PTR? EXIT THEN
+   0 ;
+: LR-W ( r -- n )  CELL+ @ T-SIZE ;
+\ a store's weight (c4lc-gen's g:lweight): a word 1, a byte 2, 16 bits 4
+: LWEIGHT ( w -- n )  DUP 1 = IF DROP 2 EXIT THEN  2 = IF 4 ELSE 1 THEN ;
+\ what the constants weigh, or -1 when the records do not ascend
+: LR-SCAN ( v -- n ) {: v | at n r -- n :}
+   0 TO at  0 TO n
+   v V# 0 ?DO
+      I v V@ TO r
+      n 0< 0= IF
+         r @ at < IF -1 TO n ELSE
+            r @ r LR-W + TO at
+            r LR-CONST? IF n r LR-W LWEIGHT + TO n THEN
+         THEN
+      THEN
+   LOOP n ;
+: LR-NZ? ( r -- f ) {: r -- f :}
+   r LR-CONST? 0= IF 0 EXIT THEN
+   r 2 CELLS + @ IF -1 EXIT THEN
+   r 3 CELLS + @ 0<> ;
+: LR-STR? ( r -- f )  DUP LR-NZ? SWAP 2 CELLS + @ 0<> AND ;
+\ c4lc-gen's g:iput, into region 2
+: D-PUT ( v ty off -- ) {: v t o -- :}
+   t T-BYTE? IF v 255 AND DATA @ o + C! EXIT THEN
+   t T-HALF? IF v 255 AND DATA @ o + C!  v 8 RSHIFT 255 AND DATA @ o + 1+ C! EXIT THEN
+   v DATA @ o + ! ;
+\ where the template ends: past the last nonzero constant
+: LR-END ( v -- l ) {: v | l r -- l :}
+   0 TO l
+   v V# 0 ?DO  I v V@ TO r  r LR-NZ? IF r @ r LR-W + TO l THEN  LOOP  l ;
+\ N constants make a template, unless it would be sparse
+: LTMPL? ( n v -- f )  OVER LTMPL < IF 2DROP 0 EXIT THEN  LR-END SWAP 4 * CELLS > 0= ;
+: LTEMPLATE ( base nbytes v -- ) {: b nb v | l at r ss j -- :}
+   v LR-END TO l
+   l IF  nb l - LTAIL CELLS > 0= IF nb TO l THEN  THEN   \ a short zero tail is copied too
+   l IF
+      16 NEW-VEC TO ss                  \ the strings first, in order
+      v V# 0 ?DO
+         I v V@ TO r
+         r LR-STR? IF  r 2 CELLS + @ DUP >off @ SWAP >slen @ D-STR, ss V, THEN
+      LOOP
+      D-ALIGN  l D-ALLOT TO at
+      0 TO j
+      v V# 0 ?DO
+         I v V@ TO r
+         r LR-STR? IF
+            at r @ +  j ss V@  3 -4 (TABPAT)  j 1+ TO j
+         ELSE r LR-NZ? IF  r 3 CELLS + @  r CELL+ @  at r @ +  D-PUT  THEN THEN
+      LOOP
+      b oLEA OP2,  oPSH OP,  at IMMD,  oPSH OP,  l oIMM OP2,  oPSH OP,
+      oMCPY OP,  3 oADJ OP2,
+   THEN
+   l nb < IF b l nb l - LMSET, THEN ;
+
 \ A scalar takes SI even when it is a char, which is what c4cc did and
 \ what c4lc kept; an array is stored element by element, the elements
-\ past the initialiser list zeroed.
+\ past the initialiser list zeroed -- or, with LTMPL stores or more,
+\ from a template (c4lc-gen's g:linitarr).
 : LIBYTE, ( off idx v -- ) {: off i v -- :}
    off oLEA OP2,  oPSH OP,  i oIMM OP2,  oADD OP,  oPSH OP,
    v oIMM OP2,  oSC OP, ;
+: LINIT-TMPL ( n -- ) {: n | et st v r -- :}
+   n >isym @ y.ct @ T-DEREF TO et
+   n >ibyte @ 1 = IF 1 ELSE n >ibyte @ 2 = IF 2 ELSE 1 CELLS THEN THEN TO st
+   16 NEW-VEC TO v
+   n >ivn @ 0 ?DO
+      4 CELLS ALLOT: TO r
+      I st * r !  et r CELL+ !  0 r 2 CELLS + !  I CELLS n >ivals @ + @ r 3 CELLS + !
+      r v V,
+   LOOP
+   n >isym @ y.val @  n >icount @ st *  v LTEMPLATE ;
 :M STMT n_linit {: n | y off v c s val -- :}
    n >isym @ TO y   y y.val @ TO off
    n >icount @ TO s
    s 0< IF
+      TCUR @                               \ (n_opasgn's temporaries: see there)
       off oLEA OP2,  oPSH OP,  n >expr @ GEN
       y y.ct @ T-PTR? IF
          y y.q @  n >expr @ CQ  DROPPED? IF S" initialization" QWARN THEN THEN
-      oSI OP,  EXIT THEN
+      oSI OP,  TCUR !  EXIT THEN
    n >ivals @ TO v   n >ivn @ TO c
+   s  n >ibyte @ 2 = IF 4 * ELSE n >ibyte @ 1 = IF 2* THEN THEN  LTMPL < 0=
+   y y.ct @ T-DEREF T-STRUCT? 0= AND IF  n LINIT-TMPL EXIT THEN
    s 0 ?DO
       I c < IF I CELLS v + @ ELSE 0 THEN TO val
       n >ibyte @ 1 = IF
@@ -545,17 +674,17 @@ VARIABLE UFN   0 UFN !
    LOOP ;M
 
 \ c4lc-gen's g:localaggr: MSET zeroes the object, then each value goes to
-\ its offset -- LEA's own when it is word-aligned, else added to the base
-: LADDR, ( base off -- ) {: b o -- :}
-   o 1 CELLS 1- AND 0= IF b o 1 CELLS / + oLEA OP2, EXIT THEN
-   b oLEA OP2,  oPSH OP,  o oIMM OP2,  oADD OP, ;
-:M STMT n_lagg {: n | b v r e -- :}
+\ its offset (LADDR,) -- or, with LTMPL constants or more, they come from
+\ a template and only the rest are stored
+:M STMT n_lagg {: n | b v r e t -- :}
+   TCUR @
    n >lsym @ y.val @ TO b
-   b oLEA OP2,  oPSH OP,  0 oIMM OP2,  oPSH OP,  n >lbytes @ oIMM OP2,  oPSH OP,
-   oMSET OP,  3 oADJ OP2,
    n >lrecs @ TO v
+   v LR-SCAN v LTMPL? TO t
+   t IF b n >lbytes @ v LTEMPLATE ELSE b 0 n >lbytes @ LMSET, THEN
    v V# 0 ?DO
       I v V@ TO r
+      t r LR-CONST? AND 0= IF
       b r @ LADDR,  oPSH OP,
       r 2 CELLS + @ TO e
       e IF
@@ -563,21 +692,28 @@ VARIABLE UFN   0 UFN !
          e CT T-STRUCT? IF ." c4fc: a struct value in an initializer is not supported" CR ABORT THEN
       ELSE r 3 CELLS + @ oIMM OP2, THEN
       r CELL+ @ STORE,
-   LOOP ;M
+      THEN
+   LOOP
+   TCUR ! ;M
 
-:M STMT n_expst  >expr @ GEN ;M
+\ Every statement that evaluates an expression puts TCUR back as it found
+\ it, after the statements inside it have: an n_opasgn's temporary lives
+\ to the end of its statement (c4lc-gen's g:stmt).
+:M STMT n_expst  TCUR @ SWAP  >expr @ EFFECT  TCUR ! ;M
 \ Inside a spliced body there is no frame to leave, so a return is a
 \ jump to the end of the splice rather than a LEV. The value is already
 \ in A either way, which is the whole reason this needs no rewriting of
 \ the tree -- see inline.f.
 :M STMT n_ret {: n | e -- :}
+   TCUR @
    n >expr @ TO e
    e IF
       e GEN
       e CT RETT @ SCONV,
       RETT @ T-PTR? IF RETQ @ e CQ DROPPED? IF S" return" QWARN THEN THEN
    THEN
-   INLRET @ IF oJMP BR, INLM, ELSE oLEV OP, THEN ;M
+   INLRET @ IF oJMP BR, INLM, ELSE oLEV OP, THEN
+   TCUR ! ;M
 :M STMT n_blk {: n -- :}
    n >len @ 0 ?DO n >list @ I CELLS + @ STMT LOOP ;M
 
@@ -619,21 +755,42 @@ VARIABLE UFN   0 UFN !
 \ The post forms store the new value unconverted and take the step back
 \ off it: converting first would lose the carry the undo needs, and the
 \ loads convert anyway.
-: INCDEC, ( node op post -- ) {: n op post | t -- :}
+: INCDEC, ( node op post -- ) {: n op post | t u -- :}
+   VUNUSED @ TO u  0 VUNUSED !
    n >opnd @ CT TO t
    n >opnd @ GEN-ADDR
    n >opnd @ op oADD = IF S" increment" ELSE S" decrement" THEN WCHECK
-   oPSH OP,
+   n >opnd @ STL? 0= IF oPSH OP, THEN
    t LOAD,
    oPSH OP,  t STEP-OF oIMM OP2,  op OP,
    post 0= IF t T-PROMOTE t SCONV, THEN
-   t STORE, ;
+   n >opnd @ STL? IF n >opnd @ STL, ELSE t STORE, THEN
+   post 0=  u 0= AND  t t_uchar = AND IF 255 MASK, THEN ;
+\ a local, wanted: the value is on the stack through the store, and POPA has it back
+: POST-LOCAL, ( node op -- ) {: n op | t -- :}
+   n >opnd @ CT TO t
+   n >opnd @ GEN-ADDR
+   n >opnd @ op oADD = IF S" increment" ELSE S" decrement" THEN WCHECK
+   t LOAD,
+   oPSH OP,  oPSH OP,  t STEP-OF oIMM OP2,  op OP,
+   n >opnd @ STL,
+   oPOPA OP, ;
 :M GEN n_preinc   oADD 0 INCDEC, ;M
 :M GEN n_predec   oSUB 0 INCDEC, ;M
-:M GEN n_postinc {: n -- :}
-   n oADD 1 INCDEC,  oPSH OP, n >opnd @ CT STEP-OF oIMM OP2, oSUB OP, ;M
-:M GEN n_postdec {: n -- :}
-   n oSUB 1 INCDEC,  oPSH OP, n >opnd @ CT STEP-OF oIMM OP2, oADD OP, ;M
+:M GEN n_postinc {: n | u -- :}
+   VUNUSED @ TO u  0 VUNUSED !
+   u 0= IF n >opnd @ STL? IF n oADD POST-LOCAL, EXIT THEN THEN
+   n oADD 1 INCDEC,
+   u IF EXIT THEN
+   oPSH OP, n >opnd @ CT STEP-OF oIMM OP2, oSUB OP,
+   n >opnd @ CT t_uchar = IF 255 MASK, THEN ;M
+:M GEN n_postdec {: n | u -- :}
+   VUNUSED @ TO u  0 VUNUSED !
+   u 0= IF n >opnd @ STL? IF n oSUB POST-LOCAL, EXIT THEN THEN
+   n oSUB 1 INCDEC,
+   u IF EXIT THEN
+   oPSH OP, n >opnd @ CT STEP-OF oIMM OP2, oADD OP,
+   n >opnd @ CT t_uchar = IF 255 MASK, THEN ;M
 :M CT n_preinc   >opnd @ CT ;M
 :M CT n_predec   >opnd @ CT ;M
 :M CT n_postinc  >opnd @ CT ;M
@@ -689,46 +846,63 @@ CREATE CNTM MMAX CELLS ALLOT   VARIABLE CNTN   0 CNTN !
 :M STMT n_empty  DROP ;M
 
 :M STMT n_if {: n | m1 m2 -- :}
+   TCUR @
    n >cond @ GEN   oBZ BR, TO m1
    n >body @ STMT
    n >else @ IF
       oJMP BR, TO m2   m1 >RES   n >else @ STMT   m2 >RES
    ELSE
       m1 >RES
-   THEN ;M
+   THEN
+   TCUR ! ;M
+
+\ -O: a loop's condition that is a plain int constant is not tested, as
+\ c4lc's gen does (g:kint?): do ... while (K) runs its body whatever K
+\ is, and while (K) or for (;K;) with K not 0 test nothing.
+: KINT? ( n -- f )
+   OPTIMIZE @ IF DUP NUM? IF >nty @ t_int = EXIT THEN THEN DROP 0 ;
+: KTRUE? ( n -- f )  DUP KINT? IF >val @ 0<> ELSE DROP 0 THEN ;
 
 :M STMT n_while {: n | top m bb cb -- :}
+   TCUR @
    BRKN @ TO bb   CNTN @ TO cb
    CHERE TO top
-   n >cond @ GEN   oBZ BR, TO m
+   -1 TO m
+   n >cond @ DUP KTRUE? IF DROP ELSE GEN  oBZ BR, TO m THEN
    n >body @ STMT
    oJMP top BACK,
-   m >RES
-   bb cb CHERE top RESOLVE-LOOP ;M
+   m 0< 0= IF m >RES THEN
+   bb cb CHERE top RESOLVE-LOOP
+   TCUR ! ;M
 
 :M STMT n_do {: n | top m bb cb cont -- :}
+   TCUR @
    BRKN @ TO bb   CNTN @ TO cb
    CHERE TO top
    n >body @ STMT
    CHERE TO cont
-   n >cond @ GEN
-   oBNZ top BACK,
-   bb cb CHERE cont RESOLVE-LOOP ;M
+   n >cond @ DUP KINT? IF
+      >val @ IF oJMP top BACK, THEN
+   ELSE GEN  oBNZ top BACK, THEN
+   bb cb CHERE cont RESOLVE-LOOP
+   TCUR ! ;M
 
 \ continue in a for loop goes to the STEP, not to the condition, and the
 \ step is emitted after the body -- so it is a genuine forward branch.
 :M STMT n_for {: n | top m bb cb cont -- :}
+   TCUR @
    BRKN @ TO bb   CNTN @ TO cb
-   n >init @ ?DUP IF GEN THEN
+   n >init @ ?DUP IF EFFECT THEN
    CHERE TO top
    -1 TO m                              \ patch 0 is a real patch index
-   n >cond @ ?DUP IF GEN  oBZ BR, TO m THEN
+   n >cond @ ?DUP IF DUP KTRUE? IF DROP ELSE GEN  oBZ BR, TO m THEN THEN
    n >body @ STMT
    CHERE TO cont
-   n >step @ ?DUP IF GEN THEN
+   n >step @ ?DUP IF EFFECT THEN
    oJMP top BACK,
    m 0< 0= IF m >RES THEN
-   bb cb CHERE cont RESOLVE-LOOP ;M
+   bb cb CHERE cont RESOLVE-LOOP
+   TCUR ! ;M
 
 \ -- switch -------------------------------------------------------------
 \ A jump table, not a chain of compares, because that is what c4lc emits:
@@ -786,6 +960,7 @@ VARIABLE CURSW   0 CURSW !
    CHERE w w.def ! ;M
 
 :M STMT n_switch {: n | w save m e bb m1 m2 m3 m4 end def k sp prev -- :}
+   TCUR @
    CURSW @ TO save
    SWC ALLOT: TO w
    n >lo @ w w.lo !  n >hi @ w w.hi !  -1 w w.def !  0 w w.cv !
@@ -845,4 +1020,5 @@ VARIABLE CURSW   0 CURSW !
    LOOP
    THEN
    BRKN @ bb ?DO BRKM I CELLS + @ end RESTO LOOP   bb BRKN !
-   save CURSW ! ;M
+   save CURSW !
+   TCUR ! ;M

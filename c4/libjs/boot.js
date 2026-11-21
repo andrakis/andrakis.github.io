@@ -30,12 +30,16 @@ import { ParHost } from './par.js';
 import { Bus } from './bus.js';
 import { Heap } from './heap.js';
 import { SharedHeap } from './sheap.js';
+import { Mmu } from './mmu.js';
+import { accel, setOsAccel } from './accel.js';
 
 // The whole machine, empty. Both hosts (cli.js, worker.js) build it
 // here so they cannot drift apart.
 //   arenaMb   memory in megabytes (default 32)
 //   drives    [{ files: Map<name, Uint8Array>, writable, sink }] (c4bb's drives)
 //   onByte    console sink, one byte at a time
+//   onDownload(name, bytes)  a file the machine hands the person (C4IX's
+//             download: devices.js "download:NAME"); without it, none is taken
 //   mhz       how fast the machine claims to be; TIME is cycles / (mhz * 1000)
 //   gui       a GuiDevice to fit, or null
 //   snd       a SoundDevice (snd-device.js) to fit, or null
@@ -47,6 +51,12 @@ import { SharedHeap } from './sheap.js';
 //             whose books are shared too (sheap.js). Where there is no
 //             SharedArrayBuffer (a page not cross-origin isolated), the
 //             simulated engine
+//   mmu       fit an MMU (mmu.js, docs/c4ix-mmu.md) to every CPU, unless
+//             false: one is fitted by default. It does nothing until the
+//             guest turns it on, which only C4IX does
+//   accel     the accelerators (accel.js): on unless false
+//   osAccel   ... an operating system's among them (C4IX's src/c4ix/accel.mjs):
+//             on unless false; the guest may turn them (ACC_OS)
 export function createMachine(opts = {}) {
   const bytes = (opts.arenaMb || 32) * 1024 * 1024;
   const par = opts.cpus > 1 && opts.parallel && opts.spawn && typeof SharedArrayBuffer !== 'undefined';
@@ -54,6 +64,7 @@ export function createMachine(opts = {}) {
   const dev = new Devices(arena, {
     drives: opts.drives,
     onByte: opts.onByte,
+    onDownload: opts.onDownload,
     cyclesPerMs: opts.mhz ? Math.max(1, Math.round(opts.mhz * 1000)) : CYCLES_PER_MS,
     hostNow: opts.hostNow,
   });
@@ -62,10 +73,20 @@ export function createMachine(opts = {}) {
   const machine = new Machine(arena, dev, bus, par ? new SharedHeap(arena, null) : new Heap(0, 0));
   // the FPU opcode (F3): on unless asked otherwise (fpu: false)
   machine.noFpu = opts.fpu === false;
+  // the drawing accelerators (accel.js): on unless asked otherwise (accel: false)
+  machine.accel = opts.accel === false ? null : accel;
+  setOsAccel(opts.osAccel !== false);
   dev.noFpu = machine.noFpu;
+  if (opts.mmu !== false) machine.mmu = new Mmu(machine);
   if (par) new ParHost(machine, opts.cpus | 0, opts.spawn);
   else if (opts.cpus) new Smp(machine, opts.cpus | 0, opts.quantum | 0,
-    () => { const m = new Machine(arena, dev, bus, machine.heap); m.noFpu = machine.noFpu; return m; });
+    () => {
+      const m = new Machine(arena, dev, bus, machine.heap);
+      m.noFpu = machine.noFpu;
+      m.accel = machine.accel;
+      if (opts.mmu !== false) m.mmu = new Mmu(m);
+      return m;
+    });
   if (opts.gui) opts.gui.attach(machine);
   if (opts.snd) opts.snd.attach(machine);
   return machine;
@@ -110,7 +131,10 @@ export function parseSymbols(bytes) {
 export function boot(machine, imageBytes, argv, opts = {}) {
   const arena = machine.arena, i32 = arena.i32;
   initRom(arena);
-  const img = loadImage(arena, parseC4r(imageBytes), MEM_BASE);
+  const parsed = parseC4r(imageBytes);
+  const img = loadImage(arena, parsed, MEM_BASE);
+  // for the program's own boot report (devices.js IMG_*)
+  machine.dev.img = { code: img.codeBase, data: img.dataBase, bss: img.dataBase + parsed.data.length, end: img.top };
 
   // argv strings and pointer table in the reserved area above the stack
   // (c4bb's layout, loader.js:141-154)
@@ -154,6 +178,12 @@ export function boot(machine, imageBytes, argv, opts = {}) {
   machine.heap.reset(heapBase, heapEnd);
   machine.dev.write32(HEAP_BASE, heapBase);
   machine.dev.write32(HEAP_END, heapEnd);
+  // The boot stack, from the reserve up to the arguments: a kernel that
+  // leaves it for good has it guarded (STACK_GUARD, c4m.js guardHit)
+  machine.dev.stackBase = heapEnd + reserveLen + mboxLen;
+  machine.dev.stackTop = arena.stackTop;
+  machine.dev.stackGuard = 0;
+  if (machine.dev.onGuard) machine.dev.onGuard();
   const reserve = reserveLen ? { base: heapEnd, len: reserveLen } : null;
   const mbox = mboxLen ? { base: heapEnd + reserveLen, len: mboxLen } : null;
   if (mbox) { machine.dev.mbox = mbox; arena.u8.fill(0, mbox.base, mbox.base + mbox.len); }

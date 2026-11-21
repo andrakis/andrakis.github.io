@@ -30,6 +30,11 @@ void *safe_malloc (size_t size, const char *fname, uint32_t line)
 // bits, is the sum below: a = ah * 2^16 + al, with ah = a >> 16 (arithmetic)
 // and al = a & 0xffff, and likewise b. c4lc does int64_t at 32 bits in
 // helper calls, and this is the hottest multiply in the game.
+#ifdef FixedMul
+// c4sdl: the function behind wl_utils.h's macro
+#undef FixedMul
+#define FixedMul c4_FixedMul
+#endif
 fixed FixedMul (fixed a, fixed b)
 {
     uint32_t ah = (uint32_t)(a >> 16), al = (uint32_t)a & 0xffff;

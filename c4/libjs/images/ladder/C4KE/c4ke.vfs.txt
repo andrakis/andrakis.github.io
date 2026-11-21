@@ -52,3 +52,5 @@ BIN_TEST  = mandel rps raycast
 		user/:
 			each($BIN_TEST):
 				$1: $1.c4r
+	# the Build Ladder's instructions (src/c4dos/fs/LADDER.TXT)
+	ladder.txt: ladder.txt

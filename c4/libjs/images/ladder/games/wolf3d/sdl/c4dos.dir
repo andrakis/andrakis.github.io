@@ -1,0 +1,4 @@
+SDL.h
+SDL_mixer.h
+SDL_syswm.h
+c4dos.dir

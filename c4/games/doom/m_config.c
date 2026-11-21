@@ -161,6 +161,13 @@ static default_t	doom_defaults_list[] =
     CONFIG_VARIABLE_INT(show_messages),
 
     //!
+    // c4doom: if non-zero, the browser's accelerators draw, where the
+    // machine has them (the Options menu's ACCELERATED, c4/c4accel.h).
+    //
+
+    CONFIG_VARIABLE_INT(c4_accelerated),
+
+    //!
     // Keyboard key to turn right.
     //
 
@@ -2118,6 +2125,17 @@ char *M_GetSaveGameDir(char *iwadname)
         savegamedir = M_StringJoin(configdir, DIR_SEPARATOR_S, ".savegame/", NULL);
 
         M_MakeDirectory(savegamedir);
+#ifdef C4DOOM
+        // c4: the person's own IWADs (-home, d_iwad.c) keep their saves
+        // apart, as Chocolate Doom does: a Doom II save is no Doom save
+        if (M_CheckParm("-home"))
+        {
+            char *shared = savegamedir;
+            savegamedir = M_StringJoin(shared, iwadname, "/", NULL);
+            free(shared);
+            M_MakeDirectory(savegamedir);
+        }
+#endif
 
         printf ("Using %s for savegames\n", savegamedir);
 #endif

@@ -471,7 +471,7 @@ int dos_image (int h) {
   if (dos_version() < C4DOS_API_V8 || !__c4dos_api[C4DOS_SLOT_IMAGE] || !__c4dos_arm()) return 0;
   return __c4dos_call1((int *)__c4dos_api[C4DOS_SLOT_IMAGE], h);
 }
-load-c4r.c 45238
+load-c4r.c 46368
 //
 // Executable loader: .c4r format
 //
@@ -510,6 +510,12 @@ enum {
 // actually stored -- the excess is BSS (zero-initialized, occupies no
 // image bytes). Version 2 images have no such field; for them MEMSZ is
 // taken to equal DATALEN. Both versions load.
+//
+// At 32 bits the field's eight bytes hold MEMSZ and four more, which a
+// v3 object from c4lc or c4fc uses for the size of its BSS (see
+// C4R_HDR_BSS): the zero-filled part at the END of MEMSZ, which begins at
+// MEMSZ - BSS. Zero there (or v2's 'p' filler) says nothing; c4rlink then
+// keeps that module's whole MEMSZ together, as it always did.
 enum { C4R__Supported_Version = 3 };
 
 enum {
@@ -545,6 +551,9 @@ enum {
 	C4R_HDR_DESTRUCTLEN, // int
 	C4R_HDR_MEMSZ,       // int -- data segment total in-memory size (v3+);
 	                     //        >= DATALEN, the excess is zero-filled BSS.
+	C4R_HDR_BSS,         // int -- of MEMSZ, how much at its end is BSS: the
+	                     //        uninitialized globals, no part of an
+	                     //        initialized one (v3, 32 bits); 0 for unknown
 	C4R_HDR__Sz
 };
 
@@ -933,6 +942,10 @@ int *c4r_load_opt_real (char *file, int options) {
 			x = (5 + i) & ~i;
 			c4r_src_read(fd, buffer, x); // padding word: MEMSZ (v3+)
 			header[C4R_HDR_MEMSZ] = *(int *)buffer;
+			// and at 32 bits, the BSS size beside it ('pppp' in v2)
+			header[C4R_HDR_BSS] = 0;
+			if (x == 8 && sizeof(int) == 4 && *(int *)(buffer + 4) != 1886417008)
+				header[C4R_HDR_BSS] = *(int *)(buffer + 4);
 			wordbytes = header[C4R_HDR_WORDBITS] / 8;
 			c4r_src_read(fd, buffer, wordbytes); header[C4R_HDR_ENTRY] = *(int *)buffer;
 			c4r_src_read(fd, buffer, wordbytes); header[C4R_HDR_CODELEN] = *(int *)buffer;
@@ -965,6 +978,10 @@ int *c4r_load_opt_real (char *file, int options) {
 			// actually stored.
 			if (header[C4R_HDR_MEMSZ] < header[C4R_HDR_DATALEN])
 				header[C4R_HDR_MEMSZ] = header[C4R_HDR_DATALEN];
+			// nor a BSS that would start before the stored bytes end
+			if (header[C4R_HDR_VERSION] < C4R__Supported_Version || header[C4R_HDR_BSS] < 0 ||
+			    header[C4R_HDR_MEMSZ] - header[C4R_HDR_BSS] < header[C4R_HDR_DATALEN])
+				header[C4R_HDR_BSS] = 0;
 
 			if (c4r_verbose) c4r_dump_info(c4r);
 
@@ -1360,6 +1377,8 @@ enum {
 	LDL ,LDG ,PSHL,PSHG,LEAP,IMMP,LIP ,ADDL,STL ,POPA,
 	// F3: IEEE arithmetic (docs/c4-float.md)
 	FPU ,
+	// 16-bit loads and store, logical shift right (docs/c4-16bit.md)
+	LH  ,LHU ,SH  ,LSR ,LCU ,
 	// End of instructions
 	INS_SIZE,
 };
@@ -1847,7 +1866,7 @@ static int rand () {
 	__u0_rand_next = __u0_rand_next * 1103515245 + 12345;
 	return (__u0_rand_next / 65536) % RAND_MAX;
 }
-c4cc.c 78952
+c4cc.c 79587
 // C4 Cross Compiler
 //
 // Compiles to any language of choice by way of implementation files.
@@ -1937,6 +1956,7 @@ char *line_start, *statement_start;
 char *_p, *_data;       // initial pointer locations
 int  *_sym, *_e, *_sp;  // initial pointer locations
 int  *_oisc4_e;
+int  *e_end;           // stmt() stops short of this: the text area is full
 int   c4cc_initialized;
 
 // Patch label types shared with the backends (asm-c4r.c defines the same
@@ -2089,7 +2109,9 @@ void c4cc_init_instructions() {
 	// -mfuse was passed; same no-bounds-check reason as above.
 	"LDL ,LDG ,PSHL,PSHG,LEAP,IMMP,LIP ,ADDL,STL ,POPA,"
 	// F3: IEEE arithmetic (docs/c4-float.md)
-	"FPU ,";
+	"FPU ,"
+	// 16-bit loads and store, logical shift right (docs/c4-16bit.md)
+	"LH  ,LHU ,SH  ,LSR ,LCU ,";
 	c4cc_keywords =
 		"static extern __attribute__ constructor destructor "     // Ignored by c4m
 		"char else enum if int return sizeof for continue while " // Keywords
@@ -2886,6 +2908,7 @@ void stmt()
   int *b3, *b4, *bend, *bdef, *odef, *oend, *o3, *o4;
 
   statement_start = p;
+  if (e > e_end) { printf("%d: the program is too big: the text area holds %d words\n", line, 128 * 1024); die(-1); }
 
   if (tk == If) {
     next();
@@ -3755,7 +3778,7 @@ void print_stacktrace (int *pc_orig, int *idmain, int *bp, int *sp) {
 }
 
 int c4cc_init () {
-  int i, poolsz, len;
+  int i, poolsz, textsz, len;
   char *x;
 
   if(c4cc_initialized) return 0;
@@ -3774,12 +3797,18 @@ int c4cc_init () {
 
   poolsz = 512 * 1024;
   if (!(sym = _sym = malloc(poolsz))) { printf("could not malloc(%d) symbol area\n", poolsz); return -1; }
-  if (!(le = e = _e = malloc(poolsz))) { printf("could not malloc(%d) text area\n", poolsz); return -1; }
+  // The text area holds 128 K words: 512 KB at 32 bits, 1 MB at 64. It
+  // was 512 KB at both, and at 64 bits the 66,000 words of c4rlink.c4r
+  // ran past it into the data area, unchecked, until common globals put
+  // it over by enough to break the build (2026-11-13).
+  textsz = 128 * 1024 * sizeof(int);
+  if (!(le = e = _e = malloc(textsz))) { printf("could not malloc(%d) text area\n", textsz); return -1; }
+  e_end = _e + 127 * 1024;
   if (!(data = _data = malloc(poolsz))) { printf("could not malloc(%d) data area\n", poolsz); return -1; }
   if (!(_sp = malloc(poolsz))) { printf("could not malloc(%d) stack area\n", poolsz); return -1; }
 
   memset(sym,  0, poolsz);
-  memset(e,    0, poolsz);
+  memset(e,    0, textsz);
   memset(data, 0, poolsz);
 
   data_s = data;
@@ -3966,7 +3995,7 @@ int c4cc_main(int argc, char **argv)
 #ifndef C4CC_INCLUDED
 int main(int argc, char **argv) { return c4cc_main(argc, argv); }
 #endif
-asm-c4r.c 39001
+asm-c4r.c 39325
 // C4 Relocatable assembler for C4 CC
 //
 // Compiles C4 to an object format that can be loaded for use in C4.
@@ -4011,7 +4040,11 @@ asm-c4r.c 39001
 // | | B    | WordBits       | How large a word is                           | |
 // | | B*8  | MEMSZ/padding  | v2: 'p' filler. v3: the first word (at byte   | |
 // | |      |                | offset 5) is the total in-memory data size;   | |
-// | |      |                | the part past DataLen is zero-filled BSS      | |
+// | |      |                | the part past DataLen is zero-filled BSS. At  | |
+// | |      |                | 32 bits the next four bytes say how much of   | |
+// | |      |                | MEMSZ, at its end, is uninitialized globals   | |
+// | |      |                | (c4lc, c4fc, c4rlink; 0 for unknown), which   | |
+// | |      |                | c4rlink lays out after all the data           | |
 // | | W    | Entry          | Position to begin code execution              | |
 // | | W    | CodeLen        | Length of code segment in words               | |
 // | | W    | DataLen        | Length of data segment in bytes               | |

@@ -1,0 +1,9 @@
+Games|Doom|doom
+Games/Doom (your files)|The Ultimate Doom|doom -home -iwad doom.wad
+Games/Doom (your files)|Doom II|doom -home -iwad doom2.wad
+Games/Doom (your files)|Final Doom: TNT Evilution|doom -home -iwad tnt.wad
+Games/Doom (your files)|Final Doom: The Plutonia Experiment|doom -home -iwad plutonia.wad
+Games|Rise of the Triad|rott
+Games|Rise of the Triad (your files)|rottreg
+Games|Wolfenstein 3D|wolf3d
+Games|Wolfenstein 3D (your files)|wolf3d6

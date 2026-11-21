@@ -1,6 +1,7 @@
 // WL_DRAW.C
 
 #include "wl_def.h"
+#include "c4/c4accel.h"         // c4sdl: the browser's accelerators
 #include "wl_cloudsky.h"
 #include "wl_atmos.h"
 #include "wl_shade.h"
@@ -55,6 +56,16 @@ short   viewangle;
 fixed   viewsin,viewcos;
 
 void    TransformActor (objtype *ob);
+
+// c4sdl: the browser's accelerators (c4/accel.mjs, c4/c4accel.h).
+// wolf_accel is the first of the game's numbers, or 0: the game's to draw
+// them. -1 until asked, which the first post does; the config (wl_main.c)
+// and the Control menu's Accelerated (wl_menu.c) set it.
+int wolf_accel = -1;
+int wolf_accel_on = 1;
+int wolf_accel_base(void) { return wolf_accel = wolf_accel_on ? accel_find("wolf3d") : 0; }
+int wolf_accel_avail(void) { return accel_find("wolf3d") != 0; }
+void wolf_accel_set(int on) { wolf_accel_on = on != 0; wolf_accel = wolf_accel_on ? accel_find("wolf3d") : 0; }
 void    BuildTables (void);
 void    ClearScreen (void);
 int     CalcRotate (objtype *ob);
@@ -312,6 +323,16 @@ void ScalePost (void)
     byte *curshades = shadetable[GetShade(wallheight[postx])];
 #endif
 
+#if defined(C4IX) && !defined(USE_SHADING)
+    // c4sdl: the whole post in one instruction where the machine has the
+    // game's accelerators (c4/c4accel.h), the same pixels
+    if (WOLF_ACCEL())
+    {
+        wolf_post(wallheight[postx], vbuf, bufferPitch, postx, centery, viewheight, postsource, TEXTURESIZE);
+        return;
+    }
+#endif
+
     ywcount = yd = wallheight[postx] >> 3;
     if(yd <= 0) yd = 100;
 
@@ -426,9 +447,38 @@ static byte secretshade[256];
 static byte secretpost[TEXTURESIZE];
 static boolean secretshaded;
 
+// The palette's colour nearest to r, g, b (0-255), of the first 255
+static int NearestColor (int r, int g, int b)
+{
+    int j, dr, dg, db, d, best, bestd;
+
+    best = 0;
+    bestd = 0x7fffffff;
+    for (j = 0; j < 255; j++)
+    {
+        dr = gamepal[j].r - r;
+        dg = gamepal[j].g - g;
+        db = gamepal[j].b - b;
+        d = dr * dr + dg * dg + db * db;
+        if (d < bestd)
+        {
+            bestd = d;
+            best = j;
+        }
+    }
+    return best;
+}
+
+// A secret: a pushwall not pushed yet, plane 1's PUSHABLETILE, which
+// PushWall clears. --secrets tints these, and the automap marks them.
+static boolean SecretWall (int x, int y)
+{
+    return MAPSPOT(x,y,1) == PUSHABLETILE;
+}
+
 static void BuildSecretShade (void)
 {
-    int i, j, r, g, b, dr, dg, db, d, best, bestd;
+    int i, r, g, b;
 
     for (i = 0; i < 256; i++)
     {
@@ -437,21 +487,7 @@ static void BuildSecretShade (void)
         b = gamepal[i].b * 3 / 4;
         if (r > 255) r = 255;
         if (g > 255) g = 255;
-        best = i;
-        bestd = 0x7fffffff;
-        for (j = 0; j < 255; j++)
-        {
-            dr = gamepal[j].r - r;
-            dg = gamepal[j].g - g;
-            db = gamepal[j].b - b;
-            d = dr * dr + dg * dg + db * db;
-            if (d < bestd)
-            {
-                bestd = d;
-                best = j;
-            }
-        }
-        secretshade[i] = best;
+        secretshade[i] = NearestColor (r, g, b);
     }
     secretshaded = true;
 }
@@ -460,13 +496,385 @@ static void SecretPost (int x, int y)
 {
     int i;
 
-    if (MAPSPOT(x,y,1) != PUSHABLETILE)
+    if (!SecretWall (x, y))
         return;
     if (!secretshaded)
         BuildSecretShade ();
     for (i = 0; i < TEXTURESIZE; i++)
         secretpost[i] = secretshade[postsource[i]];
     postsource = secretpost;
+}
+
+/*
+=============================================================================
+
+                                 AUTOMAP
+
+= c4sdl: Tab, as in Rise of the Triad: the level from above, as far as it
+= has been seen. The ray caster marks each tile a ray enters in mapseen
+= (REVEALMAP, version.h; the marks are in WallRefresh's loops below), a
+= new level clears it (SetupGameLevel) and a saved game keeps it
+= (wl_main.c). Nothing else is done for the map while it is not shown.
+=
+= It shows the walls, each in its texture's average colour, the doors
+= across their tiles (a key's door in the key's colour, an open one
+= drawn short), the elevator's switch, the secrets that have been seen
+= and not pushed (SecretWall, as --secrets finds them) and the player,
+= an arrow. It starts fitted to the screen: the box of the tiles seen at
+= the biggest of amapsizes that box fits, up to 6 pixels a tile. - and +
+= zoom out and in through amapsizes, and the zoom is kept from then on; a
+= box bigger than the screen shows the part of it round the player. The
+= game waits while the map is up, as ROTT's does; Tab or Escape goes back.
+=
+=============================================================================
+*/
+
+#define AM_BACK     0       // the colours: amapcol[AM_...]
+#define AM_FLOOR    1
+#define AM_DOOR     2
+#define AM_GOLD     3
+#define AM_SILVER   4
+#define AM_ELEVATOR 5
+#define AM_SECRET   6
+#define AM_PLAYER   7
+#define AM_TEXT     8
+#define AM_COLOURS  9
+
+static byte amapcol[AM_COLOURS];
+static boolean amapcolok;
+static byte amapwall[MAXWALLTILES];     // a wall's colour, when amapwallok
+static boolean amapwallok[MAXWALLTILES];
+
+static void AmapColours (void)
+{
+    amapcol[AM_BACK] = NearestColor (0, 0, 0);
+    amapcol[AM_FLOOR] = NearestColor (44, 44, 60);
+    amapcol[AM_DOOR] = NearestColor (0, 184, 184);
+    amapcol[AM_GOLD] = NearestColor (252, 208, 0);
+    amapcol[AM_SILVER] = NearestColor (208, 208, 252);
+    amapcol[AM_ELEVATOR] = NearestColor (0, 252, 0);
+    amapcol[AM_SECRET] = NearestColor (252, 0, 252);
+    amapcol[AM_PLAYER] = NearestColor (252, 252, 252);
+    amapcol[AM_TEXT] = NearestColor (184, 184, 184);
+    amapcolok = true;
+}
+
+// A wall's colour: its texture's average, a little brighter, from one
+// pixel in sixteen. Worked out once, the first time it is drawn.
+static int AmapWall (int tile)
+{
+    byte *src;
+    int x, y, c, r, g, b;
+
+    tile &= MAXWALLTILES - 1;
+    if (!amapwallok[tile])
+    {
+        src = PM_GetPage (horizwall[tile]);
+        r = g = b = 0;
+        for (x = 0; x < TEXTURESIZE; x += 4)
+        {
+            for (y = 0; y < TEXTURESIZE; y += 4)
+            {
+                c = src[x * TEXTURESIZE + y];
+                r += gamepal[c].r;
+                g += gamepal[c].g;
+                b += gamepal[c].b;
+            }
+        }
+        c = (TEXTURESIZE / 4) * (TEXTURESIZE / 4);
+        r = r / c * 5 / 4 + 16;
+        g = g / c * 5 / 4 + 16;
+        b = b / c * 5 / 4 + 16;
+        if (r > 255) r = 255;
+        if (g > 255) g = 255;
+        if (b > 255) b = 255;
+        amapwall[tile] = NearestColor (r, g, b);
+        amapwallok[tile] = true;
+    }
+    return amapwall[tile];
+}
+
+// Seen, or a wall in a corner no ray reaches: one whose two neighbours
+// along a diagonal are walls that have been seen, with the floor between
+// them seen too (ROTT's FixMapSeen, here when the map is drawn).
+static boolean AmapSeen (int x, int y)
+{
+    int dx, dy;
+
+    if (mapseen[x][y] || mapreveal)
+        return true;
+    if (!tilemap[x][y] || (tilemap[x][y] & BIT_DOOR))
+        return false;
+    for (dx = -1; dx <= 1; dx += 2)
+    {
+        if (x + dx < 0 || x + dx >= mapwidth)
+            continue;
+        for (dy = -1; dy <= 1; dy += 2)
+        {
+            if (y + dy < 0 || y + dy >= mapheight)
+                continue;
+            if (mapseen[x + dx][y] && tilemap[x + dx][y] && !(tilemap[x + dx][y] & BIT_DOOR)
+                && mapseen[x][y + dy] && tilemap[x][y + dy] && !(tilemap[x][y + dy] & BIT_DOOR)
+                && mapseen[x + dx][y + dy] && !tilemap[x + dx][y + dy])
+                return true;
+        }
+    }
+    return false;
+}
+
+static void AmapBar (int x, int y, int w, int h, int color)
+{
+    byte *dest;
+
+    if (w <= 0 || h <= 0)
+        return;
+    dest = vbuf + ylookup[y] + x;
+    while (h--)
+    {
+        memset (dest, color, w);
+        dest += bufferPitch;
+    }
+}
+
+// A line of dots size x size, kept on the screen
+static void AmapLine (int x0, int y0, int x1, int y1, int size, int color)
+{
+    int dx, dy, sx, sy, err, e2;
+
+    dx = x1 > x0 ? x1 - x0 : x0 - x1;
+    dy = y1 > y0 ? y0 - y1 : y1 - y0;
+    sx = x0 < x1 ? 1 : -1;
+    sy = y0 < y1 ? 1 : -1;
+    err = dx + dy;
+    while (1)
+    {
+        if (x0 >= 0 && y0 >= 0 && x0 + size <= screenWidth && y0 + size <= screenHeight)
+            AmapBar (x0, y0, size, size, color);
+        if (x0 == x1 && y0 == y1)
+            break;
+        e2 = 2 * err;
+        if (e2 >= dy)
+        {
+            err += dy;
+            x0 += sx;
+        }
+        if (e2 <= dx)
+        {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+// The door of tile across it, as it is: an open door is short
+static void AmapDoor (int sx, int sy, int t, int tile)
+{
+    doorobj_t *door;
+    int len, th, color;
+
+    door = &doorobjlist[tile & ~BIT_DOOR];
+    switch (door->lock)
+    {
+        case dr_lock1: color = amapcol[AM_GOLD]; break;
+        case dr_lock2: case dr_lock3: case dr_lock4: color = amapcol[AM_SILVER]; break;
+        case dr_elevator: color = amapcol[AM_ELEVATOR]; break;
+        default: color = amapcol[AM_DOOR]; break;
+    }
+    th = t / 3;
+    if (th < 1)
+        th = 1;
+    len = t - (int)(((int32_t)door->position * t) >> 16);
+    if (len < 1)
+        len = 1;
+    if (door->vertical)
+        AmapBar (sx + (t - th) / 2, sy, th, len, color);
+    else
+        AmapBar (sx, sy + (t - th) / 2, len, th, color);
+}
+
+// The player: an arrow from where it stands, the way it faces
+static void AmapPlayer (int px0, int py0, int t)
+{
+    int len, size, a, x1, y1, i, hx, hy;
+
+    size = t >= 8 ? 2 : 1;
+    if (size < scaleFactor)
+        size = scaleFactor;
+    len = t + t / 2;
+    if (len < 8 * scaleFactor)
+        len = 8 * scaleFactor;
+    a = player->angle;
+    x1 = px0 + (int)(((int32_t)costable[a] * len) >> 16);
+    y1 = py0 - (int)(((int32_t)sintable[a] * len) >> 16);
+    AmapLine (px0 - (len >> 1) * (x1 - px0) / len, py0 - (len >> 1) * (y1 - py0) / len,
+              x1, y1, size, amapcol[AM_PLAYER]);
+    for (i = -1; i <= 1; i += 2)                // the head
+    {
+        a = player->angle + 180 + i * 35;
+        while (a >= ANGLES)
+            a -= ANGLES;
+        hx = x1 + (int)(((int32_t)costable[a] * (len / 2)) >> 16);
+        hy = y1 - (int)(((int32_t)sintable[a] * (len / 2)) >> 16);
+        AmapLine (x1, y1, hx, hy, size, amapcol[AM_PLAYER]);
+    }
+}
+
+// The n tiles of lo..hi to show, those round the player's at
+static void AmapWindow (int *lo, int *hi, int at, int n)
+{
+    int first;
+
+    if (*hi - *lo + 1 <= n)
+        return;
+    first = at - n / 2;
+    if (first > *hi - n + 1)
+        first = *hi - n + 1;
+    if (first < *lo)
+        first = *lo;
+    *lo = first;
+    *hi = first + n - 1;
+}
+
+#define AM_SIZES    7       // the zooms, a tile's pixels (times scaleFactor)
+#define AM_FIRSTMAX 6       // the most it starts at, unzoomed
+
+static int amapsizes[AM_SIZES] = { 2, 3, 4, 6, 8, 12, 16 };
+static int amapzoom = -1;   // amapsizes' index chosen with - and +, or -1
+static int amapcur;         // the index drawn last
+
+static void AmapDraw (void)
+{
+    int x, y, x0, y0, x1, y1, t, w, h, ox, oy, sx, sy, tile, color;
+    word textw, texth;
+    char str[64];
+
+    snprintf (str, sizeof(str), "FLOOR %d  SECRETS %d/%d  - + ZOOM  TAB RETURNS",
+              gamestate.mapon + 1, (int)gamestate.secretcount, (int)gamestate.secrettotal);
+    fontnumber = 0;
+    VW_MeasurePropString (str, &textw, &texth);
+
+    x0 = mapwidth;
+    y0 = mapheight;
+    x1 = y1 = -1;
+    for (x = 0; x < mapwidth; x++)
+    {
+        for (y = 0; y < mapheight; y++)
+        {
+            if (!mapseen[x][y] && !mapreveal)
+                continue;
+            if (x < x0) x0 = x;
+            if (x > x1) x1 = x;
+            if (y < y0) y0 = y;
+            if (y > y1) y1 = y;
+        }
+    }
+    if (x1 < 0)                                 // nothing seen yet
+    {
+        x0 = x1 = player->tilex;
+        y0 = y1 = player->tiley;
+    }
+    if (x0 > 0) x0--;                           // and the corners round it
+    if (y0 > 0) y0--;
+    if (x1 < mapwidth - 1) x1++;
+    if (y1 < mapheight - 1) y1++;
+
+    w = screenWidth;
+    h = screenHeight - (texth + 1) * scaleFactor;   // a line of text below
+    t = w / (x1 - x0 + 1);                      // the size it all fits at
+    if (h / (y1 - y0 + 1) < t)
+        t = h / (y1 - y0 + 1);
+    if (amapzoom < 0)                           // not zoomed yet: the biggest
+    {                                           // size that fits, up to 6
+        amapcur = 0;
+        while (amapcur + 1 < AM_SIZES && amapsizes[amapcur + 1] <= AM_FIRSTMAX
+               && amapsizes[amapcur + 1] * scaleFactor <= t)
+            amapcur++;
+    }
+    else
+        amapcur = amapzoom;
+    t = amapsizes[amapcur] * scaleFactor;
+    AmapWindow (&x0, &x1, player->tilex, w / t);    // what doesn't fit:
+    AmapWindow (&y0, &y1, player->tiley, h / t);    // the part round the player
+    ox = (w - t * (x1 - x0 + 1)) / 2;
+    oy = (h - t * (y1 - y0 + 1)) / 2;
+
+    vbuf = VL_LockSurface (screenBuffer);
+    if (!vbuf)
+        return;
+    AmapBar (0, 0, screenWidth, screenHeight, amapcol[AM_BACK]);
+    for (x = x0; x <= x1; x++)
+    {
+        for (y = y0; y <= y1; y++)
+        {
+            if (!AmapSeen (x, y))
+                continue;
+            sx = ox + (x - x0) * t;
+            sy = oy + (y - y0) * t;
+            tile = tilemap[x][y];
+            if (!tile || (tile & BIT_DOOR))
+            {
+                AmapBar (sx, sy, t, t, amapcol[AM_FLOOR]);
+                if (tile)
+                    AmapDoor (sx, sy, t, tile);
+                continue;
+            }
+            if (tile == BIT_WALL)               // a pushwall on its way
+                color = AmapWall (pwalltile);
+            else if (SecretWall (x, y))
+                color = amapcol[AM_SECRET];
+            else if ((tile & ~BIT_WALL) == ELEVATORTILE)
+                color = amapcol[AM_ELEVATOR];
+            else
+                color = AmapWall (tile & ~BIT_WALL);
+            AmapBar (sx, sy, t, t, color);
+        }
+    }
+    AmapPlayer (ox + (int)(((int32_t)(player->x - (x0 << TILESHIFT)) * t) >> TILESHIFT),
+                oy + (int)(((int32_t)(player->y - (y0 << TILESHIFT)) * t) >> TILESHIFT), t);
+    VL_UnlockSurface (screenBuffer);
+    vbuf = NULL;
+
+    SETFONTCOLOR (amapcol[AM_TEXT], amapcol[AM_BACK]);
+    px = (screenWidth / scaleFactor - textw) / 2;
+    py = screenHeight / scaleFactor - texth;
+    VWB_DrawPropString (str);
+    VW_UpdateScreen ();
+}
+
+void AutoMap (void)
+{
+    if (!amapcolok)
+        AmapColours ();
+    FinishPaletteShifts ();
+    AmapDraw ();
+
+    while (Keyboard[sc_Tab])                    // let go of the Tab that showed it
+        IN_WaitAndProcessEvents ();
+    IN_ClearKeysDown ();
+    while (1)
+    {
+        IN_WaitAndProcessEvents ();
+        if (Keyboard[sc_Tab] || Keyboard[sc_Escape])
+            break;
+        if (Keyboard[sc_Minus] || Keyboard[sc_Equal])   // - out, + (=) in
+        {
+            amapzoom = amapcur + (Keyboard[sc_Equal] ? 1 : -1);
+            if (amapzoom < 0)
+                amapzoom = 0;
+            if (amapzoom >= AM_SIZES)
+                amapzoom = AM_SIZES - 1;
+            Keyboard[sc_Minus] = Keyboard[sc_Equal] = false;   // a step a press
+            AmapDraw ();
+        }
+    }
+    while (Keyboard[sc_Tab] || Keyboard[sc_Escape])
+        IN_WaitAndProcessEvents ();
+    IN_ClearKeysDown ();
+
+    if (viewsize != 21)
+        DrawPlayScreen ();
+    IN_CenterMouse ();
+    lasttimecount = GetTimeCount ();
 }
 
 /*

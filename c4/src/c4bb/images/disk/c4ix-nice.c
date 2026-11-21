@@ -40,18 +40,23 @@ static int usage() {
     return 2;
 }
 
-// NAME as the shell finds it: /bin/NAME, c4ix-NAME.c4r, NAME, NAME.c4r
+// NAME as the shell finds it, with its PATH as it starts (sh.c):
+// /bin/NAME, /usr/bin/NAME, /usr/games/bin/NAME, c4ix-NAME.c4r, NAME,
+// NAME.c4r
 static int run(char *name, int argc, char **argv) {
     int i, form, pid, st[4];
     char *p;
     i = 0;
     while (name[i] && name[i] != '/' && name[i] != '.') ++i;
     if (name[i]) return spawn(name, argc, argv);
-    form = 0;
+    if (i > 64) return 0 - 1;
+    form = 0 - 2;
     pid = 0 - 1;
-    while (form < 4 && pid < 0) {
-        if (form == 0) {
-            p = cat(path, "/bin/");
+    while (form < 4 && pid == SPAWN_NOENT) {
+        if (form <= 0) {
+            if (form == 0 - 2) p = cat(path, "/bin/");
+            else if (form == 0 - 1) p = cat(path, "/usr/bin/");
+            else p = cat(path, "/usr/games/bin/");
             cat(p, name);
             if (ustat(path, st) < 0 || st[0] != 2) { ++form; continue; }
         } else if (form == 1) {
@@ -98,7 +103,9 @@ int main(int argc, char **argv) {
     if (i >= argc) return usage();
     unice(0, n);
     if ((pid = run(argv[i], argc - i, argv + i)) < 0) {
-        uprintf("nice: %s: not found\n", argv[i]);
+        if (pid == SPAWN_NOMEM) uprintf("nice: out of memory starting %s\n", argv[i]);
+        else if (pid == SPAWN_NOENT) uprintf("nice: cannot find %s\n", argv[i]);
+        else uprintf("nice: cannot load %s\n", argv[i]);
         return 127;
     }
     return uwait(pid);

@@ -48,6 +48,7 @@ struct wk_env {
     int mods;                         // Shift, Ctrl, Alt as the last key left them
     int desk, face, light, shadow;    // the scheme's colours (Settings)
     int title, title2, ititle, ititle2, sel;
+    int fsans, fbold, fsize;          // the interface's font (wk_font_use): F_SANS's, F_BOLD's, a size step
 };
 // A grin application (compiled with -D WK_IMPORT, src/grin/import.c) has
 // no wk of its own: it reads grin's, through the pointer grin publishes
@@ -77,8 +78,21 @@ enum { C_DARK = 0x000000, C_WHITE = 0xffffff, C_GREEN = 0x00ff00 };
 enum { S_FLAT = 0, S_CLASSIC = 1, S_WIN31 = 2, N_STYLES = 3 };
 #define ui_style (wk.style)
 
-// fonts: monospace, a UI face, and its bold
-enum { F_MONO = 0, F_SANS = 1, F_BOLD = 2 };
+// fonts: monospace, a UI face, and its bold; then the display's other
+// faces (gui.h's GUI_* fonts), for a choice of them
+enum { F_MONO = 0, F_SANS = 1, F_BOLD = 2, F_COURIER = 3, F_LUCIDA = 4,
+       F_VERDANA = 5, F_VERDANA_B = 6, F_SERIF = 7, F_SERIF_B = 8 };
+// The choices offered (draw.c): faces for the interface, which d_text and
+// d_textn then draw F_SANS and F_BOLD in; fixed-width faces for an
+// editor; and sizes, Small, Normal and Large. The interface's size moves
+// F_SANS and F_BOLD a pixel down or up; an editor's is a text grid's.
+enum { WK_FACES = 3, WK_SIZES = 3 };
+char *wk_face_name(int i);            // the interface's faces: "Tahoma", "Verdana", "Georgia"
+char *wk_mono_name(int i);            // the fixed-width faces: "Consolas", "Courier New", "Lucida Console"
+int   wk_mono_font(int i);            // ... as a font for d_textn
+char *wk_size_name(int i);
+void  wk_font_use(int face, int size);  // the interface's face and size, from now on
+void  wk_grid(int size, int *font_size, int *cw, int *ch);   // a text grid's: its font's size, a cell
 // bevel styles
 enum { B_RAISED = 1, B_SUNKEN = 2, B_FIELD = 3, B_PRESSED = 4, B_ETCHED = 5 };
 // mouse events, in client coordinates
@@ -86,10 +100,11 @@ enum { E_DOWN = 1, E_UP = 2, E_MOVE = 3, E_DBL = 4, E_WHEEL = 5 };
 // keys (browser keyCodes) and modifiers
 enum { KEY_BACK = 8, KEY_TAB = 9, KEY_ENTER = 13, KEY_ESC = 27, KEY_PGUP = 33, KEY_PGDN = 34,
        KEY_END = 35, KEY_HOME = 36, KEY_LEFT = 37, KEY_UP = 38, KEY_RIGHT = 39, KEY_DOWN = 40,
-       KEY_DEL = 46, KEY_F2 = 113, KEY_F4 = 115, KEY_F5 = 116 };
+       KEY_INS = 45, KEY_DEL = 46, KEY_F2 = 113, KEY_F3 = 114, KEY_F4 = 115, KEY_F5 = 116 };
 enum { M_SHIFT = 1, M_CTRL = 2, M_ALT = 4 };
-// pointer shapes, GUI_PTR_*'s numbers
-enum { PTR_ARROW = 0, PTR_TEXT = 1, PTR_RESIZE = 2 };
+// pointer shapes, GUI_PTR_*'s numbers (PTR_COLS: a splitter's, left and right;
+// PTR_LOCK: "click to capture", the mouse locked to the display at a click)
+enum { PTR_ARROW = 0, PTR_TEXT = 1, PTR_RESIZE = 2, PTR_LOCK = 8, PTR_COLS = 9 };
 // 16x16 icons (d_icon), which a class names by its kind; the numbers are
 // the C4IX desktop's window kinds
 enum { ICON_TERM = 1, ICON_INFO = 2, ICON_FILES = 3, ICON_TASKS = 4, ICON_NOTE = 5,
@@ -121,7 +136,10 @@ struct wk_class {
 // a menu bar: titles, and for each an array of items ending in 0 ("-" a
 // separator); an item chosen reaches command as WK_CMD(menu, item)
 struct wk_menu { char *title; char **items; };
-enum { WK_CMD_STEP = 256 };
+// an item whose first byte is WK_CHECKED is drawn with a check mark beside
+// it, and without that byte ("-" is a separator)
+enum { WK_CHECKED = 1 };
+enum { WK_CMD_STEP = 256, WK_POPUP = 200 };
 #define WK_CMD(m, i) ((m) * WK_CMD_STEP + (i))
 
 // wk_open's flags
@@ -141,7 +159,14 @@ int   wk_alive(int w);
 void  wk_title(int w, char *s);
 char *wk_get_title(int w);
 void  wk_invalidate(int w, int x, int y, int ww, int hh);   // ww = 0: all of it
+void  wk_invalidate_covered(int w, int x, int y, int ww, int hh);
+                                      // ... part of it that its draw paints every pixel of (a
+                                      // program's frame): when nothing else changed, only it is
+                                      // drawn there, not what is under it or its own frame
 void  wk_menu(int w, struct wk_menu *m, int n);
+void  wk_popup(int w, int x, int y, char **items);          // a menu of its own at (x, y) in the
+                                      // client area (a right click's): ITEMS as a menu bar's, the
+                                      // one chosen reaching command as WK_CMD(WK_POPUP, item)
 int   wk_timer(int w, int id, int ms);                      // every ms (0 stops it); 1 if set
 void  wk_raise(int w);
 int   wk_focus();                     // the window with the keyboard, or 0
@@ -158,9 +183,12 @@ int   wk_now();                       // milliseconds of machine time
 void  wk_msgbox(int owner, int dialog, char *title, char *text, int buttons);
 void  wk_inputbox(int owner, int dialog, char *title, char *prompt, char *buf, int max);
 void  wk_filebox(int owner, int dialog, int save, char *pattern, char *buf, int max);
-                                      // buf: the start folder or name in, the path chosen out
+                                      // buf: the start folder or name in, the path chosen out;
+                                      // pattern: "*", "*.c;*.h", or types and their patterns,
+                                      // "C Source (*.c)|*.c|All Files (*)|*", the first shown first
 
-// the clipboard: text, copied in
+// the clipboard: text, copied in. One for every window: in grin the
+// kit's own memory, so a paste after the copier has gone still has it
 int   wk_clip_set(char *s, int n);    // 1 if it took it
 char *wk_clip_get(int *n);
 
@@ -179,6 +207,7 @@ void d_imgdef(int id, int w, int h, int *px);
 void d_image(int id, int x, int y);
 // w x h 8-bit pixels at src through 256 colours at pal, scaled to dw x dh
 void d_blit8(int x, int y, int w, int h, char *src, int pitch, int *pal, int dw, int dh);
+int  d_damage_within(int x, int y, int w, int h);   // 1 if all that is being redrawn is inside
 int  ui_mix(int a, int b, int t, int n);   // a colour T/N of the way from A to B
 
 // colour schemes (draw.c)
@@ -196,10 +225,46 @@ void ui_hscrollbar(int x, int y, int w, int total, int visible, int left);
 int  ui_hscroll_click(int px, int py, int x, int y, int w, int total, int visible, int left);
                                                // ... and a bar across: ui_scroll_drag(x, y, px)
 int  ui_scroll_active();
+int  ui_scroll_repeat();                        // the last press was an arrow's or the track's: the desktop repeats it
 void ui_scroll_end();
 void ui_field(int x, int y, int w, char *text, int caret, int focused);
 int  ui_field_key(char *text, int max, int *caret, int code, int ch, int mods);
+                                               // ... Ctrl+C copies the whole field, Ctrl+X cuts it,
+                                               // Ctrl+V pastes at the caret (the clipboard's first line)
+// the clipboard's keys, CUA's beside the letters, as Windows 3.1 took
+// both: copy Ctrl+C or Ctrl+Ins, cut Ctrl+X or Shift+Del, paste Ctrl+V
+// or Shift+Ins
+int  ui_key_copy(int code, int ch, int mods);
+int  ui_key_cut(int code, int ch, int mods);
+int  ui_key_paste(int code, int ch, int mods);
 int  ui_field_hit(int px, int x, int w, char *text, int caret);   // the caret for a click
+void ui_check(int x, int y, char *label, int on);  // a check box and its label
+// a splitter: the bar between two panes side by side, dragged across
+void ui_splitter(int x, int y, int w, int h);
+int  ui_split_click(int px, int py, int x, int y, int w, int h, int pos);   // 1: pressed, a drag from POS begun
+int  ui_split_drag(int px);                    // POS as the pointer has moved it, or -1 for no drag
+int  ui_split_active();
+// A find bar, under an editor's text (ui.c): the editor keeps one and does
+// the looking, the bar says what was asked for -- UF_NEXT, UF_PREV,
+// UF_TYPED (the text changed), UF_CLOSE -- and keeps a note of what the
+// last look found.
+enum { UI_FIND_H = 30, UI_FIND_MAX = 64 };
+enum { UF_NONE = 0, UF_NEXT = 1, UF_PREV = 2, UF_TYPED = 3, UF_CLOSE = 4 };
+struct ui_find {
+    char text[UI_FIND_MAX];           // what to find
+    int caret;
+    int on;                           // shown
+    int keys;                         // it has the keyboard, not the text
+    int mcase;                        // Match case
+    char note[64];                    // what the last look found
+    int bad;                          // ... and it was nothing (drawn in red)
+};
+void ui_find_open(struct ui_find *f, char *seed, int n);   // shown, with the keys; SEED (a selection) to find
+void ui_find_draw(struct ui_find *f, int x, int y, int w, int focused);
+int  ui_find_mouse(struct ui_find *f, int ev, int px, int py, int x, int y, int w);   // UF_*, or -1 off it
+int  ui_find_key(struct ui_find *f, int code, int ch, int mods);                      // UF_*
+void ui_find_say(struct ui_find *f, char *note, int bad);
+int  ui_find_at(struct ui_find *f, char *s, int n);       // 1 if what F finds starts at S (N characters there)
 void ui_tabs(int x, int y, char **labels, int n, int sel);
 int  ui_tab_hit(int px, int py, int x, int y, char **labels, int n);
 void ui_group(int x, int y, int w, int h, char *label);
@@ -274,7 +339,9 @@ extern char *notepad_name;            // in its titles ("Notepad"; the desktop's
 extern char *notepad_about;           // its Help > About line
 extern char *notepad_home;            // where Open starts
 extern char *notepad_untitled;        // where Save As offers to put a new document
-extern int notepad_filebox;           // 1: Open and Save As are file boxes (grin's); 0: typed paths
+extern int notepad_filebox;           // 1: Open and Save As are file boxes; 0: typed paths
+extern char *notepad_filter;          // the types the file box offers ("*"; wk_filebox)
+extern char *notepad_cfg;             // where Format's choices are kept (wk_fopen), or 0 for nowhere
 int  wk_clock();                      // the host's time of day, in seconds since midnight
 
 // ---- screen savers (savers.c) ----------------------------------------------
@@ -286,6 +353,7 @@ void saver_start(int which);
 void saver_frame();
 void saver_stop();
 int  saver_frames();
+extern char *saver_marquee;          // what Marquee says (the C4IX desktop's line unless the shell says)
 
 #endif // WINKIT_H
 // wkwin.h -- inside the window kit: the window record, and what its
@@ -371,6 +439,35 @@ void wk_dialog_answer(struct win *d, int yes);   // close a dialog with this ans
 extern struct wk_class wk_msg_class;
 extern struct wk_class wk_input_class;
 extern struct wk_class wk_file_class;
+
+// ---- the file box: dialog.c's, drawn by the look in use (Windows 3.1's
+// there, Windows 95's in look95.c) ----
+enum { FB_MAX = 256, FB_ROWS = 12, FB_ROW = 16 };
+struct fdlg {
+    char *buf;                    // as a message box's (dialog.c)
+    int max;
+    char out[WK_PATH];            // the name typed, then the path chosen
+    int caret;
+    int save;
+    int n, top, sel;              // the folder's entries, the first shown, the one picked
+    char dir[WK_PATH];
+    char filter[WK_PATH];         // the types offered: "label|patterns|label|patterns..."
+    char pattern[WK_NAME];        // the patterns of the one in use, ';' between them
+    int ftype;                    // ... which that is
+    int drop;                     // a drop-down list open (look95.c): 1 the folders, 2 the types
+    int up;                       // the look has an Up button: no ".." among the entries
+    int isdir[FB_MAX];
+    int order[FB_MAX];
+    char names[FB_MAX * WK_NAME];
+};
+char *wk_fb_name(struct fdlg *f, int k);        // the k'th entry shown, folders first
+void wk_fb_list(struct fdlg *f);                // the folder's entries read again
+void wk_fb_enter(struct fdlg *f, char *name);   // into a folder of the one shown, ".." up
+void wk_fb_ok(struct win *d, struct fdlg *f);   // Open or Save: the name typed, or a folder entered
+int  wk_fb_types(struct fdlg *f);               // how many types the filter offers
+void wk_fb_label(struct fdlg *f, int i, char *out, int n);   // type i's label
+void wk_fb_type(struct fdlg *f, int i);         // type i the one shown
+extern struct wk_class wk_file95_class;
 void wk_answer_owner(int owner, int dialog, int result);   // wmcore.c: to the window, or the shell
 #endif
 // textgrid.h -- a VT100 text grid for a window (textgrid.c): what the C4IX
@@ -413,6 +510,11 @@ struct tgrid {
     // window shows (0, the live grid).
     int *sb;
     int sbn, sbhead, view;
+    // A selection (tg_select): from a line and column to a line and column,
+    // the lines numbered from the grid's first (nscr: the rows scrolled off
+    // so far), so it stays on its text as more arrives. sel is 0 for none,
+    // 1 a run of lines, 2 a block.
+    int nscr, sel, sl0, sc0, sl1, sc1, selecting;
 };
 
 extern int tg_pal[256];               // xterm's 256 colours
@@ -431,6 +533,14 @@ void tg_clear_screen(struct tgrid *g);   // Ctrl+L
 void tg_scroll(struct tgrid *g, int rows);   // the scrollback: rows further back (negative: forward)
 void tg_draw(struct tgrid *g, int x, int y, int focused);   // the grid at x, y and its scroll bar
 void tg_mouse(struct tgrid *g, int ev, int x, int y);       // its scroll bar (E_WHEEL: y the steps)
+// The selection, made with the mouse on the grid (x, y inside its sunken
+// edge): a press starts one, a drag takes it on, and with block it is a
+// rectangle rather than a run of lines. A click with no drag drops it.
+void tg_select(struct tgrid *g, int ev, int x, int y, int block);
+void tg_select_all(struct tgrid *g);  // the scrollback and the screen
+void tg_unselect(struct tgrid *g);
+int  tg_copy(struct tgrid *g, int all);   // the selection (or, all, everything) onto the
+                                          // clipboard, a line a row; 0 if nothing was
 // desktop.h -- what the desktop's modules share. docs/c4ix-desktop.md.
 //
 // The desktop is one C4IX task, the C4IX shell over the window kit
@@ -447,6 +557,9 @@ void tg_mouse(struct tgrid *g, int ev, int x, int y);       // its scroll bar (E
 //   taskmgr.c   System Monitor
 //   apps.c      About and Settings
 //   edit.c      Editor: the IDE, a VIM-mode editor that builds with b4ke
+//   hl.c        the IDE's syntax colouring
+//   explore.c   the IDE's Code tab: the code a C file compiles to, or a
+//               compiled file's, with its source
 //   wall.c      the desktop's picture
 //
 // Only the kit and shell.c touch the display. Everything else draws
@@ -457,7 +570,7 @@ void tg_mouse(struct tgrid *g, int ev, int x, int y);       // its scroll bar (E
 #include "c4ix_user.h"
 #include "wkwin.h"
 
-enum { TASK_H = 30, SIGTERM = 15 };
+enum { TASK_H = 30, SIGINT = 2, SIGTERM = 15 };
 
 // window kinds (the kit's icons have the same numbers)
 enum { K_TERM = 1, K_ABOUT = 2, K_FILES = 3, K_TASKS = 4, K_NOTE = 5, K_CALC = 6,
@@ -468,6 +581,7 @@ enum { A_NONE = 0, A_DELETE = 1, A_RENAME = 2, A_NEWDIR = 3, A_OPEN = 4, A_SAVEA
        A_RUN = 6, A_ENDPROC = 7 };
 
 #define wm_mods (wk.mods)     // the modifiers held now, for a click
+extern int wm_button;         // the button of the last press: 0 the left, 2 the right (tools.c)
 
 // ---- tools.c: windows as the tools see them (struct win, wkwin.h) ----
 int  win_open(int kind, char *title, int w, int h, int size);   // size: the tool's state
@@ -477,16 +591,20 @@ void win_raise(int i);
 int  win_focused();
 void mark_dirty();                    // the whole scene is to be drawn again
 void mark_win_dirty(struct win *w);   // only this window's contents changed
+void mark_frame();                    // a program's framebuffer frame waits: drawn at once (shell.c)
 int  now_ms();
 void msgbox(struct win *owner, char *title, char *text, int yesno, int action);
 void inputbox(struct win *owner, char *title, char *prompt, char *initial, int action);
 char *dialog_text();                  // the text an input dialog was answered with
-void run_command(char *cmd);          // a new Terminal running cmd
+void run_command(char *cmd);          // a new Terminal running cmd, or a window game's own window
+void desk_window_app(char *cmd);      // cmd's program is a game that plays in a window of its own
+int  desk_which(char *cmd, char *path);   // the path of cmd's program, as the shell finds it; 0 none
 void launch(int kind);                // a new window of that kind (the Go menu, the icons)
 struct wk_class *kind_class(int kind);
 
 // ---- the tools: each window kind's hooks (tools.c calls these) ----
 int  term_open(char *cmd);
+int  term_run(char *cmd);             // cmd in a window that is only its canvas, no shell
 void term_draw(struct win *w, int ox, int oy, int cw, int ch, int focused);
 void term_key(struct win *w, int code, int ch, int mods);
 void term_keyup(struct win *w, int code, int ch, int mods);
@@ -494,6 +612,11 @@ void term_drawn(struct win *w);
 void term_tick(struct win *w);
 void term_close(struct win *w);
 void term_mouse(struct win *w, int ev, int x, int y, int cw, int ch);
+int  term_pointer(struct win *w, int x, int y, int cw, int ch);   // PTR_LOCK over a canvas that asked (L 1)
+int  term_lock_event(int *ev);        // a display event the locked mouse's (shell.c, before the kit): 1 taken
+void term_lock_tick();                // each pass: the lock let go once its canvas no longer has it
+void desk_unlock();                   // shell.c: the display lets the mouse go, the pointer an arrow
+void term_command(struct win *w, int menu, int item);   // Edit: Copy, Paste, Select All, Copy All
 
 int  files_open(char *path);
 void files_draw(struct win *w, int ox, int oy, int cw, int ch, int focused);
@@ -501,6 +624,7 @@ void files_mouse(struct win *w, int ev, int x, int y, int cw, int ch);
 void files_key(struct win *w, int code, int ch, int mods);
 void files_command(struct win *w, int menu, int item);
 void files_answer(struct win *w, int action, int yes);
+int  files_pointer(struct win *w, int x, int y, int cw, int ch);   // PTR_COLS over the tree's splitter
 
 int  tasks_open();
 int  tasks_open_perf();           // System Monitor on its Performance tab
@@ -522,6 +646,33 @@ void edit_command(struct win *w, int menu, int item);
 void edit_answer(struct win *w, int action, int yes);
 void edit_tick(struct win *w);
 void edit_close(struct win *w);
+
+// edit.c's text grid, from IDE Settings' font: a cell's width and height,
+// the font's size and face (the Code tab draws in it too)
+extern int ide_cw, ide_ch, ide_fs, ide_face;
+
+// hl.c: the IDE's syntax colouring. The languages, and what a character is.
+enum { L_TEXT = 0, L_C = 1, L_JS = 2, L_LISP = 3, L_FORTH = 4, L_SH = 5, L_B4K = 6, HL_MAX = 1024 };
+enum { HC_TEXT = 0, HC_KW = 1, HC_TYPE = 2, HC_STR = 3, HC_COM = 4, HC_NUM = 5, HC_PRE = 6 };
+int  hl_lang(char *path);                        // L_* by the file's name
+int  hl_inwords(char *s, int n, char *list);     // S[0..N) one of LIST's words (" a b ")
+int  hl_line(char *s, int n, int st, int lang);  // colour a line; the C comment state after it
+int  hl_at(int i);                               // HC_* of the line's character I
+
+// explore.c: the IDE's Code tab, which edit.c holds as an opaque int *
+int *xp_new();
+void xp_free(int *x);
+int  xp_compile(int *x, char *path, char *dir);   // cc -g -c PATH in the background; 0 if it cannot
+int  xp_load(int *x, char *path, char *dir);      // the compiled file PATH itself; 0 if it is not one
+int  xp_tick(int *x);                            // 1 when the compile ended and the tab changed
+int  xp_busy(int *x);
+int  xp_opt(int *x);                             // 1 if it compiles with -O
+void xp_cursor(int *x, int line);                // the cursor on LINE (1-based): its function
+int  xp_band(int *x, int line);                  // the band beside LINE, or -1
+void xp_draw(int *x, int ox, int oy, int cw, int ch, int *cols, int modified, int focused);
+int  xp_mouse(int *x, int ev, int px, int py, int cw, int ch);   // 1 used, 0 not, 2 a line (xp_goto), -1, -2
+int  xp_key(int *x, int code, int ch, int mods);                 // 1 used, 0 not, 2 a line (xp_goto)
+int  xp_goto(int *x, char *path);                // the line asked for, its file into PATH (128)
 
 void about_open();
 void about_draw(struct win *w, int ox, int oy, int cw, int ch, int focused);
@@ -546,6 +697,24 @@ void theme_set_saver(int which, int wait);   // the screen saver and its minutes
 void theme_set_style(int style);   // S_FLAT, S_CLASSIC or S_WIN31
 void saver_preview();              // the chosen saver now (Settings)
 int  theme_swatch(int i);          // the desktop colours Settings offers, 0..7
+// Files' order: by one of these, SORT_* * 2, plus 1 for descending; folders first either way
+enum { SORT_NAME = 0, SORT_TYPE = 1, SORT_SIZE = 2, SORT_DATE = 3, N_SORTS = 4 };
+int  theme_sort();
+void theme_set_sort(int sort);
+// Files' folder tree: its width, as its splitter was last left
+int  theme_tree();
+void theme_set_tree(int w);
+// the interface's font: one of the kit's faces and sizes (WK_FACES, WK_SIZES)
+int  theme_font();
+int  theme_fsize();
+void theme_set_font(int face, int size);
+
+// the screen's size (Settings): one of the sizes offered, asked of the
+// display at once and when the desktop starts, and remembered with the rest
+int  display_count();
+char *display_name(int i);         // "800x600"
+int  display_cur();                // the one in use
+void display_set(int i);
 
 // ---- wall.c: the desktop's picture ----
 int  wall_load(char *path);
@@ -556,6 +725,7 @@ void wall_resize();                           // the screen changed size: the ti
 // Text Editor are the window kit's: calc.c and notepad.c in src/winkit.)
 
 #include "desktop.h"
+#include "c4ix_accel.h"
 
 // ---- About ---------------------------------------------------------------------------------
 
@@ -584,14 +754,23 @@ void about_draw(struct win *w, int ox, int oy, int cw, int ch, int focused) {
     d_text(ox + 68, oy + 116, C_SHADOW, F_SANS, "Enter or Esc closes this window.");
 }
 
-// ---- Settings: the colour scheme, the desktop, the screen saver and the look ---------
+// ---- Settings: the scheme, the desktop, the screen's size, the saver, the look, the font ----
 //
 // Display Properties, cut down: a list of schemes and a row of desktop
 // colours, each applied at once (theme_set, which also remembers them in
-// /etc/desktop.cfg), beside a preview drawn in the colours in use.
+// /etc/desktop.cfg), beside a preview drawn in the colours in use. The
+// screen's size too, which the display takes at once (display_set). And
+// in a third column the interface's font, its face and size, with a
+// sample: every window's titles, menus and dialogs are drawn in it.
+// Under it, C4IX's accelerators (c4ix_accel.h): the machine's switch for
+// them, turned at once; the page keeps what it was turned to for its
+// next boot (libjs/web/app.js), and a machine without them says so.
 
 static char *dflt_label;
 static char sbuf[16];
+// the second column's width, and where the third starts and how wide it is
+// and where the accelerators' group is, under the font's sample
+enum { SET_COL = 222, SET_X3 = 432, SET_COL3 = 146, SET_ACC = 250 };
 
 int settings_open() {
     int k;
@@ -599,7 +778,7 @@ int settings_open() {
     w = win_first();
     while (w) { if (w->used && w->kind == K_SETTINGS) { win_raise(w->id); return w->id; } w = w->next; }
     dflt_label = "Defaults";
-    return win_open(K_SETTINGS, "Settings", 440, 430, 0);
+    return win_open(K_SETTINGS, "Settings", 590, 450, 0);
 }
 
 void settings_draw(struct win *w, int ox, int oy, int cw, int ch, int focused) {
@@ -625,10 +804,15 @@ void settings_draw(struct win *w, int ox, int oy, int cw, int ch, int focused) {
         if (sel) d_recto(x - 2, y + 58, 20, 20, C_DARK);
         ++i;
     }
+    // the screen's size: two to a row
+    y = y + 102;
+    ui_group(ox + 8, y, 180, 60, "Screen size");
+    i = 0;
+    while (i < display_count()) { ui_radio(ox + 18 + (i % 2) * 84, y + 16 + (i / 2) * 20, display_name(i), i == display_cur()); ++i; }
     // the preview: the desktop, an inactive window, an active one
     x = ox + 200; y = oy + 14;
-    d_rect(x, y, cw - 210, 170, C_DESK);
-    d_bevel(x, y, cw - 210, 170, B_SUNKEN);
+    d_rect(x, y, SET_COL, 170, C_DESK);
+    d_bevel(x, y, SET_COL, 170, B_SUNKEN);
     d_rect(x + 12, y + 14, 150, 70, C_FACE); d_bevel(x + 12, y + 14, 150, 70, B_RAISED);
     d_rect(x + 15, y + 17, 144, 16, C_ITITLE);
     // its title in the scheme's dark when the bar is light, as the windows' (wm.c)
@@ -645,7 +829,7 @@ void settings_draw(struct win *w, int ox, int oy, int cw, int ch, int focused) {
     // the screen saver: which, after how long, and a look at it now
     x = ox + 200; y = oy + 192;
     n = saver_count();
-    ui_group(x, y, cw - 210, 26 + n * 18, "Screen saver");
+    ui_group(x, y, SET_COL, 26 + n * 18, "Screen saver");
     sel = theme_saver();
     i = 0;
     while (i < n) { ui_radio(x + 10, y + 16 + i * 18, saver_name(i), i == sel); ++i; }
@@ -658,10 +842,33 @@ void settings_draw(struct win *w, int ox, int oy, int cw, int ch, int focused) {
     ui_button(x + 192, y + 62, 22, 20, "+", 0, 0);
     // the look
     y = oy + 192 + 26 + n * 18 + 8;
-    ui_group(x, y, cw - 210, 44, "Look");
+    ui_group(x, y, SET_COL, 44, "Look");
     ui_radio(x + 10, y + 18, "Flat", ui_style == S_FLAT);
     ui_radio(x + 70, y + 18, "Classic", ui_style == S_CLASSIC);
     ui_radio(x + 140, y + 18, "Windows 3.1", ui_style == S_WIN31);
+    // the font: its face, its size, and a sample in it
+    x = ox + SET_X3; y = oy + 8;
+    ui_group(x, y, SET_COL3, 20 + WK_FACES * 20, "Font");
+    i = 0;
+    while (i < WK_FACES) { ui_radio(x + 10, y + 18 + i * 20, wk_face_name(i), i == theme_font()); ++i; }
+    y = y + 28 + WK_FACES * 20;
+    ui_group(x, y, SET_COL3, 20 + WK_SIZES * 20, "Font size");
+    i = 0;
+    while (i < WK_SIZES) { ui_radio(x + 10, y + 18 + i * 20, wk_size_name(i), i == theme_fsize()); ++i; }
+    y = y + 28 + WK_SIZES * 20;
+    d_rect(x, y, SET_COL3, 56, C_WHITE);
+    d_bevel(x, y, SET_COL3, 56, B_SUNKEN);
+    d_text(x + 8, y + 8, C_DARK, F_BOLD, "Window Title");
+    d_text(x + 8, y + 30, C_DARK, F_SANS, "The quick brown fox");
+    // the accelerators
+    y = oy + SET_ACC;
+    n = cx_os(0 - 1);
+    ui_group(x, y, SET_COL3, 64, "Accelerators");
+    if (n & 2) {
+        ui_radio(x + 10, y + 18, "On", n & 1);
+        ui_radio(x + 70, y + 18, "Off", !(n & 1));
+        d_text(x + 10, y + 40, C_SHADOW, F_SANS, "unpacking and CRC");
+    } else d_text(x + 10, y + 24, C_SHADOW, F_SANS, "Not on this machine");
     ui_button(ox + 8, oy + ch - 34, 86, 24, dflt_label, 0, 0);
 }
 
@@ -682,6 +889,12 @@ void settings_mouse(struct win *w, int ev, int x, int y, int cw, int ch) {
         if (ui_hit(x, y, 16 + i * 20, sy + 58, 20, 20)) { theme_set(theme_scheme(), theme_swatch(i)); return; }
         ++i;
     }
+    // the screen's size (settings_draw)
+    i = 0;
+    while (i < display_count()) {
+        if (ui_hit(x, y, 14 + (i % 2) * 84, sy + 102 + 14 + (i / 2) * 20, 80, 18)) { display_set(i); return; }
+        ++i;
+    }
     // the screen saver group (settings_draw)
     i = 0;
     while (i < saver_count()) {
@@ -696,7 +909,18 @@ void settings_mouse(struct win *w, int ev, int x, int y, int cw, int ch) {
     if (ui_hit(x, y, 206, sy - 2, 60, 16)) { theme_set_style(S_FLAT); return; }
     if (ui_hit(x, y, 266, sy - 2, 66, 16)) { theme_set_style(S_CLASSIC); return; }
     if (ui_hit(x, y, 336, sy - 2, 90, 16)) { theme_set_style(S_WIN31); return; }
-    if (ui_hit(x, y, 8, ch - 34, 86, 24)) { theme_set(theme_count() - 1, 0 - 1); theme_set_wall(1); theme_set_style(S_FLAT); }
+    // the font's face and size (settings_draw): the third column
+    i = 0;
+    while (i < WK_FACES) { if (ui_hit(x, y, SET_X3 + 4, 24 + i * 20, SET_COL3 - 8, 18)) { theme_set_font(i, theme_fsize()); return; } ++i; }
+    sy = 8 + 28 + WK_FACES * 20;
+    i = 0;
+    while (i < WK_SIZES) { if (ui_hit(x, y, SET_X3 + 4, sy + 16 + i * 20, SET_COL3 - 8, 18)) { theme_set_font(theme_font(), i); return; } ++i; }
+    // the accelerators (settings_draw), where the machine has them
+    if (cx_os(0 - 1) & 2) {
+        if (ui_hit(x, y, SET_X3 + 6, SET_ACC + 16, 56, 18)) { cx_os(1); mark_win_dirty(w); return; }
+        if (ui_hit(x, y, SET_X3 + 66, SET_ACC + 16, 60, 18)) { cx_os(0); mark_win_dirty(w); return; }
+    }
+    if (ui_hit(x, y, 8, ch - 34, 86, 24)) { theme_set(theme_count() - 1, 0 - 1); theme_set_wall(1); theme_set_style(S_FLAT); theme_set_font(0, 1); }
 }
 
 // Up and Down walk the schemes; Esc or Enter closes
@@ -708,8 +932,8 @@ void settings_key(struct win *w, int code, int ch, int mods) {
     else if (code == KEY_DOWN && s < theme_count() - 1) { theme_set(s + 1, theme_bg()); theme_set_wall(w2); }
     else if (code == KEY_ESC || code == KEY_ENTER) win_close(win_index(w));
 }
-// edit.c -- Editor, the desktop's IDE: a text editor with a VIM mode
-// that builds what it edits. docs/c4ix-desktop.md.
+// edit.c -- the IDE: a text editor, modeless or with VIM's modes, that
+// builds what it edits. docs/c4ix-desktop.md.
 //
 // The text is an array of lines, each its own allocation, so a file is
 // as big as memory allows and an edit moves one line, not the file.
@@ -718,8 +942,14 @@ void settings_key(struct win *w, int code, int ch, int mods) {
 // undo is a snapshot of the whole text before each change, which is
 // simple and, for the files this machine holds, cheap.
 //
-// VIM mode (the default; ":set novim" turns it off, for a plain editor in
-// which typing always types and Esc opens the command line):
+// Two ways of typing, chosen in its Settings (View > Settings, kept in
+// /etc/ide.cfg with the colour scheme and the font). Traditional, the default, is Text
+// Editor's: typing always types, Shift with the moving keys or a drag of
+// the mouse selects, and typing replaces the selection; Ctrl+X, C and V
+// (and Shift+Del, Ctrl+Ins, Shift+Ins) cut, copy and paste, Ctrl+A selects
+// everything, Ctrl+Z and Ctrl+Y undo and redo, and Esc opens the command
+// line below (:w, :make and the rest). VIM mode (":set vim" for one
+// window, ":set novim" back):
 //   Normal   h j k l w b e W B E 0 ^ $ gg G { } % f t F T ; ,  with counts
 //            i a I A o O  x X D C s S r J ~  p P  u Ctrl-R  .  n N *
 //            d c y > <  with any motion, doubled for lines, and iw aw
@@ -741,31 +971,100 @@ void settings_key(struct win *w, int code, int ch, int mods) {
 // runs what was built in a new Terminal: the .c file's image, or
 // the command a BUILD.B4K names with "SET RUN command".
 //
-// Long lines scroll across (a bar under the text), or, with :set wrap (View
-// > Word Wrap), fold onto the rows below; j and k still move by line. The
+// Long lines fold onto the rows below (Word Wrap, on to start with), or,
+// with :set nowrap (View > Word Wrap), scroll across under a bar; j and k
+// move by line either way. The
 // build pane scrolls both ways, and its Cancel button (or Build > Cancel)
 // stops a build: what b4ke is running first, then b4ke.
 //
 // Files. A pane down the left is the disk as a tree, closed folders to
 // start with: a click opens or closes a folder, and opens a file in the
 // editor. Opening a file opens the folders on the way to it. Ctrl+B,
-// View > Files or :Ex shows and hides it.
+// View > Files or :Ex shows and hides it. The bar on its right is a
+// splitter: dragged, it sizes the pane, a size every IDE window opens
+// with after that (kept in /etc/ide.cfg).
+//
+// Find. Ctrl+F (Edit > Find..., in either way of typing) opens the kit's
+// find bar under the text: Enter, F3 or Next finds the next match after
+// the selection, Shift+Enter, Shift+F3 or Previous the one before, round
+// past the end or the top with a note that it went round; the match is
+// selected (VIM's Visual, in VIM mode) and scrolled to. Match case or not.
+//
+// Scrolling. The wheel and the scroll bar move the view by lines, and the
+// cursor with it when it would leave the view; the last line comes to the
+// bottom however its lines wrap. The colouring's state at each line's
+// start is kept as far as it was worked out, so the view moves up as
+// cheaply as down.
+//
+// Code. View > Code (F7, :code) opens a Code tab beside the text's, in
+// the text's place: explore.c, a cut-down Code Explorer, with the
+// functions down its left and the code a .c file compiles to, its source
+// lines between the instructions. It compiles the saved file with cc -g,
+// again at each save, and shows the function the cursor is in; typing
+// finds another by name, a double click on a call goes to the callee and
+// on a line back to it in the text, and Esc or F7 goes back to the text
+// (whose gutter is banded where that function has code). Its -O button
+// compiles with and without -O. A compiled file -- anything with C4R's
+// header, a program, an object or a library -- opens in the Code tab
+// alone, as it is, its sources read where its map says they are; F6 runs
+// a program.
 //
 // Colours. The text is coloured by what the file's name says it is: C and
 // headers, JavaScript, Lisp, Forth, shell scripts and Makefiles, and B4KE
-// build files. :syntax off (or View > Syntax Colouring) turns it off.
+// build files. :syntax off (or View > Syntax Colouring) turns it off. The
+// colours are a scheme's, chosen in Settings: Blue, after VIM's `blue`
+// (the default), or Classic, black on white.
+//
+// Edit's Cut, Copy and Paste go through the desktop's clipboard (the
+// kit's, which every window shares): in VIM mode they take a Visual
+// selection. Any other file that looks binary -- by its name (.wad, .tgz
+// and the like) or a NUL in its first bytes -- is opened only once asked.
 
 #include "desktop.h"
 
-enum { ECW = 7, ECH = 15, EFONT = 12, UNDO_MAX = 32, BROWS = 8, BLOG_MAX = 300,
-       ERR_MAX = 100, REC_MAX = 3000, KEY_F4 = 115, KEY_F6 = 117, KEY_F8 = 119 };
+enum { UNDO_MAX = 32, BROWS = 8, BLOG_MAX = 300,
+       ERR_MAX = 100, REC_MAX = 3000, KEY_F4 = 115, KEY_F6 = 117, KEY_F7 = 118, KEY_F8 = 119 };
+// The text grid: a cell's width and height, the font's size and face.
+// Settings' font sets them (the kit's grids, wk_grid), for every IDE
+// window and its Code tab (explore.c)
+int ide_cw = 7;
+int ide_ch = 15;
+int ide_fs = 12;
+int ide_face = F_MONO;
+#define ECW ide_cw
+#define ECH ide_ch
+#define EFONT ide_fs
+#define EFACE ide_face
+// the tabs over the text, when the Code tab is open: their height
+enum { TABH = 24 };
 // the file pane: its width, its header, a row; a node's flags; how many
 // entries of one folder it lists
-enum { FW = 180, FHDR = 20, FROW = 16, F_DIR = 1, F_OPEN = 2, F_KIDS = 400, FNAME = 64 };
-// the languages it colours, and the colours
-enum { L_TEXT = 0, L_C = 1, L_JS = 2, L_LISP = 3, L_FORTH = 4, L_SH = 5, L_B4K = 6, HL_MAX = 1024 };
-enum { HC_KW = 0x0000b0, HC_TYPE = 0x007878, HC_STR = 0xa01818, HC_COM = 0x2a8a2a, HC_NUM = 0x905000, HC_PRE = 0x8020a0 };
+enum { FW = 180, SPW = 5, FMIN = 100, FHDR = 20, FROW = 16, F_DIR = 1, F_OPEN = 2, F_KIDS = 400, FNAME = 64 };
+// the languages it colours, and what each character is (desktop.h, hl.c):
+// the scheme's colour for it is ec[that] (below)
 enum { M_NORMAL = 0, M_INSERT = 1, M_VISUAL = 2, M_VLINE = 3, M_CMD = 4 };
+// Edit's items, and the answer this window asks for itself
+enum { E_CUT = 0, E_COPY = 1, E_PASTE = 2, E_ALL = 4, E_FIND = 6, E_FNEXT = 7, E_FPREV = 8 };
+enum { A_BINARY = 40 };
+
+// The colour schemes: the text's colours by HC_*, then the rest. A gutter
+// number colour of SHADOW is the desktop scheme's shadow.
+enum { SC_BG = 7, SC_GUT = 8, SC_GUTFG = 9, SC_SEL = 10, SC_TILDE = 11, SC_CUR = 12, SC_CURFG = 13, SC_N = 14,
+       N_SCHEMES = 2, SHADOW = 0x1000000 };
+static char *scheme_names[N_SCHEMES] = { "Blue (after VIM's blue)", "Classic (black on white)" };
+static int scheme_cols[N_SCHEMES * SC_N] = {
+    // Blue: VIM's `blue`, gold on dark blue
+    0xffd700, 0xffffff, 0x87d7ff, 0x87ffaf, 0xd7d7af, 0xff87af, 0x87ffff,
+    0x000087, 0x00005f, 0xffff87, 0x5f87d7, 0x5f87ff, 0xffd700, 0x000087,
+    // Classic: the IDE's first colours
+    0x000000, 0x0000b0, 0x007878, 0xa01818, 0x2a8a2a, 0x905000, 0x8020a0,
+    0xffffff, 0xe8e8e8, SHADOW, 0xa8c8ff, 0x6060c0, 0x000000, 0xffffff };
+// Settings: the scheme, the input mode (VIM's or not) and the font's
+// face and size, for every IDE window, kept in /etc/ide.cfg
+static int ide_scheme, ide_vim, ide_loaded, ide_mono;
+static int ide_size = 1;
+static int ide_fw = FW;                // the file pane's width (its splitter), for each window opened
+static int *ec;                       // the scheme in use: ec[HC_KW] and the rest
 
 struct edit {
     char path[128];
@@ -793,21 +1092,33 @@ struct edit {
     char **fpath; int *fdepth; int *fflag;         // the file pane: a node's path, depth, F_ flags
     int fn, fcap, ftop, fshown, ffollow;
     int hver, nosyn;                               // a count of changes; colouring off
-    int hl_line, hl_ver, hl_lang, hl_state;        // the colouring state at the top, cached
+    int *hls; int hlsn, hlscap, hl_lang;           // the colouring's state at each line's start, known for the first hlsn
     int wrap;                                      // long lines fold onto the rows below
     int lcx, lcy;                                  // the cursor at the last draw: the view follows it when it moves
     int tah, ph, hb, maxw;                         // the text area's height, the build pane's, a bar across, the longest line
     int bleft, bmaxw, bcols, bcancel;              // the build pane across; a build being cancelled
     int fleft;                                     // the file pane across, in 6-pixel steps
+    int tsel, tlast;                               // Traditional: a selection from (vy, vx); the last key typed text
+    int drag;                                      // the mouse is selecting
+    char ask[WK_PATH];                             // a file box's path, in and out
+    char pend[128];                                // a binary file waiting to be opened, once asked
+    int *xp; int xshown, xtab, xobj;               // the Code tab (explore.c): open, in front; a compiled file, shown alone
+    int fw, fwx, fdrag;                            // the file pane's width: chosen, as drawn; its splitter dragged
+    int vis;                                       // the scroll bar's lines at once: the text's less the last top line
+    int fh;                                        // the find bar's height as drawn (0: closed)
+    struct ui_find fb;                             // the find bar
 };
 
 static struct edit *E(struct win *w) { return (struct edit *)w->st; }
 static char sb[512];
-static struct wk_menu edit_menus[4];
+static struct wk_menu edit_menus[5];
 static char *edit_file_items[7];
+static char *edit_edit_items[10];
 static char *edit_build_items[7];
-static char *edit_view_items[4];
+static char *edit_view_items[7];
 static char *edit_help_items[2];
+// what Open and Save As offer: the file box's types
+static char *ide_filter = "All Files (*)|*|C Source (*.c;*.h)|*.c;*.h|Build Files (*.b4k)|*.b4k|Scripts (*.sh;*.js;*.lisp;*.fs)|*.sh;*.js;*.mjs;*.lisp;*.scm;*.fs;*.f;*.4th|Text (*.txt;*.md)|*.txt;*.md";
 
 static int e_isspace(int c) { return c == ' ' || c == 9 || c == 10 || c == 13; }
 static int e_isword(int c) {
@@ -823,6 +1134,14 @@ static int e_class(int c, int big) {
 static void e_say(struct edit *e, char *s) { ui_cpy(e->msg, s); }
 
 // ---- lines -------------------------------------------------------------------------
+
+// Line Y changed: the file is modified, and the colouring's state after
+// Y has to be worked out again
+static void e_touched(struct edit *e, int y) {
+    e->modified = 1; e->changed = 1; ++e->hver;
+    if (y < 0) y = 0;
+    if (e->hlsn > y + 1) e->hlsn = y + 1;
+}
 
 static void e_lines_reserve(struct edit *e, int need) {
     char **nln;
@@ -866,7 +1185,7 @@ static void e_insline(struct edit *e, int at, char *s, int n) {
     e->len[at] = n;
     e->cap[at] = c;
     ++e->nl;
-    e->modified = 1; e->changed = 1; ++e->hver;
+    e_touched(e, at);
 }
 
 static void e_delline(struct edit *e, int at) {
@@ -877,7 +1196,7 @@ static void e_delline(struct edit *e, int at) {
     while (i < e->nl - 1) { e->ln[i] = e->ln[i + 1]; e->len[i] = e->len[i + 1]; e->cap[i] = e->cap[i + 1]; ++i; }
     --e->nl;
     if (e->nl == 0) e_insline(e, 0, "", 0);
-    e->modified = 1; e->changed = 1; ++e->hver;
+    e_touched(e, at);
 }
 
 static void e_clear(struct edit *e) {
@@ -885,6 +1204,7 @@ static void e_clear(struct edit *e) {
     i = 0;
     while (i < e->nl) { free(e->ln[i]); ++i; }
     e->nl = 0;
+    e->hlsn = 0;
 }
 
 // The text, split into lines; a final newline makes no empty line after it.
@@ -972,7 +1292,7 @@ static void e_delrange(struct edit *e, int y0, int x0, int y1, int x1) {
     e->len[y0] = x0 + tail;
     k = y1;
     while (k > y0) { e_delline(e, y0 + 1); --k; }
-    e->modified = 1; e->changed = 1; ++e->hver;
+    e_touched(e, y0);
 }
 
 static int e_ry, e_rx;    // where e_instext left off
@@ -981,6 +1301,7 @@ static int e_ry, e_rx;    // where e_instext left off
 static void e_instext(struct edit *e, int y, int x, char *s, int n) {
     int i, start, tail;
     char *t;
+    e_touched(e, y);
     if (x > e->len[y]) x = e->len[y];
     // cut the rest of the line off, append the pieces, put it back
     tail = e->len[y] - x;
@@ -1004,7 +1325,6 @@ static void e_instext(struct edit *e, int y, int x, char *s, int n) {
     if (tail > 0) memcpy(e->ln[y] + e->len[y], t, tail);
     e->len[y] = e->len[y] + tail;
     free(t);
-    e->modified = 1; e->changed = 1; ++e->hver;
 }
 
 static void e_inschar(struct edit *e, int c) {
@@ -1066,7 +1386,13 @@ static void e_undo(struct edit *e, int redo) {
 // ---- files ---------------------------------------------------------------------------
 
 static void f_reveal(struct edit *e, char *path);
+static void e_findbar(struct win *w, int dir, int here);
+static void e_find_open(struct win *w);
+static void e_find_act(struct win *w, int a);
+static void ide_save();
+static void x_compile(struct edit *e);
 static void f_add(struct edit *e, char *path);
+static void e_dirname(char *path, char *out);
 
 static void e_retitle(struct win *w) {
     struct edit *e;
@@ -1078,7 +1404,7 @@ static void e_retitle(struct win *w) {
         ui_cpy(sb, e->path + k);
     } else ui_cpy(sb, "Untitled");
     if (e->modified) ui_cat(sb, " *");
-    ui_cat(sb, " - Editor");
+    ui_cat(sb, " - IDE");
     win_title(w, sb);
 }
 
@@ -1098,7 +1424,8 @@ static int e_load(struct edit *e, char *path) {
     uclose(fd);
     e_settext(e, b, n);
     free(b);
-    ui_cpy(e->path, path);
+    if (e->xobj) { e->xobj = 0; e->xshown = 0; e->xtab = 0; }   // text again, after a compiled file
+    ui_ncpy(e->path, path, 128);
     e->cy = 0; e->cx = 0; e->want = 0; e->top = 0; e->left = 0;
     e->modified = 0;
     while (e->un > 0) { --e->un; free(e->utext[e->un]); }
@@ -1111,13 +1438,14 @@ static int e_save(struct edit *e, char *path) {
     int fd, r, n;
     char *t;
     if (!path[0]) { e_say(e, "No file name"); return 0; }
+    if (e->xobj) { e_say(e, "A compiled file is shown, not text: there is nothing to save"); return 0; }
     if ((fd = uopen(path, O_WR + O_CREATE + O_TRUNCATE)) < 0) { e_say(e, "Cannot write that file"); return 0; }
     t = e_gettext(e, &n);
     r = n > 0 ? write(fd, t, n) : 0;
     uclose(fd);
     free(t);
     if (r != n) { e_say(e, "Write failed"); return 0; }
-    if (path != e->path) ui_cpy(e->path, path);
+    if (path != e->path) ui_ncpy(e->path, path, 128);
     e->modified = 0;
     ui_cpy(e->msg, "\"");
     ui_cat(e->msg, path);
@@ -1126,6 +1454,75 @@ static int e_save(struct edit *e, char *path) {
     ui_cat(e->msg, " lines");
     f_add(e, e->path);
     f_reveal(e, e->path);
+    x_compile(e);
+    return 1;
+}
+
+// Binary files, by their names' ends; then any file with a NUL in its
+// first bytes, which text never has.
+static char *bin_ext = " .c4r .c4o .c4l .c4s .c4m .tgz .tar .gz .zip .z .wad .wl1 .wl6 .sod .rtl .rts .grp .pak .bin .img .vfs .png .jpg .gif .bmp .ico .wav .mp3 .ogg .mid .voc .exe .com .o .a .so ";
+static int e_binary(char *p) {
+    int i, k, fd, n;
+    char ext[12];
+    k = ui_len(p);
+    i = k;
+    while (i > 0 && p[i - 1] != '.' && p[i - 1] != '/') --i;
+    if (i > 0 && p[i - 1] == '.' && k - i + 1 < 12) {
+        n = 0;
+        while (i - 1 + n < k) { ext[n] = p[i - 1 + n]; if (ext[n] >= 'A' && ext[n] <= 'Z') ext[n] = ext[n] + 32; ++n; }
+        if (hl_inwords(ext, n, bin_ext)) return 1;
+    }
+    if ((fd = uopen(p, O_RD)) < 0) return 0;
+    n = uread(fd, sb, 512);
+    uclose(fd);
+    i = 0;
+    while (i < n) { if (!sb[i]) return 1; ++i; }
+    return 0;
+}
+
+// A compiled file: C4R's header, whatever its name
+static int e_isobj(char *p) {
+    int fd, n;
+    if ((fd = uopen(p, O_RD)) < 0) return 0;
+    n = uread(fd, sb, 4);
+    uclose(fd);
+    return n == 4 && sb[0] == 'C' && sb[1] == '4' && sb[2] == 'R';
+}
+// ... into the Code tab alone, as it is: the text is put away
+static int e_open_obj(struct win *w, char *path) {
+    struct edit *e;
+    char dir[128];
+    e = E(w);
+    if (!e->xp) e->xp = xp_new();
+    e_settext(e, "", 0);
+    while (e->un > 0) { --e->un; free(e->utext[e->un]); }
+    e_redo_clear(e);
+    ui_ncpy(e->path, path, 128);
+    e->cy = 0; e->cx = 0; e->want = 0; e->top = 0; e->left = 0; e->modified = 0; e->tsel = 0;
+    e->xobj = 1; e->xshown = 1; e->xtab = 1;
+    e_dirname(path, dir);
+    xp_load(e->xp, path, dir);
+    f_reveal(e, e->path);
+    return 1;
+}
+
+// A file into the editor: 1 opened, 0 cannot, 2 asked first (a binary
+// file, which A_BINARY's answer opens). A compiled file opens in the Code
+// tab.
+static int e_open(struct win *w, char *path, int force) {
+    struct edit *e;
+    e = E(w);
+    if (!force && e_isobj(path)) return e_open_obj(w, path);
+    if (!force && e_binary(path)) {
+        ui_ncpy(e->pend, path, 128);
+        ui_cpy(sb, "'");
+        ui_ncat(sb, ui_base(path), 200);
+        ui_cat(sb, "' does not look like text: it is a binary file, which the IDE cannot show, and would spoil if it saved it. Open it anyway?");
+        wk_msgbox(w->id, A_BINARY, "IDE", sb, WK_OKCANCEL);
+        return 2;
+    }
+    if (!e_load(e, path)) return 0;
+    x_compile(e);
     return 1;
 }
 
@@ -1482,6 +1879,7 @@ static void e_make(struct win *w) {
     int bk;
     e = E(w);
     if (e->building) { e_say(e, "A build is already running"); return; }
+    if (e->xobj) return;                          // a compiled file: already built
     if (!e->path[0]) { e_say(e, "Save the file first (:w FILE)"); return; }
     if (e->modified && !e_save(e, e->path)) return;
     e_retitle(w);
@@ -1520,21 +1918,29 @@ static void e_make(struct win *w) {
     }
 
     // b4ke on pipes, as the Terminal runs its shell (term.c): our
-    // ends are close-on-spawn, its stdin is a pipe nobody writes
+    // ends are close-on-spawn, its stdin is a pipe nobody writes. Every
+    // step is checked, as there: with the table full, a desktop that
+    // went on would keep the build's pipe as its stdout for good.
     if (upipe(pin) < 0) { e_say(e, "No pipe for the build"); return; }
     if (upipe(pout) < 0) { uclose(pin[0]); uclose(pin[1]); e_say(e, "No pipe for the build"); return; }
-    ucloexec(pin[1], 1);
-    ucloexec(pout[0], 1);
     s0 = udup(STDIN); s1 = udup(STDOUT); s2 = udup(STDERR);
-    ucloexec(s0, 1); ucloexec(s1, 1); ucloexec(s2, 1);
-    udup2(pin[0], STDIN);
-    udup2(pout[1], STDOUT);
-    udup2(pout[1], STDERR);
-    e->pid = spawn("/bin/b4ke", k, argv);
-    udup2(s0, STDIN); udup2(s1, STDOUT); udup2(s2, STDERR);
-    uclose(s0); uclose(s1); uclose(s2);
+    e->pid = 0 - 1;
+    if (s0 >= 0 && s1 >= 0 && s2 >= 0) {
+        ucloexec(pin[1], 1); ucloexec(pout[0], 1);
+        ucloexec(s0, 1); ucloexec(s1, 1); ucloexec(s2, 1);
+        if (udup2(pin[0], STDIN) >= 0 && udup2(pout[1], STDOUT) >= 0 && udup2(pout[1], STDERR) >= 0)
+            e->pid = spawn("/bin/b4ke", k, argv);
+        // s0, s1 and s2 are open, so these cannot fail
+        udup2(s0, STDIN); udup2(s1, STDOUT); udup2(s2, STDERR);
+    }
     uclose(pin[0]); uclose(pout[1]); uclose(pin[1]);
-    if (e->pid < 0) { uclose(pout[0]); e_say(e, "Cannot start b4ke"); return; }
+    if (e->pid < 0) {
+        uclose(pout[0]);
+        e_say(e, s0 >= 0 && s1 >= 0 && s2 >= 0 ? "Cannot start b4ke" : "No descriptors for the build");
+        uclose(s0); uclose(s1); uclose(s2);   // one that is -1 closes nothing
+        return;
+    }
+    uclose(s0); uclose(s1); uclose(s2);
     e->out_r = pout[0];
     e_build_clear(e);
     e->building = 1; e->bshown = 1; e->bcancel = 0;
@@ -1546,12 +1952,56 @@ static void e_make(struct win *w) {
 
 static void e_goto_error(struct win *w, int i);
 
-// Output waiting in the build's pipe; never blocks (wm.c's loop calls this).
+// The Code tab's compile, of the saved file, when the tab is open
+static void x_compile(struct edit *e) {
+    char dir[128];
+    if (!e->xshown || !e->xp || !e->path[0] || e->xobj) return;
+    e_dirname(e->path, dir);
+    xp_compile(e->xp, e->path, dir);
+}
+// F7: the Code tab, opened the first time; then from one tab to the other
+static void e_code(struct win *w) {
+    struct edit *e;
+    e = E(w);
+    if (e->xobj) return;
+    if (!e->xp) e->xp = xp_new();
+    if (e->xshown) { e->xtab = !e->xtab; return; }
+    e->xshown = 1; e->xtab = 1;
+    x_compile(e);
+}
+// the Code tab closed
+static void x_close(struct edit *e) { e->xshown = 0; e->xtab = 0; }
+
+// A line the Code tab asked for: in this text, or another file's in a
+// window of its own
+static void x_goto(struct win *w) {
+    struct edit *e, *o;
+    struct win *ow;
+    char p[128];
+    int line, i;
+    e = E(w);
+    line = xp_goto(e->xp, p);
+    if (line <= 0) return;
+    if (!e->xobj && ui_eq(p, e->path)) {
+        e->xtab = 0;
+        e->cy = line - 1; e_clamp(e); e->cx = e_firstnb(e, e->cy); e->want = e->cx; e->tsel = 0;
+        if (e->vim && e->mode != M_INSERT) e->mode = M_NORMAL;
+        return;
+    }
+    i = edit_open(p);
+    if (i < 0 || !(ow = win_get(i)) || ow->kind != K_EDIT) return;
+    o = E(ow);
+    o->cy = line - 1; e_clamp(o); o->cx = e_firstnb(o, o->cy); o->want = o->cx;
+}
+
+// Output waiting in the build's pipe, and the Code pane's compile; never
+// blocks (wm.c's loop calls this).
 void edit_tick(struct win *w) {
     struct edit *e;
     char buf[512];
     int n, i;
     e = E(w);
+    if (e->xp && xp_tick(e->xp)) mark_win_dirty(w);
     if (!e->building) return;
     while ((n = uavail(e->out_r)) > 0) {
         if (n > 512) n = 512;
@@ -1618,6 +2068,7 @@ void edit_close(struct win *w) {
     int i;
     e = E(w);
     e_stop_build(e);
+    if (e->xp) { xp_free(e->xp); e->xp = 0; }
     i = 0;
     while (i < e->fn) { free(e->fpath[i]); ++i; }
     if (e->fpath) { free((char *)e->fpath); free((char *)e->fdepth); free((char *)e->fflag); }
@@ -1968,11 +2419,12 @@ static void e_ex(struct win *w, char *c) {
     if (c[0] == 'e' && (c[1] == ' ' || (c[1] == '!' && c[2] == ' '))) {
         if (c[1] != '!' && e->modified) { e_say(e, "No write since last change (add ! to override)"); return; }
         c = c + (c[1] == '!' ? 3 : 2);
-        if (!e_load(e, c)) { e_settext(e, "", 0); ui_cpy(e->path, c); e->modified = 0; e->cy = 0; e->cx = 0; e_say(e, "New file"); }
+        if (!e_open(w, c, 0)) { e_settext(e, "", 0); ui_ncpy(e->path, c, 128); e->modified = 0; e->cy = 0; e->cx = 0; e_say(e, "New file"); }
         e_retitle(w);
         return;
     }
     if (ui_eq(c, "make")) { e_make(w); return; }
+    if (ui_eq(c, "code")) { e_code(w); return; }
     if (ui_eq(c, "Ex") || ui_eq(c, "Explore") || ui_eq(c, "Lex") || ui_eq(c, "files")) { e->fshown = !e->fshown; return; }
     if (ui_eq(c, "syntax off") || ui_eq(c, "syn off")) { e->nosyn = 1; return; }
     if (ui_eq(c, "syntax on") || ui_eq(c, "syn on")) { e->nosyn = 0; return; }
@@ -1991,7 +2443,7 @@ static void e_ex(struct win *w, char *c) {
     if (ui_eq(c, "cclose")) { e->bshown = 0; return; }
     if (ui_eq(c, "set nu") || ui_eq(c, "set number")) { e->nu = 1; return; }
     if (ui_eq(c, "set nonu") || ui_eq(c, "set nonumber")) { e->nu = 0; return; }
-    if (ui_eq(c, "set vim")) { e->vim = 1; e->mode = M_NORMAL; e_clamp(e); return; }
+    if (ui_eq(c, "set vim")) { e->vim = 1; e->tsel = 0; e->mode = M_NORMAL; e_clamp(e); return; }
     if (ui_eq(c, "set novim")) { e->vim = 0; e->mode = M_INSERT; e_say(e, "VIM mode off: type to edit; Esc for a command (set vim to come back)"); return; }
     if (c[0] == 's' && c[1] == '/') { e_subst(e, c + 1, 0); return; }
     if (c[0] == '%' && c[1] == 's' && c[2] == '/') { e_subst(e, c + 2, 1); return; }
@@ -2118,7 +2570,7 @@ static void e_normal_key(struct win *w, int code, int ch, int mods) {
             e_save_undo(e);
             while (n > 0 && e->cx < e->len[e->cy]) { e->ln[e->cy][e->cx] = ch; ++e->cx; --n; }
             --e->cx;
-            e->modified = 1; e->changed = 1; ++e->hver;
+            e_touched(e, e->cy);
             return;
         }
         if (r == 'i' || r == 'a') {
@@ -2223,7 +2675,7 @@ static void e_normal_key(struct win *w, int code, int ch, int mods) {
             if (r >= 'a' && r <= 'z') r = r - 32; else if (r >= 'A' && r <= 'Z') r = r + 32;
             e->ln[e->cy][e->cx] = r; ++e->cx;
         }
-        e->modified = 1; e->changed = 1; ++e->hver;
+        e_touched(e, e->cy);
         e_clamp(e);
         return;
     }
@@ -2245,6 +2697,223 @@ static void e_normal_key(struct win *w, int code, int ch, int mods) {
     }
 }
 
+// ---- the selection and the clipboard -----------------------------------------------------
+//
+// A selection is VIM's Visual one, or Traditional's (tsel), from (vy, vx)
+// to the cursor. As a range it runs up to, not including, (y1, x1): a
+// Visual one takes the character under the cursor too, and a line-wise one
+// whole lines with their newlines.
+
+static int e_sel_on(struct edit *e) { return e->vim ? e->mode == M_VISUAL || e->mode == M_VLINE : e->tsel; }
+
+static int e_sel_range(struct edit *e, int *y0, int *x0, int *y1, int *x1) {
+    int t;
+    if (!e_sel_on(e)) return 0;
+    *y0 = e->vy; *x0 = e->vx; *y1 = e->cy; *x1 = e->cx;
+    if (*y1 < *y0 || (*y1 == *y0 && *x1 < *x0)) { t = *y0; *y0 = *y1; *y1 = t; t = *x0; *x0 = *x1; *x1 = t; }
+    if (*y0 < 0) *y0 = 0;
+    if (*y1 >= e->nl) { *y1 = e->nl - 1; *x1 = e->len[*y1]; }
+    if (e->vim && e->mode == M_VLINE) { *x0 = 0; *x1 = e->len[*y1] + 1; }
+    else if (e->vim) *x1 = *x1 + 1;
+    return *y1 > *y0 || *x1 > *x0;
+}
+
+// the selection gone: VIM back to Normal, Traditional to none
+static void e_sel_end(struct edit *e) {
+    e->tsel = 0;
+    if (e->vim && (e->mode == M_VISUAL || e->mode == M_VLINE)) { e->mode = M_NORMAL; e_clamp(e); }
+}
+
+static void e_copy(struct edit *e) {
+    char *t;
+    int n, y0, x0, y1, x1;
+    if (!e_sel_range(e, &y0, &x0, &y1, &x1)) return;
+    t = e_range(e, y0, x0, y1, x1, &n);
+    wk_clip_set(t, n);
+    free(t);
+}
+
+// the selection taken out of the text, the cursor where it began: 1 if there was one
+static int e_cut(struct edit *e) {
+    int y0, x0, y1, x1;
+    if (!e_sel_range(e, &y0, &x0, &y1, &x1)) { e_sel_end(e); return 0; }
+    e_delrange(e, y0, x0, y1, x1);
+    e->cy = y0; e->cx = x0; e->want = x0;
+    e_sel_end(e);
+    e_clamp(e);
+    return 1;
+}
+
+// the clipboard's text at the cursor, in place of the selection (its
+// carriage returns left out: a line ends in a newline here)
+static void e_paste(struct edit *e) {
+    char *c, *t;
+    int n, k, m;
+    c = wk_clip_get(&n);
+    if (n <= 0) return;
+    e_save_undo(e);
+    e_cut(e);
+    t = (char *)ualloc(n + 1);
+    m = 0; k = 0;
+    while (k < n) { if (c[k] != 13 && c[k]) { t[m] = c[k]; ++m; } ++k; }
+    e_instext(e, e->cy, e->cx, t, m);
+    free(t);
+    e->cy = e_ry; e->cx = e_rx; e->want = e->cx;
+    e_clamp(e);
+}
+
+static void e_edit(struct win *w, int item) {
+    struct edit *e;
+    e = E(w);
+    if (item == E_FIND) { e_find_open(w); return; }
+    if (item == E_FNEXT || item == E_FPREV) { e_findbar(w, item == E_FNEXT ? 1 : 0 - 1, 0); return; }
+    if (e->mode == M_CMD) e->mode = e->vim ? M_NORMAL : M_INSERT;
+    if (item == E_COPY) e_copy(e);
+    else if (item == E_CUT) {
+        if (!e_sel_on(e)) return;
+        e_save_undo(e);
+        e_copy(e);
+        e_cut(e);
+    }
+    else if (item == E_PASTE) e_paste(e);
+    else if (item == E_ALL) {
+        e->vy = 0; e->vx = 0;
+        e->cy = e->nl - 1; e->cx = e->len[e->cy];
+        if (e->vim) { e->mode = M_VISUAL; if (e->cx > 0) --e->cx; }
+        else e->tsel = e->nl > 1 || e->cx > 0;
+    }
+    e->tlast = 0;
+    e_retitle(w);
+}
+
+// ---- Find -----------------------------------------------------------------------------
+
+// The match after the selection's start (DIR 1; from that start itself
+// when HERE, as the text to find is typed) or the one before it (-1),
+// round past the end or the top, selected -- Traditional's selection, or
+// VIM's Visual -- and so scrolled to; or the bar says there is none.
+static void e_findbar(struct win *w, int dir, int here) {
+    struct edit *e;
+    int m, y, x, y0, x0, y1, x1, k, sel;
+    e = E(w);
+    if (e->xobj) { e_say(e, "A compiled file: its Code tab finds a function by its name, typed"); return; }
+    m = ui_len(e->fb.text);
+    if (!m) { ui_find_open(&e->fb, 0, 0); return; }        // nothing to look for yet: ask
+    e->xtab = 0;                                           // the text in front, not its Code tab
+    if (e->mode == M_CMD) e->mode = e->vim ? M_NORMAL : M_INSERT;
+    sel = e_sel_range(e, &y0, &x0, &y1, &x1);
+    if (sel) { y = y0; x = x0; } else { y = e->cy; x = e->cx; }
+    if (dir > 0) { if (sel && !here) ++x; }
+    else --x;
+    e->fb.note[0] = 0; e->fb.bad = 0;
+    k = 0;
+    while (k <= e->nl + 1) {
+        if (dir > 0) {
+            while (x + m <= e->len[y]) { if (ui_find_at(&e->fb, e->ln[y] + x, e->len[y] - x)) break; ++x; }
+            if (x + m <= e->len[y]) break;
+            ++y; x = 0;
+            if (y >= e->nl) { y = 0; ui_find_say(&e->fb, "Wrapped to the top", 0); }
+        } else {
+            if (x > e->len[y] - m) x = e->len[y] - m;
+            while (x >= 0) { if (ui_find_at(&e->fb, e->ln[y] + x, e->len[y] - x)) break; --x; }
+            if (x >= 0) break;
+            --y;
+            if (y < 0) { y = e->nl - 1; ui_find_say(&e->fb, "Wrapped to the bottom", 0); }
+            x = e->len[y];
+        }
+        ++k;
+    }
+    if (k > e->nl + 1) { ui_find_say(&e->fb, "Not found", 1); return; }
+    e->vy = y; e->vx = x; e->cy = y; e->tlast = 0;
+    if (e->vim) { e->mode = M_VISUAL; e->cx = x + m - 1; }
+    else { e->cx = x + m; e->tsel = 1; }
+    e->want = e->cx;
+}
+
+// what the find bar asked for
+static void e_find_act(struct win *w, int a) {
+    if (a == UF_NEXT) e_findbar(w, 1, 0);
+    else if (a == UF_PREV) e_findbar(w, 0 - 1, 0);
+    else if (a == UF_TYPED) e_findbar(w, 1, 1);
+}
+
+// Find: the bar, with the selection to look for if it is on one line
+static void e_find_open(struct win *w) {
+    struct edit *e;
+    char *t;
+    int n, y0, x0, y1, x1;
+    e = E(w);
+    if (e->xobj) { e_say(e, "A compiled file: its Code tab finds a function by its name, typed"); return; }
+    e->xtab = 0;
+    if (e->mode == M_CMD) e->mode = e->vim ? M_NORMAL : M_INSERT;
+    if (e_sel_range(e, &y0, &x0, &y1, &x1) && y0 == y1 && x1 - x0 < UI_FIND_MAX) {
+        t = e_range(e, y0, x0, y1, x1, &n);
+        ui_find_open(&e->fb, t, n);
+        free(t);
+    } else ui_find_open(&e->fb, 0, 0);
+}
+
+static int e_ctrl(int code, int ch, int mods, int c) { return (mods & M_CTRL) && (code == c || ch == c || ch == c + 32); }
+
+// Traditional: Text Editor's keys. The moving keys with Shift select; the
+// typing keys replace a selection; a run of characters typed is undone
+// as one.
+static void e_trad_key(struct win *w, int code, int ch, int mods) {
+    struct edit *e;
+    int typing, y0, x0, y1, x1;
+    e = E(w);
+    if (code == 16 || code == 17 || code == 18) return;       // Shift, Ctrl or Alt alone
+    if (ui_key_copy(code, ch, mods)) { e_edit(w, E_COPY); return; }
+    if (ui_key_cut(code, ch, mods)) { e_edit(w, E_CUT); return; }
+    if (ui_key_paste(code, ch, mods)) { e_edit(w, E_PASTE); return; }
+    if (e_ctrl(code, ch, mods, 'A')) { e_edit(w, E_ALL); return; }
+    if (e_ctrl(code, ch, mods, 'Z')) { e_undo(e, 0); e->tsel = 0; e->tlast = 0; e_clamp(e); return; }
+    if (e_ctrl(code, ch, mods, 'Y')) { e_undo(e, 1); e->tsel = 0; e->tlast = 0; e_clamp(e); return; }
+    if (e_ctrl(code, ch, mods, 'O')) { edit_command(w, 0, 1); return; }
+    if (e_ctrl(code, ch, mods, 'N')) { edit_command(w, 0, 0); return; }
+    if (code == KEY_ESC) {
+        if (e->tsel) { e->tsel = 0; return; }
+        e->mode = M_CMD; e->cmdkind = ':'; e->cmdn = 0; e->cmd[0] = 0;
+        return;
+    }
+    if (code == KEY_LEFT || code == KEY_RIGHT || code == KEY_UP || code == KEY_DOWN || code == KEY_HOME ||
+        code == KEY_END || code == KEY_PGUP || code == KEY_PGDN) {
+        e->tlast = 0;
+        if (mods & M_SHIFT) {
+            if (!e->tsel) { e->vy = e->cy; e->vx = e->cx; }
+            e_nav_insert(e, code, mods);
+            e->tsel = e->vy != e->cy || e->vx != e->cx;
+            return;
+        }
+        // Left and Right with a selection go to its ends
+        if (e->tsel && !(mods & M_CTRL) && (code == KEY_LEFT || code == KEY_RIGHT) && e_sel_range(e, &y0, &x0, &y1, &x1)) {
+            if (code == KEY_LEFT) { e->cy = y0; e->cx = x0; } else { e->cy = y1; e->cx = x1; }
+            e->want = e->cx; e->tsel = 0;
+            return;
+        }
+        e->tsel = 0;
+        e_nav_insert(e, code, mods);
+        return;
+    }
+    typing = ch >= 32 && ch < 127 && !(mods & M_CTRL);
+    if (!typing && code != KEY_ENTER && code != KEY_BACK && code != KEY_DEL && code != KEY_TAB) return;
+    if (!typing || !e->tlast || e->tsel) e_save_undo(e);
+    e->tlast = typing;
+    if (e->tsel) {
+        e_cut(e);
+        if (code == KEY_BACK || code == KEY_DEL) return;
+    }
+    e_insert_key(e, code, ch, mods);
+}
+
+// Run (F6): what was built; a compiled file shown, if it is a program
+static void e_run(struct win *w) {
+    struct edit *e;
+    e = E(w);
+    if (!e->xobj) { e_ex(w, "run"); return; }
+    if (ui_ends(e->path, ".c4r")) run_command(e->path);
+}
+
 // The way in for every key. It records the keys of a change as it is
 // made, so '.' can type them again.
 static void e_key(struct win *w, int code, int ch, int mods) {
@@ -2256,10 +2925,24 @@ static void e_key(struct win *w, int code, int ch, int mods) {
     if ((mods & M_CTRL) && (code == 83 || ch == 's' || ch == 'S')) { e_save(e, e->path); e_retitle(w); return; }
     // Ctrl+B: the file pane, as IDEs have it (VIM's page back is not here)
     if ((mods & M_CTRL) && (code == 66 || ch == 'b' || ch == 'B')) { e->fshown = !e->fshown; return; }
+    // Ctrl+F: Find, in either way of typing (VIM's page forward is not here
+    // either); F3 and Shift+F3 the next and the one before
+    if ((mods & M_CTRL) && (code == 70 || ch == 'f' || ch == 'F')) { e_find_open(w); return; }
+    if (code == KEY_F3) { if (!e->fb.text[0]) e_find_open(w); else e_findbar(w, (mods & M_SHIFT) ? 0 - 1 : 1, 0); return; }
     if (code == KEY_F5) { e_make(w); return; }
-    if (code == KEY_F6) { e_ex(w, "run"); return; }
+    if (code == KEY_F6) { e_run(w); return; }
     if (code == KEY_F8) { e_goto_error(w, (mods & M_SHIFT) ? e->ecur - 1 : e->ecur + 1); return; }
     if (code == KEY_F4) { e->bshown = !e->bshown; return; }
+    if (code == KEY_F7) { e_code(w); return; }
+    // the find bar's keys while it has them (the text's Code tab not in front)
+    if (e->fb.on && e->fb.keys && !(e->xshown && e->xtab && e->xp)) { e_find_act(w, ui_find_key(&e->fb, code, ch, mods)); return; }
+    // the Code tab in front: its keys, and Esc back to the text
+    if (e->xshown && e->xtab && e->xp) {
+        k = xp_key(e->xp, code, ch, mods);
+        if (k == 2) x_goto(w);
+        else if (k == 0 && code == KEY_ESC && !e->xobj) e->xtab = 0;
+        return;
+    }
     if (e->mode == M_CMD) {
         e_cmdline_key(w, code, ch);
         // without VIM mode there is no Normal to come back to
@@ -2267,9 +2950,8 @@ static void e_key(struct win *w, int code, int ch, int mods) {
         return;
     }
     if (!e->vim) {
-        // the plain editor: always typing; Esc is the way to a command
-        if (code == KEY_ESC) { e->mode = M_CMD; e->cmdkind = ':'; e->cmdn = 0; e->cmd[0] = 0; return; }
-        e_insert_key(e, code, ch, mods);
+        // Traditional: always typing; Esc is the way to a command
+        e_trad_key(w, code, ch, mods);
         e_retitle(w);
         return;
     }
@@ -2309,195 +2991,37 @@ void edit_key(struct win *w, int code, int ch, int mods) { e_key(w, code, ch, mo
 
 // ---- syntax colours ---------------------------------------------------------------------
 //
-// Each line is coloured on its own, character by character, into hlc; the
-// one thing carried from line to line is being inside a C comment. Where
-// that stands at the top of the view is kept, with the count of changes
-// it was worked out for, so scrolling down does not read the file again.
+// hl.c colours a line; what is kept here is the state the colouring is in
+// at the start of each line, as far down as it has been worked out (a
+// change cuts it back to the line changed: e_touched), so neither
+// scrolling down nor up reads the file from its start again.
 
-static int hlc[HL_MAX];
+static int e_hcol(int i) { return ec[hl_at(i)]; }
 
-static int e_lang(char *p) {
-    if (ui_ends(p, ".c") || ui_ends(p, ".h")) return L_C;
-    if (ui_ends(p, ".js") || ui_ends(p, ".mjs")) return L_JS;
-    if (ui_ends(p, ".lisp") || ui_ends(p, ".scm") || ui_ends(p, ".el")) return L_LISP;
-    if (ui_ends(p, ".f") || ui_ends(p, ".fs") || ui_ends(p, ".fth") || ui_ends(p, ".4th")) return L_FORTH;
-    if (ui_ends(p, ".sh") || ui_ends(p, "Makefile") || ui_ends(p, ".mk")) return L_SH;
-    if (ui_ends(p, ".b4k") || ui_ends(p, ".B4K")) return L_B4K;
-    return L_TEXT;
-}
-
-// Is S[0..N) one of LIST's words? LIST has a space before each word and
-// after the last.
-static int e_inwords(char *s, int n, char *list) {
-    int i, k;
-    i = 0;
-    while (list[i]) {
-        if (list[i] == ' ' && list[i + 1]) {
-            k = 0;
-            while (k < n && list[i + 1 + k] == s[k]) ++k;
-            if (k == n && list[i + 1 + k] == ' ') return 1;
-        }
-        ++i;
-    }
-    return 0;
-}
-
-static void e_paint(int i, int j, int c) {
-    while (i < j && i < HL_MAX) { hlc[i] = c; ++i; }
-}
-static int e_hcol(int i) { return i < HL_MAX ? hlc[i] : C_DARK; }
-
-static char *c_kw = " if else while for do switch case default break continue return goto sizeof typedef struct union enum static extern const volatile register inline restrict ";
-static char *c_ty = " int char short long unsigned signed void float double ";
-static char *js_kw = " function var let const if else for while do return new class this null true false undefined import export from of in typeof instanceof await async break continue switch case default throw try catch finally delete yield ";
-static char *lisp_kw = " define lambda if begin let let* letrec set! cond else and or not quote next define-macro when unless do case ";
-static char *forth_kw = " IF ELSE THEN BEGIN WHILE REPEAT UNTIL AGAIN DO ?DO LOOP +LOOP LEAVE UNLOOP EXIT ; : VARIABLE CONSTANT VALUE CREATE DOES> RECURSE DEFER IS TO CASE OF ENDOF ENDCASE IMMEDIATE POSTPONE ['] [CHAR] LITERAL :NONAME {: :} :M ;M ";
-static char *sh_kw = " if then else elif fi for in do done while until case esac function return export local set exit break continue shift ";
-
-// a string from I (its quote) to its end, \ escapes skipped
-static int e_strend(char *s, int n, int i) {
-    int q;
-    q = s[i];
-    ++i;
-    while (i < n && s[i] != q) { if (s[i] == 92) ++i; ++i; }
-    return i < n ? i + 1 : n;
-}
-
-// C and JavaScript; ST 1 is inside /* */
-static int e_hl_c(char *s, int n, int st, int js) {
-    int i, j, c, nb;
-    i = 0; nb = 0;
-    while (i < n) {
-        c = s[i];
-        if (st == 1) {
-            j = i;
-            while (j < n && !(s[j] == '*' && j + 1 < n && s[j + 1] == '/')) ++j;
-            if (j < n) { j = j + 2; st = 0; }
-            e_paint(i, j, HC_COM); i = j;
-        } else if (c == '/' && i + 1 < n && s[i + 1] == '/') { e_paint(i, n, HC_COM); i = n; }
-        else if (c == '/' && i + 1 < n && s[i + 1] == '*') { e_paint(i, i + 2, HC_COM); i = i + 2; st = 1; }
-        else if (c == '"' || c == 39 || (js && c == '`')) { j = e_strend(s, n, i); e_paint(i, j, HC_STR); i = j; }
-        else if (!js && c == '#' && !nb) {
-            j = i + 1;
-            while (j < n && s[j] == ' ') ++j;
-            while (j < n && e_isword(s[j])) ++j;
-            e_paint(i, j, HC_PRE); i = j;
-        } else if (c >= '0' && c <= '9' && (i == 0 || !e_isword(s[i - 1]))) {
-            j = i;
-            while (j < n && (e_isword(s[j]) || s[j] == '.')) ++j;
-            e_paint(i, j, HC_NUM); i = j;
-        } else if (e_isword(c)) {
-            j = i;
-            while (j < n && e_isword(s[j])) ++j;
-            if (e_inwords(s + i, j - i, js ? js_kw : c_kw)) e_paint(i, j, HC_KW);
-            else if (!js && e_inwords(s + i, j - i, c_ty)) e_paint(i, j, HC_TYPE);
-            i = j;
-        } else ++i;
-        if (c != ' ' && c != 9) nb = 1;
-    }
-    return st;
-}
-
-static int e_lispword(int c) { return c > ' ' && c != '(' && c != ')' && c != '"' && c != ';' && c != 39; }
-static void e_hl_lisp(char *s, int n) {
-    int i, j, c;
-    i = 0;
-    while (i < n) {
-        c = s[i];
-        if (c == ';') { e_paint(i, n, HC_COM); i = n; }
-        else if (c == '"') { j = e_strend(s, n, i); e_paint(i, j, HC_STR); i = j; }
-        else if (e_lispword(c)) {
-            j = i;
-            while (j < n && e_lispword(s[j])) ++j;
-            if ((c >= '0' && c <= '9') || (c == '-' && j > i + 1 && s[i + 1] >= '0' && s[i + 1] <= '9') || c == '#')
-                e_paint(i, j, HC_NUM);
-            else if (e_inwords(s + i, j - i, lisp_kw)) e_paint(i, j, HC_KW);
-            i = j;
-        } else ++i;
-    }
-}
-
-// Forth: blank-separated words, case not mattering; \ and ( comment, S" ." C"
-// ABORT" take a string, and : the name it defines
-static void e_hl_forth(char *s, int n) {
-    int i, j, k, c, def;
-    char up[24];
-    i = 0; def = 0;
-    while (i < n) {
-        if (s[i] == ' ' || s[i] == 9) { ++i; }
-        else {
-            j = i;
-            while (j < n && s[j] != ' ' && s[j] != 9) ++j;
-            k = 0;
-            while (k < j - i && k < 23) { c = s[i + k]; up[k] = c >= 'a' && c <= 'z' ? c - 32 : c; ++k; }
-            if (j - i == 1 && s[i] == 92) { e_paint(i, n, HC_COM); j = n; }
-            else if (j - i == 1 && s[i] == '(') {
-                k = j; while (k < n && s[k] != ')') ++k;
-                if (k < n) ++k;
-                e_paint(i, k, HC_COM); j = k;
-            } else if (j - i <= 23 && j > i && s[j - 1] == '"' && (j - i == 2 || (j - i == 6 && up[0] == 'A'))) {
-                e_paint(i, j, HC_KW);
-                k = j + 1; while (k < n && s[k] != '"') ++k;
-                if (k < n) ++k;
-                e_paint(j, k, HC_STR); j = k;
-            } else if (def) { e_paint(i, j, HC_TYPE); def = 0; }
-            else if ((s[i] >= '0' && s[i] <= '9') || (s[i] == '-' && j > i + 1 && s[i + 1] >= '0' && s[i + 1] <= '9'))
-                e_paint(i, j, HC_NUM);
-            else if (j - i <= 23 && e_inwords(up, j - i, forth_kw)) {
-                e_paint(i, j, HC_KW);
-                if (j - i == 1 && s[i] == ':') def = 1;
-            }
-            i = j;
-        }
-    }
-}
-
-// shell, Makefiles and B4KE: # comments, quotes, $variables; a B4KE line's
-// first word, in capitals, is its directive
-static void e_hl_sh(char *s, int n, int b4k) {
-    int i, j, c, first;
-    i = 0; first = 1;
-    while (i < n) {
-        c = s[i];
-        if (c == '#' && (i == 0 || s[i - 1] == ' ' || s[i - 1] == 9)) { e_paint(i, n, HC_COM); i = n; }
-        else if (c == '"' || c == 39) { j = e_strend(s, n, i); e_paint(i, j, HC_STR); i = j; first = 0; }
-        else if (c == '$') {
-            j = i + 1;
-            if (j < n && (s[j] == '{' || s[j] == '(')) { c = s[j] == '{' ? '}' : ')'; while (j < n && s[j] != c) ++j; if (j < n) ++j; }
-            else { while (j < n && e_isword(s[j])) ++j; }
-            e_paint(i, j, HC_TYPE); i = j; first = 0;
-        } else if (e_isword(c)) {
-            j = i;
-            while (j < n && e_isword(s[j])) ++j;
-            if (b4k && first && c >= 'A' && c <= 'Z') e_paint(i, j, HC_KW);
-            else if (!b4k && e_inwords(s + i, j - i, sh_kw)) e_paint(i, j, HC_KW);
-            else if (c >= '0' && c <= '9') e_paint(i, j, HC_NUM);
-            i = j; first = 0;
-        } else { if (c != ' ' && c != 9) first = 0; ++i; }
-    }
-}
-
-// Colour line Y into hlc; ST is the state at its start, and the state at
+// Colour line Y (hl.c); ST is the state at its start, and the state at
 // its end comes back
-static int e_hl(struct edit *e, int y, int st, int lang) {
-    int n;
-    n = e->len[y];
-    e_paint(0, n, C_DARK);
-    if (lang == L_C || lang == L_JS) return e_hl_c(e->ln[y], n, st, lang == L_JS);
-    if (lang == L_LISP) e_hl_lisp(e->ln[y], n);
-    else if (lang == L_FORTH) e_hl_forth(e->ln[y], n);
-    else if (lang == L_SH || lang == L_B4K) e_hl_sh(e->ln[y], n, lang == L_B4K);
-    return 0;
-}
+static int e_hl(struct edit *e, int y, int st, int lang) { return hl_line(e->ln[y], e->len[y], st, lang); }
 
 // the state at the start of line LINE
 static int e_hlstate(struct edit *e, int line, int lang) {
-    int y, st;
+    int y, st, m, *n;
     if (lang != L_C && lang != L_JS) return 0;
-    y = 0; st = 0;
-    if (e->hl_ver == e->hver && e->hl_lang == lang && e->hl_line <= line) { y = e->hl_line; st = e->hl_state; }
-    while (y < line && y < e->nl) { st = e_hl(e, y, st, lang); ++y; }
-    e->hl_line = line; e->hl_state = st; e->hl_ver = e->hver; e->hl_lang = lang;
+    if (line >= e->nl) line = e->nl - 1;
+    if (line < 0) line = 0;
+    if (e->hl_lang != lang) { e->hlsn = 0; e->hl_lang = lang; }
+    if (line + 1 > e->hlscap) {
+        m = e->hlscap ? e->hlscap : 256;
+        while (m < line + 1) m = m * 2;
+        n = (int *)ualloc(m * sizeof(int));
+        if (e->hlsn > 0) memcpy(n, e->hls, e->hlsn * sizeof(int));
+        if (e->hls) free((char *)e->hls);
+        e->hls = n; e->hlscap = m;
+    }
+    if (e->hlsn == 0) { e->hls[0] = 0; e->hlsn = 1; }
+    if (line < e->hlsn) return e->hls[line];
+    y = e->hlsn - 1; st = e->hls[y];
+    while (y < line) { st = e_hl(e, y, st, lang); ++y; e->hls[y] = st; }
+    e->hlsn = line + 1;
     return st;
 }
 
@@ -2655,20 +3179,28 @@ static int f_maxw(struct edit *e) {
     }
     return mx;
 }
-static int f_hvis() { return (FW - 17) / 6; }
-static int f_hbar(struct edit *e) { return f_maxw(e) > f_hvis(); }
+static int f_hvis(struct edit *e) { return (e->fwx - 17) / 6; }
+static int f_hbar(struct edit *e) { return f_maxw(e) > f_hvis(e); }
 static int f_rows(struct edit *e, int ch) { return (ch - FHDR - 2 - (f_hbar(e) ? 16 : 0)) / FROW; }
 static void f_clamp(struct edit *e, int rows) {
     int max;
     if (e->ftop > e->fn - rows) e->ftop = e->fn - rows;
     if (e->ftop < 0) e->ftop = 0;
-    max = f_maxw(e) - f_hvis();
+    max = f_maxw(e) - f_hvis(e);
     if (max < 0) max = 0;
     if (e->fleft > max) e->fleft = max;
     if (e->fleft < 0) e->fleft = 0;
 }
 // the pane is drawn only where the text keeps some room
-static int f_on(struct edit *e, int cw) { return e->fshown && e->fpath && cw >= FW + 200; }
+static int f_on(struct edit *e, int cw) { return e->fshown && e->fpath && cw >= FMIN + SPW + 200; }
+// the pane's width in a window CW wide: the one chosen, as far as the text keeps 220 pixels
+static int f_width(struct edit *e, int cw) {
+    int w;
+    w = e->fw;
+    if (w > cw - SPW - 220) w = cw - SPW - 220;
+    if (w < FMIN) w = FMIN;
+    return w;
+}
 
 static void f_draw(struct edit *e, int ox, int oy, int ch) {
     int rows, i, y, x, cur, k, hb, vb, dx;
@@ -2684,16 +3216,16 @@ static void f_draw(struct edit *e, int ox, int oy, int ch) {
     e->ffollow = 0;
     f_clamp(e, rows);
     dx = e->fleft * 6;
-    d_rect(ox, oy, FW, ch, 0xf4f4f4);
-    d_rect(ox, oy, FW, FHDR, C_FACE);
-    d_bevel(ox, oy, FW, FHDR, B_RAISED);
+    d_rect(ox, oy, e->fwx, ch, 0xf4f4f4);
+    d_rect(ox, oy, e->fwx, FHDR, C_FACE);
+    d_bevel(ox, oy, e->fwx, FHDR, B_RAISED);
     d_text(ox + 6, oy + 4, C_DARK, F_BOLD, "Files");
-    d_clip(ox, oy + FHDR, FW - (vb ? 17 : 0), ch - FHDR - (hb ? 16 : 0));
+    d_clip(ox, oy + FHDR, e->fwx - (vb ? 17 : 0), ch - FHDR - (hb ? 16 : 0));
     i = e->ftop;
     y = oy + FHDR + 2;
     while (i < e->fn && i < e->ftop + rows) {
         x = ox + 4 + e->fdepth[i] * 12 - dx;
-        if (i == cur) d_rect(ox, y, FW, FROW, 0xc8dcff);
+        if (i == cur) d_rect(ox, y, e->fwx, FROW, 0xc8dcff);
         if (e->fflag[i] & F_DIR) {
             if (e->fflag[i] & F_OPEN) { d_line(x, y + 6, x + 4, y + 10, C_DARK); d_line(x + 4, y + 10, x + 8, y + 6, C_DARK); }
             else { d_line(x + 2, y + 4, x + 6, y + 8, C_DARK); d_line(x + 6, y + 8, x + 2, y + 12, C_DARK); }
@@ -2711,9 +3243,8 @@ static void f_draw(struct edit *e, int ox, int oy, int ch) {
         ++i;
     }
     d_clip_end();
-    if (vb) ui_scrollbar(ox + FW - 17, oy + FHDR, ch - FHDR - (hb ? 16 : 0), e->fn, rows, e->ftop);
-    if (hb) ui_hscrollbar(ox, oy + ch - 16, FW - 17, f_maxw(e), f_hvis(), e->fleft);
-    d_rect(ox + FW, oy, 2, ch, C_SHADOW);
+    if (vb) ui_scrollbar(ox + e->fwx - 17, oy + FHDR, ch - FHDR - (hb ? 16 : 0), e->fn, rows, e->ftop);
+    if (hb) ui_hscrollbar(ox, oy + ch - 16, e->fwx - 17, f_maxw(e), f_hvis(e), e->fleft);
 }
 
 // a file picked in the pane: into the editor, unless that loses changes
@@ -2724,7 +3255,7 @@ static void f_pick(struct win *w, int i) {
     if (ui_eq(e->fpath[i], e->path)) return;
     if (e->modified) { e_say(e, "No write since last change: :w first, or :e! FILE"); return; }
     ui_cpy(p, e->fpath[i]);
-    if (!e_load(e, p)) e_say(e, "Cannot open that file");
+    if (!e_open(w, p, 0)) e_say(e, "Cannot open that file");
     e_retitle(w);
 }
 
@@ -2736,16 +3267,16 @@ static void f_mouse(struct win *w, int ev, int x, int y, int ch) {
     hb = f_hbar(e);
     if (ev == E_WHEEL) { e->ftop = e->ftop + y * 3; f_clamp(e, rows); return; }
     if (ev != E_DOWN) return;
-    if (e->fn > rows && x >= FW - 17) {
-        t = ui_scroll_click(x, y, FW - 17, FHDR, ch - FHDR - (hb ? 16 : 0), e->fn, rows, e->ftop);
+    if (e->fn > rows && x >= e->fwx - 17) {
+        t = ui_scroll_click(x, y, e->fwx - 17, FHDR, ch - FHDR - (hb ? 16 : 0), e->fn, rows, e->ftop);
         if (t >= 0) { e->ftop = t; return; }
     }
     if (hb && y >= ch - 16) {
-        t = ui_hscroll_click(x, y, 0, ch - 16, FW - 17, f_maxw(e), f_hvis(), e->fleft);
+        t = ui_hscroll_click(x, y, 0, ch - 16, e->fwx - 17, f_maxw(e), f_hvis(e), e->fleft);
         if (t >= 0) e->fleft = t;
         return;
     }
-    if (y < FHDR + 2 || x >= FW) return;
+    if (y < FHDR + 2 || x >= e->fwx) return;
     i = e->ftop + (y - FHDR - 2) / FROW;
     if (i < 0 || i >= e->fn || i >= e->ftop + rows) return;
     if (e->fflag[i] & F_DIR) { if (e->fflag[i] & F_OPEN) f_close_dir(e, i); else f_open_dir(e, i); }
@@ -2755,14 +3286,11 @@ static void f_mouse(struct win *w, int ev, int x, int y, int ch) {
 // ---- drawing ------------------------------------------------------------------------------
 
 static int e_selected(struct edit *e, int y, int x) {
-    int y0, x0, y1, x1, t;
-    if (e->mode != M_VISUAL && e->mode != M_VLINE) return 0;
-    y0 = e->vy; x0 = e->vx; y1 = e->cy; x1 = e->cx;
-    if (y1 < y0 || (y1 == y0 && x1 < x0)) { t = y0; y0 = y1; y1 = t; t = x0; x0 = x1; x1 = t; }
+    int y0, x0, y1, x1;
+    if (!e_sel_range(e, &y0, &x0, &y1, &x1)) return 0;
     if (y < y0 || y > y1) return 0;
-    if (e->mode == M_VLINE) return 1;
     if (y == y0 && x < x0) return 0;
-    if (y == y1 && x > x1) return 0;
+    if (y == y1 && x >= x1) return 0;
     return 1;
 }
 
@@ -2780,23 +3308,58 @@ static int e_wseg(struct edit *e, int y, int x, int cols) {
     return s < h ? s : h - 1;
 }
 
-enum { BHDR = ECH + 2, BLOG_H = BROWS * ECH + 2, BPANE = BHDR + BLOG_H + 16 };
+// The top line that brings the last line to the bottom: wrapped, the
+// rows of the lines from it to the end fill the view (as last drawn)
+static int e_maxtop(struct edit *e) {
+    int t, used, h;
+    if (!e->wrap) return e->nl > e->rows ? e->nl - e->rows : 0;
+    t = e->nl; used = 0;
+    while (t > 0) {
+        h = e_wh(e, t - 1, e->cols);
+        if (used + h > e->rows) break;
+        used = used + h; --t;
+    }
+    return t < e->nl ? t : e->nl - 1;           // (the last line alone taller than the view)
+}
+// the last line every row of which shows with line T at the top (T, if it
+// alone is taller than the view)
+static int e_lastfull(struct edit *e, int t) {
+    int l, used, h;
+    if (!e->wrap) return t + e->rows - 1 < e->nl ? t + e->rows - 1 : e->nl - 1;
+    l = t; used = 0;
+    while (l < e->nl) {
+        h = e_wh(e, l, e->cols);
+        if (used + h > e->rows) break;
+        used = used + h; ++l;
+    }
+    return l > t ? l - 1 : t;
+}
+
+// the build pane: its header (a line of the interface's text), its log (BROWS of the grid's)
+enum { BHDR = 17 };
+#define BLOG_H (BROWS * ECH + 2)
+#define BPANE (BHDR + BLOG_H + 16)
 
 static void e_draw_text(struct win *w, int ox, int oy, int cw, int ch, int focused) {
     struct edit *e;
-    int rows, cols, gw, y, line, x, n, sx, ph, sy, k, i, c, endsel, lang, st, tah, hb, h, seg, a, cseg, r, used, l, by;
+    int rows, cols, gw, y, line, x, n, sx, ph, sy, k, i, c, endsel, lang, st, tah, hb, h, seg, a, cseg, r, used, l, by, fh;
     char num[16];
     e = E(w);
+    ec = scheme_cols + ide_scheme * SC_N;
     ph = e->bshown ? BPANE : 0;
+    fh = e->fb.on ? UI_FIND_H : 0;                // the find bar, under the text
     sy = oy + ch - ECH - 4;                       // the status line
-    tah = ch - ECH - 4 - ph;                      // the text's area, its bars included
+    tah = ch - ECH - 4 - ph - fh;                 // the text's area, its bars included
     hb = !e->wrap;
     rows = (tah - 6 - (hb ? 16 : 0)) / ECH;
     if (rows < 1) rows = 1;
     gw = e->nu ? 5 * ECW : 0;
     cols = (cw - 8 - gw - 17) / ECW;
     if (cols < 1) cols = 1;
-    e->rows = rows; e->cols = cols; e->gw = gw; e->tah = tah; e->ph = ph; e->hb = hb;
+    e->rows = rows; e->cols = cols; e->gw = gw; e->tah = tah; e->ph = ph; e->hb = hb; e->fh = fh;
+    // the scroll bar's lines at once: what makes its end the last top line
+    e->vis = e->nl - e_maxtop(e);
+    if (e->vis < 1) e->vis = 1;
     e->maxw = 0;
     i = 0;
     while (i < e->nl) { if (e->len[i] > e->maxw) e->maxw = e->len[i]; ++i; }
@@ -2824,12 +3387,12 @@ static void e_draw_text(struct win *w, int ox, int oy, int cw, int ch, int focus
     }
     e->lcx = e->cx; e->lcy = e->cy;
 
-    d_rect(ox, oy, cw, tah, C_WHITE);
-    if (gw) d_rect(ox, oy, gw + 2, tah, 0xe8e8e8);
+    d_rect(ox, oy, cw, tah, ec[SC_BG]);
+    if (gw) d_rect(ox, oy, gw + 2, tah, ec[SC_GUT]);
     line = e->top;
     r = 0;
     y = oy + 3;
-    lang = e->nosyn ? L_TEXT : e_lang(e->path);
+    lang = e->nosyn ? L_TEXT : hl_lang(e->path);
     st = e_hlstate(e, e->top, lang);
     sx = ox + 4 + gw;
     while (line < e->nl && r < rows) {
@@ -2840,17 +3403,19 @@ static void e_draw_text(struct win *w, int ox, int oy, int cw, int ch, int focus
         seg = 0;
         while (seg < h && r < rows) {
             a = e->wrap ? seg * cols : e->left;   // the first column this row shows
+            // a band where the Code pane's function has code from this line
+            if (seg == 0 && e->xshown && e->xp && (c = xp_band(e->xp, line + 1)) >= 0) d_rect(ox, y, 3, ECH, c);
             if (gw && seg == 0) {
                 ui_num(num, line + 1);
                 k = ui_len(num);
-                d_textn(ox + 2 + (4 - k) * ECW, y, C_SHADOW, EFONT, F_MONO, ECW, num, k);
+                d_textn(ox + 2 + (4 - k) * ECW, y, ec[SC_GUTFG] == SHADOW ? C_SHADOW : ec[SC_GUTFG], EFONT, EFACE, ECW, num, k);
             }
             // the selection behind the text
-            if (e->mode == M_VISUAL || e->mode == M_VLINE) {
+            if (e_sel_on(e)) {
                 x = a;
                 endsel = e->len[line] > a + cols ? a + cols : e->len[line];
                 while (x <= endsel && x < a + cols) {
-                    if (e_selected(e, line, x)) d_rect(sx + (x - a) * ECW, y, ECW, ECH, 0xa8c8ff);
+                    if (e_selected(e, line, x)) d_rect(sx + (x - a) * ECW, y, ECW, ECH, ec[SC_SEL]);
                     ++x;
                 }
             }
@@ -2861,33 +3426,35 @@ static void e_draw_text(struct win *w, int ox, int oy, int cw, int ch, int focus
                 c = e_hcol(a + x);
                 k = x + 1;
                 while (k < n && e_hcol(a + k) == c) ++k;
-                d_textn(sx + x * ECW, y, c, EFONT, F_MONO, ECW, e->ln[line] + a + x, k - x);
+                d_textn(sx + x * ECW, y, c, EFONT, EFACE, ECW, e->ln[line] + a + x, k - x);
                 x = k;
             }
             // the cursor: a block in Normal, a bar in Insert
-            if (focused && line == e->cy && seg == cseg && e->mode != M_CMD) {
+            if (focused && !e->fb.keys && line == e->cy && seg == cseg && e->mode != M_CMD) {
                 x = sx + (e->cx - a) * ECW;
                 if (e->vim && e->mode != M_INSERT) {
-                    d_rect(x, y, ECW, ECH, C_DARK);
+                    d_rect(x, y, ECW, ECH, ec[SC_CUR]);
                     c = e_char(e, line, e->cx);
-                    if (c != 10) { num[0] = c; d_textn(x, y, C_WHITE, EFONT, F_MONO, ECW, num, 1); }
-                } else d_rect(x, y, 2, ECH - 1, C_DARK);
+                    if (c != 10) { num[0] = c; d_textn(x, y, ec[SC_CURFG], EFONT, EFACE, ECW, num, 1); }
+                } else d_rect(x, y, 2, ECH - 1, ec[SC_CUR]);
             }
             y = y + ECH;
             ++r; ++seg;
         }
         ++line;
     }
-    while (r < rows) { d_text(sx, y, 0x6060c0, F_MONO, "~"); y = y + ECH; ++r; }
-    ui_scrollbar(ox + cw - 17, oy, tah - (hb ? 16 : 0), e->nl, rows, e->top);
+    while (r < rows) { d_textn(sx, y, ec[SC_TILDE], EFONT, EFACE, ECW, "~", 1); y = y + ECH; ++r; }
+    ui_scrollbar(ox + cw - 17, oy, tah - (hb ? 16 : 0), e->nl, e->vis, e->top);
     if (hb) {
         ui_hscrollbar(ox, oy + tah - 16, cw - 17, e->maxw + 1, cols, e->left);
         d_rect(ox + cw - 17, oy + tah - 16, 17, 16, C_FACE);
     }
 
+    if (fh) ui_find_draw(&e->fb, ox, oy + tah, cw, focused);
+
     // the build pane: a header with Cancel while it runs, the log, its bars
     if (e->bshown) {
-        y = oy + tah;
+        y = oy + tah + fh;
         d_rect(ox, y, cw, BHDR, C_FACE);
         d_bevel(ox, y, cw, BHDR, B_RAISED);
         ui_cpy(sb, e->building ? "Build: running" : (e->blogn == 0 ? "Build" : (e->bcancel ? "Build: cancelled" : (e->bstatus == 0 ? "Build: finished" : "Build: failed"))));
@@ -2914,7 +3481,7 @@ static void e_draw_text(struct win *w, int ox, int oy, int cw, int ch, int focus
             if (i == e->bsel) { d_rect(ox, by + 1 + k * ECH, cw - 17, ECH, 0x304070); c = C_WHITE; }
             n = ui_len(e->blog[i]) - e->bleft;
             if (n > e->bcols) n = e->bcols;
-            if (n > 0) d_textn(ox + 4, by + 1 + k * ECH, c, EFONT, F_MONO, ECW, e->blog[i] + e->bleft, n);
+            if (n > 0) d_textn(ox + 4, by + 1 + k * ECH, c, EFONT, EFACE, ECW, e->blog[i] + e->bleft, n);
             ++k; ++i;
         }
         ui_scrollbar(ox + cw - 17, by, BLOG_H, e->blogn, BROWS, e->btop);
@@ -2928,32 +3495,66 @@ static void e_draw_text(struct win *w, int ox, int oy, int cw, int ch, int focus
     if (e->mode == M_CMD) {
         sb[0] = e->cmdkind; sb[1] = 0;
         ui_cat(sb, e->cmd);
-        d_textn(ox + 4, sy + 2, C_DARK, EFONT, F_MONO, ECW, sb, ui_len(sb));
+        d_textn(ox + 4, sy + 2, C_DARK, EFONT, EFACE, ECW, sb, ui_len(sb));
         if (focused) d_rect(ox + 4 + ui_len(sb) * ECW, sy + 2, 2, ECH - 1, C_DARK);
     } else {
         if (e->msg[0]) ui_cpy(sb, e->msg);
-        else if (!e->vim) ui_cpy(sb, "-- EDIT --  (Esc for a command: w, make, set vim; Ctrl+S saves)");
+        else if (!e->vim) ui_cpy(sb, "-- EDIT --  (Esc for a command: w, make, e FILE; Ctrl+S saves)");
         else if (e->mode == M_INSERT) ui_cpy(sb, "-- INSERT --");
         else if (e->mode == M_VISUAL) ui_cpy(sb, "-- VISUAL --");
         else if (e->mode == M_VLINE) ui_cpy(sb, "-- VISUAL LINE --");
         else sb[0] = 0;
+        d_clip(ox, sy, cw - 20 - 9 * ECW, ECH + 4);
         d_text(ox + 4, sy + 3, C_DARK, F_SANS, sb);
+        d_clip_end();
     }
     ui_num(sb, e->cy + 1);
     ui_cat(sb, ",");
     ui_num(sb + ui_len(sb), e->cx + 1);
     k = ui_len(sb);
-    d_textn(ox + cw - 12 - k * ECW, sy + 2, C_DARK, EFONT, F_MONO, ECW, sb, k);
+    d_textn(ox + cw - 12 - k * ECW, sy + 2, C_DARK, EFONT, EFACE, ECW, sb, k);
 }
 
-// the view moved to T: the cursor comes along, as the redraw keeps it in view
+// The view moved to T, no further than brings the last line to the
+// bottom: the cursor comes along onto a line wholly in view, as the
+// redraw keeps it in view (it would move the view back for a cursor on a
+// line whose rows run off the bottom).
 static void e_scrolled(struct edit *e, int t) {
+    int last;
+    last = e_maxtop(e);
+    if (t > last) t = last;
+    if (t < 0) t = 0;
     e->top = t;
-    if (e->top > e->nl - e->rows) e->top = e->nl - e->rows;
-    if (e->top < 0) e->top = 0;
-    if (e->cy < e->top) e->cy = e->top;
-    if (e->cy >= e->top + e->rows) e->cy = e->top + e->rows - 1;
+    last = e_lastfull(e, t);
+    if (e->cy < t) e->cy = t;
+    if (e->cy > last) e->cy = last;
     e_clamp(e);
+}
+
+// The line and column at (x, y) in the text (as the last draw laid it
+// out), clamped to the text
+static void e_pos_at(struct edit *e, int x, int y, int *py, int *px) {
+    int r, l, h;
+    r = (y - 3) / ECH;
+    if (y < 3 || r < 0) r = 0;
+    if (!e->wrap) {
+        l = e->top + r;
+        if (l >= e->nl) l = e->nl - 1;
+        if (l < 0) l = 0;
+        *py = l;
+        *px = e->left + (x - 4 - e->gw + ECW / 2) / ECW;
+    } else {
+        // the row's line, and which of its wrapped rows
+        l = e->top;
+        while (l < e->nl - 1) { h = e_wh(e, l, e->cols); if (r < h) break; r = r - h; ++l; }
+        h = e_wh(e, l, e->cols);
+        if (r >= h) r = h - 1;
+        *py = l;
+        *px = r * e->cols + (x - 4 - e->gw + ECW / 2) / ECW;
+    }
+    if (x - 4 - e->gw + ECW / 2 < 0) *px = e->wrap ? r * e->cols : e->left;
+    if (*px > e->len[*py]) *px = e->len[*py];
+    if (*px < 0) *px = 0;
 }
 
 // Where things are, in the text's own coordinates (as the last draw left
@@ -2962,7 +3563,7 @@ static void e_mouse_text(struct win *w, int ev, int x, int y, int cw, int ch) {
     struct edit *e;
     int row, line, t, by, r, l, h;
     e = E(w);
-    by = e->tah + BHDR;                            // the build log's top
+    by = e->tah + e->fh + BHDR;                    // the build log's top
     if (ev == E_WHEEL) { e_scrolled(e, e->top + y * 3); return; }
     if (ev == E_MOVE) {
         t = ui_scroll_drag(cw - 17, 0, y);
@@ -2973,13 +3574,27 @@ static void e_mouse_text(struct win *w, int ev, int x, int y, int cw, int ch) {
         if (t >= 0) { e->btop = t; return; }
         t = ui_scroll_drag(0, by + BLOG_H, x);
         if (t >= 0) { e->bleft = t; return; }
+        // a selection being dragged out: Traditional's, or VIM's Visual
+        if (e->drag) {
+            e_pos_at(e, x, y, &row, &line);
+            if (row == e->cy && line == e->cx) return;
+            e->cy = row; e->cx = line; e->want = line;
+            if (!e->vim) e->tsel = e->vy != e->cy || e->vx != e->cx;
+            else { if (e->mode != M_VISUAL) e->mode = M_VISUAL; e_clamp(e); }
+            wk_invalidate(w->id, 0, 0, 0, 0);
+        }
         return;
     }
     if (ev != E_DOWN && ev != E_DBL) return;
-    if (e->bshown && y >= e->tah && y < e->tah + e->ph) {
+    if (e->fh && y >= e->tah && y < e->tah + e->fh) {
+        e->drag = 0;
+        e_find_act(w, ui_find_mouse(&e->fb, ev, x, y, 0, e->tah, cw));
+        return;
+    }
+    if (e->bshown && y >= e->tah + e->fh && y < e->tah + e->fh + e->ph) {
         if (ev != E_DOWN && y < by) return;
         if (y < by) {
-            if (e->building && ui_hit(x, y, cw - 72, e->tah + 1, 66, BHDR - 2)) e_cancel(w);
+            if (e->building && ui_hit(x, y, cw - 72, e->tah + e->fh + 1, 66, BHDR - 2)) e_cancel(w);
             return;
         }
         if (y >= by + BLOG_H) {
@@ -3004,56 +3619,86 @@ static void e_mouse_text(struct win *w, int ev, int x, int y, int cw, int ch) {
         return;
     }
     if (y >= e->tah) return;
-    t = ui_scroll_click(x, y, cw - 17, 0, e->tah - (e->hb ? 16 : 0), e->nl, e->rows, e->top);
+    t = ui_scroll_click(x, y, cw - 17, 0, e->tah - (e->hb ? 16 : 0), e->nl, e->vis, e->top);
     if (t >= 0) { e_scrolled(e, t); return; }
     if (e->hb && y >= e->tah - 16) {
         t = ui_hscroll_click(x, y, 0, e->tah - 16, cw - 17, e->maxw + 1, e->cols, e->left);
         if (t >= 0) e->left = t;
         return;
     }
-    if (e->mode == M_VISUAL || e->mode == M_VLINE || e->mode == M_CMD) e->mode = M_NORMAL;
-    r = (y - 3) / ECH;
-    if (r < 0) r = 0;
-    if (!e->wrap) {
-        line = e->top + r;
-        if (line >= e->nl) line = e->nl - 1;
-        if (line < 0) line = 0;
-        e->cy = line;
-        e->cx = e->left + (x - 4 - e->gw + ECW / 2) / ECW;
-    } else {
-        // the row's line, and which of its wrapped rows
-        l = e->top;
-        while (l < e->nl - 1) { h = e_wh(e, l, e->cols); if (r < h) break; r = r - h; ++l; }
-        h = e_wh(e, l, e->cols);
-        if (r >= h) r = h - 1;
-        e->cy = l;
-        e->cx = r * e->cols + (x - 4 - e->gw + ECW / 2) / ECW;
-    }
-    e_clamp(e);
+    if (e->mode == M_VISUAL || e->mode == M_VLINE || e->mode == M_CMD) e->mode = e->vim ? M_NORMAL : M_INSERT;
+    e->tlast = 0;
+    e->fb.keys = 0;                                // a click in the text: the keys are the text's again
+    // Shift+click: Traditional's selection runs from where the cursor was
+    if (!e->vim && (wk.mods & M_SHIFT) && ev == E_DOWN) { if (!e->tsel) { e->vy = e->cy; e->vx = e->cx; } }
+    else e->tsel = 0;
+    e_pos_at(e, x, y, &e->cy, &e->cx);
+    if (e->vim) e_clamp(e);
     e->want = e->cx;
+    if (!e->vim && (wk.mods & M_SHIFT) && ev == E_DOWN) { e->tsel = e->vy != e->cy || e->vx != e->cx; e->drag = 1; return; }
+    // a double click takes a word (Traditional); a press starts a selection a drag makes
+    if (!e->vim && ev == E_DBL && e_isword(e_char(e, e->cy, e->cx))) {
+        r = e->cx; while (r > 0 && e_isword(e->ln[e->cy][r - 1])) --r;
+        l = e->cx; while (l < e->len[e->cy] && e_isword(e->ln[e->cy][l])) ++l;
+        e->vy = e->cy; e->vx = r; e->cx = l; e->tsel = l > r;
+        return;
+    }
+    e->vy = e->cy; e->vx = e->cx;
+    e->drag = ev == E_DOWN;
+}
+
+// The tabs over the text, while the Code tab is open (a compiled file's
+// window has none: it is all Code tab); the Code tab in front
+static int x_tabs(struct edit *e) { return e->xshown && e->xp && !e->xobj; }
+static int x_front(struct edit *e) { return e->xshown && e->xtab && e->xp; }
+static char *x_labels[2];
+static void x_tab_labels(struct edit *e) {
+    x_labels[0] = e->path[0] ? ui_base(e->path) : "Untitled";
+    x_labels[1] = "Code";
 }
 
 // The pointer over the window: a text beam over the text, an arrow over
-// the pane, the bars and the build log (as the last draw laid them out)
+// the tabs, the Code tab, the bars and the build log (as the last draw
+// laid them out)
 int edit_pointer(struct win *w, int x, int y, int cw, int ch) {
     struct edit *e;
     e = E(w);
     if (f_on(e, cw)) {
-        if (x < FW + 2) return PTR_ARROW;
-        x = x - FW - 2; cw = cw - FW - 2;
+        e->fwx = f_width(e, cw);
+        if (x >= e->fwx && x < e->fwx + SPW) return PTR_COLS;
+        if (x < e->fwx) return PTR_ARROW;
+        x = x - e->fwx - SPW; cw = cw - e->fwx - SPW;
     }
+    if (x_tabs(e)) { if (y < TABH) return PTR_ARROW; y = y - TABH; }
+    if (x_front(e)) return PTR_ARROW;
     if (y < e->tah - (e->hb ? 16 : 0) && x < cw - 17) return PTR_TEXT;
     return PTR_ARROW;
 }
 
-// The file pane on the left when it is shown, the text beside it
+// The file pane on the left when it is shown, and beside it the text, or
+// the Code tab in its place, under their tabs
 void edit_draw(struct win *w, int ox, int oy, int cw, int ch, int focused) {
     struct edit *e;
     e = E(w);
-    if (!f_on(e, cw)) { e_draw_text(w, ox, oy, cw, ch, focused); return; }
-    f_draw(e, ox, oy, ch);
-    d_clip(ox + FW + 2, oy, cw - FW - 2, ch);
-    e_draw_text(w, ox + FW + 2, oy, cw - FW - 2, ch, focused);
+    ec = scheme_cols + ide_scheme * SC_N;
+    if (f_on(e, cw)) {
+        e->fwx = f_width(e, cw);
+        f_draw(e, ox, oy, ch);
+        ui_splitter(ox + e->fwx, oy, SPW, ch);
+        ox = ox + e->fwx + SPW; cw = cw - e->fwx - SPW;
+    }
+    if (x_tabs(e)) {
+        x_tab_labels(e);
+        d_rect(ox, oy, cw, TABH, C_FACE);
+        ui_tabs(ox + 4, oy + 2, x_labels, 2, e->xtab);
+        ui_button(ox + cw - 24, oy + 3, 20, 18, "x", 0, 0);   // closes the Code tab
+        oy = oy + TABH; ch = ch - TABH;
+    }
+    // the function at the cursor: the Code tab's, and the gutter's bands
+    if (e->xshown && e->xp && !e->xobj) xp_cursor(e->xp, e->cy + 1);
+    d_clip(ox, oy, cw, ch);
+    if (x_front(e)) xp_draw(e->xp, ox, oy, cw, ch, ec, e->modified, focused);
+    else e_draw_text(w, ox, oy, cw, ch, focused);
     d_clip_end();
 }
 
@@ -3061,14 +3706,194 @@ void edit_mouse(struct win *w, int ev, int x, int y, int cw, int ch) {
     struct edit *e;
     int t;
     e = E(w);
-    if (!f_on(e, cw)) { e_mouse_text(w, ev, x, y, cw, ch); return; }
-    if (ev == E_MOVE) {
-        t = ui_scroll_drag(FW - 17, FHDR, y);
-        if (t >= 0) { e->ftop = t; return; }
-        t = ui_scroll_drag(0, ch - 16, x);
-        if (t >= 0) { e->fleft = t; return; }
-    } else if (x < FW + 2) { f_mouse(w, ev, x, y, ch); return; }
-    e_mouse_text(w, ev, x - FW - 2, y, cw - FW - 2, ch);
+    // the splitter let go: its width kept, for the IDE windows opened after
+    if (ev == E_UP) { e->drag = 0; if (e->fdrag) { e->fdrag = 0; ide_fw = e->fw; ide_save(); } return; }
+    if (f_on(e, cw)) {
+        e->fwx = f_width(e, cw);
+        if (ev == E_MOVE) {
+            if (e->fdrag && (t = ui_split_drag(x)) >= 0) {
+                e->fw = t;
+                if (e->fw > cw - SPW - 220) e->fw = cw - SPW - 220;
+                if (e->fw < FMIN) e->fw = FMIN;
+                return;
+            }
+            t = ui_scroll_drag(e->fwx - 17, FHDR, y);
+            if (t >= 0) { e->ftop = t; return; }
+            t = ui_scroll_drag(0, ch - 16, x);
+            if (t >= 0) { e->fleft = t; return; }
+        } else if (ev == E_DOWN && ui_split_click(x, y, e->fwx, 0, SPW, ch, e->fwx)) { e->drag = 0; e->fdrag = 1; return; }
+        else if (x < e->fwx + SPW) { e->drag = 0; if (x < e->fwx) f_mouse(w, ev, x, y, ch); return; }
+        x = x - e->fwx - SPW; cw = cw - e->fwx - SPW;
+    }
+    if (x_tabs(e)) {
+        // a tab picked, or the Code tab closed (a wheel's y is how far, not where)
+        if (ev != E_WHEEL && ev != E_MOVE && y < TABH) {
+            e->drag = 0;
+            if (ev != E_DOWN) return;
+            x_tab_labels(e);
+            if (ui_hit(x, y, cw - 24, 3, 20, 18)) { x_close(e); mark_dirty(); return; }
+            t = ui_tab_hit(x, y, 4, 2, x_labels, 2);
+            if (t >= 0) { e->xtab = t; mark_dirty(); }
+            return;
+        }
+        if (ev != E_WHEEL) y = y - TABH;
+        ch = ch - TABH;
+    }
+    if (x_front(e)) {
+        e->drag = 0;
+        t = xp_mouse(e->xp, ev, x, y, cw, ch);
+        if (t == 2) { x_goto(w); mark_dirty(); return; }
+        if (t != 0) mark_win_dirty(w);
+        return;
+    }
+    e_mouse_text(w, ev, x, y, cw, ch);
+}
+
+// ---- Settings: the colour scheme, the input mode and the font --------------------------------
+//
+// One page for every IDE window, a window of its own: each choice is used
+// at once, in every IDE window open, and kept in /etc/ide.cfg as
+// "scheme N input M font F size S pane P" (M 1 for VIM; F and S the kit's
+// fixed-width faces and sizes; P the file pane's width), as Settings keeps
+// the desktop's in /etc/desktop.cfg.
+
+static char icfg[64];
+
+// the grid the font makes
+static void ide_grid() {
+    ide_face = wk_mono_font(ide_mono);
+    wk_grid(ide_size, &ide_fs, &ide_cw, &ide_ch);
+}
+
+static void ide_load() {
+    int fd, n, i, v;
+    ide_loaded = 1;
+    n = 0;
+    if ((fd = uopen("/etc/ide.cfg", O_RD)) >= 0) { n = uread(fd, icfg, 60); uclose(fd); }
+    if (n < 0) n = 0;
+    icfg[n] = 0;
+    i = 0;
+    while (i < n) {
+        if (icfg[i] == 's' && icfg[i + 1] == 'c' && icfg[i + 6] == ' ' && e_digits(icfg + i + 7, &v) > 0 && v < N_SCHEMES) ide_scheme = v;
+        if (icfg[i] == 'i' && icfg[i + 1] == 'n' && icfg[i + 5] == ' ' && e_digits(icfg + i + 6, &v) > 0) ide_vim = v != 0;
+        if (icfg[i] == 'f' && icfg[i + 1] == 'o' && icfg[i + 4] == ' ' && e_digits(icfg + i + 5, &v) > 0 && v < WK_FACES) ide_mono = v;
+        if (icfg[i] == 's' && icfg[i + 1] == 'i' && icfg[i + 4] == ' ' && e_digits(icfg + i + 5, &v) > 0 && v < WK_SIZES) ide_size = v;
+        if (icfg[i] == 'p' && icfg[i + 1] == 'a' && icfg[i + 4] == ' ' && e_digits(icfg + i + 5, &v) > 0 && v >= FMIN && v < 2000) ide_fw = v;
+        ++i;
+    }
+    ide_grid();
+}
+
+static void ide_save() {
+    int fd;
+    if ((fd = uopen("/etc/ide.cfg", O_WR + O_CREATE + O_TRUNCATE)) < 0) return;
+    ui_cpy(icfg, "scheme ");
+    ui_num(icfg + ui_len(icfg), ide_scheme);
+    ui_cat(icfg, ide_vim ? " input 1 font " : " input 0 font ");
+    ui_num(icfg + ui_len(icfg), ide_mono);
+    ui_cat(icfg, " size ");
+    ui_num(icfg + ui_len(icfg), ide_size);
+    ui_cat(icfg, " pane ");
+    ui_num(icfg + ui_len(icfg), ide_fw);
+    ui_cat(icfg, "\n");
+    write(fd, icfg, ui_len(icfg));
+    uclose(fd);
+}
+
+// a choice made: into every IDE window, and kept
+static void ide_set(int scheme, int vim) {
+    struct win *w;
+    struct edit *e;
+    ide_scheme = scheme; ide_vim = vim;
+    ide_save();
+    w = win_first();
+    while (w) {
+        if (w->used && w->kind == K_EDIT && (e = E(w)) && e->vim != vim) {
+            e->vim = vim; e->tsel = 0; e->op = 0; e->pre = 0; e->count = 0;
+            e->mode = vim ? M_NORMAL : M_INSERT;
+            e_clamp(e);
+            e_say(e, vim ? "VIM mode: Esc for Normal, i to type" : "Traditional: type to edit; Esc for a command");
+        }
+        w = w->next;
+    }
+    mark_dirty();
+}
+
+// the font chosen: every IDE window, and its Code tab, laid out again in it
+static void ide_set_font(int face, int size) {
+    ide_mono = face; ide_size = size;
+    ide_grid();
+    ide_save();
+    mark_dirty();
+}
+
+// a piece of the preview: n characters of s in colour hc, along from *x
+static void iset_piece(int *x, int y, int hc, char *s) {
+    d_textn(*x, y, ec[hc], EFONT, EFACE, ECW, s, ui_len(s));
+    *x = *x + ui_len(s) * ECW;
+}
+
+// the font group's columns: a face, or a size, in each
+static int iset_col[3] = { 18, 112, 222 };
+
+static void iset_draw(int w, int cw, int ch, int focused) {
+    int i, x, y;
+    d_rect(0, 0, cw, ch, C_FACE);
+    ui_group(8, 8, cw - 16, 66, "Colour scheme");
+    i = 0;
+    while (i < N_SCHEMES) { ui_radio(18, 28 + i * 20, scheme_names[i], i == ide_scheme); ++i; }
+    ui_group(8, 82, cw - 16, 66, "Input mode");
+    ui_radio(18, 102, "Traditional: type at once, as in Text Editor", !ide_vim);
+    ui_radio(18, 122, "VIM: Normal, Insert and Visual modes", ide_vim);
+    ui_group(8, 156, cw - 16, 66, "Font");
+    i = 0;
+    while (i < WK_FACES) { ui_radio(iset_col[i], 174, wk_mono_name(i), i == ide_mono); ++i; }
+    i = 0;
+    while (i < WK_SIZES) { ui_radio(iset_col[i], 196, wk_size_name(i), i == ide_size); ++i; }
+    // the preview, in the scheme and the font chosen
+    ec = scheme_cols + ide_scheme * SC_N;
+    y = 230;
+    d_rect(8, y, cw - 16, 3 * ECH + 8, ec[SC_BG]);
+    d_bevel(8, y, cw - 16, 3 * ECH + 8, B_SUNKEN);
+    x = 14; iset_piece(&x, y + 4, HC_PRE, "#include"); iset_piece(&x, y + 4, HC_TEXT, " "); iset_piece(&x, y + 4, HC_STR, "\"c4ix.h\"");
+    x = 14; iset_piece(&x, y + 4 + ECH, HC_TYPE, "int"); iset_piece(&x, y + 4 + ECH, HC_TEXT, " main() { ");
+    iset_piece(&x, y + 4 + ECH, HC_KW, "return"); iset_piece(&x, y + 4 + ECH, HC_TEXT, " "); iset_piece(&x, y + 4 + ECH, HC_NUM, "0");
+    iset_piece(&x, y + 4 + ECH, HC_TEXT, "; }");
+    x = 14; iset_piece(&x, y + 4 + 2 * ECH, HC_COM, "// the IDE's colours");
+    ui_button(cw - 88, ch - 34, 76, 24, "OK", 0, 1);
+}
+
+static void iset_mouse(int w, int ev, int x, int y, int b) {
+    int cw, ch, i;
+    if (ev != E_DOWN) return;
+    wk_size(w, &cw, &ch);
+    i = 0;
+    while (i < N_SCHEMES) { if (ui_hit(x, y, 14, 26 + i * 20, cw - 28, 18)) { ide_set(i, ide_vim); return; } ++i; }
+    if (ui_hit(x, y, 14, 100, cw - 28, 18)) { ide_set(ide_scheme, 0); return; }
+    if (ui_hit(x, y, 14, 120, cw - 28, 18)) { ide_set(ide_scheme, 1); return; }
+    i = 0;
+    while (i < 3) {
+        if (i < WK_FACES && ui_hit(x, y, iset_col[i] - 4, 172, 100, 18)) { ide_set_font(i, ide_size); return; }
+        if (i < WK_SIZES && ui_hit(x, y, iset_col[i] - 4, 194, 100, 18)) { ide_set_font(ide_mono, i); return; }
+        ++i;
+    }
+    if (ui_hit(x, y, cw - 88, ch - 34, 76, 24)) wk_close(w);
+}
+
+static void iset_key(int w, int down, int code, int ch, int mods) {
+    if (!down) return;
+    if (code == KEY_ESC || code == KEY_ENTER) wk_close(w);
+    else if (code == KEY_UP && ide_scheme > 0) ide_set(ide_scheme - 1, ide_vim);
+    else if (code == KEY_DOWN && ide_scheme < N_SCHEMES - 1) ide_set(ide_scheme + 1, ide_vim);
+}
+
+static struct wk_class iset_class = { .kind = K_SETTINGS, .draw = iset_draw, .mouse = iset_mouse, .key = iset_key };
+
+static void ide_settings() {
+    int i;
+    if ((i = wk_find(&iset_class))) { wk_raise(i); return; }
+    iset_class.size = 16;
+    wk_open(&iset_class, "IDE Settings", 380, 370, WK_FIXED | WK_CENTER, 0);
 }
 
 // ---- the window -----------------------------------------------------------------------------
@@ -3077,22 +3902,29 @@ int edit_open(char *path) {
     int i;
     struct win *w;
     struct edit *e;
-    i = win_open(K_EDIT, "Untitled - Editor", 760, 500, sizeof(struct edit));
+    if (!ide_loaded) ide_load();
+    i = win_open(K_EDIT, "Untitled - IDE", 760, 500, sizeof(struct edit));
     if (i < 0) return i;
     w = win_get(i);
     e = E(w);
-    edit_menus[0].title = "File"; edit_menus[1].title = "Build"; edit_menus[2].title = "View"; edit_menus[3].title = "Help";
+    edit_menus[0].title = "File"; edit_menus[1].title = "Edit"; edit_menus[2].title = "Build";
+    edit_menus[3].title = "View"; edit_menus[4].title = "Help";
     edit_file_items[0] = "New"; edit_file_items[1] = "Open..."; edit_file_items[2] = "Save";
     edit_file_items[3] = "Save As..."; edit_file_items[4] = "-"; edit_file_items[5] = "Close"; edit_file_items[6] = 0;
+    edit_edit_items[E_CUT] = "Cut   Ctrl+X"; edit_edit_items[E_COPY] = "Copy   Ctrl+C"; edit_edit_items[E_PASTE] = "Paste   Ctrl+V";
+    edit_edit_items[3] = "-"; edit_edit_items[E_ALL] = "Select All   Ctrl+A"; edit_edit_items[5] = "-";
+    edit_edit_items[E_FIND] = "Find...   Ctrl+F"; edit_edit_items[E_FNEXT] = "Find Next   F3";
+    edit_edit_items[E_FPREV] = "Find Previous  Shift+F3"; edit_edit_items[9] = 0;
     edit_build_items[0] = "Build   F5"; edit_build_items[1] = "Run   F6"; edit_build_items[2] = "Next Error   F8";
     edit_build_items[3] = "Previous Error"; edit_build_items[4] = "Show Output   F4";
     edit_build_items[5] = "Cancel Build"; edit_build_items[6] = 0;
     edit_view_items[0] = "Files   Ctrl+B"; edit_view_items[1] = "Syntax Colouring";
-    edit_view_items[2] = "Word Wrap"; edit_view_items[3] = 0;
+    edit_view_items[2] = "Word Wrap"; edit_view_items[3] = "Code   F7"; edit_view_items[4] = "-";
+    edit_view_items[5] = "Settings..."; edit_view_items[6] = 0;
     edit_help_items[0] = "Keys"; edit_help_items[1] = 0;
-    edit_menus[0].items = edit_file_items; edit_menus[1].items = edit_build_items;
-    edit_menus[2].items = edit_view_items; edit_menus[3].items = edit_help_items;
-    wk_menu(i, edit_menus, 4);
+    edit_menus[0].items = edit_file_items; edit_menus[1].items = edit_edit_items; edit_menus[2].items = edit_build_items;
+    edit_menus[3].items = edit_view_items; edit_menus[4].items = edit_help_items;
+    wk_menu(i, edit_menus, 5);
     e->utext = (char **)ualloc(UNDO_MAX * sizeof(int)); e->ulen = (int *)ualloc(UNDO_MAX * sizeof(int));
     e->ucy = (int *)ualloc(UNDO_MAX * sizeof(int)); e->ucx = (int *)ualloc(UNDO_MAX * sizeof(int));
     e->rtext = (char **)ualloc(UNDO_MAX * sizeof(int)); e->rlen = (int *)ualloc(UNDO_MAX * sizeof(int));
@@ -3103,8 +3935,10 @@ int edit_open(char *path) {
     e->epath = (char **)ualloc(ERR_MAX * sizeof(int));
     e->eline = (int *)ualloc(ERR_MAX * sizeof(int));
     e->elog = (int *)ualloc(ERR_MAX * sizeof(int));
-    e->vim = 1; e->nu = 1; e->mode = M_NORMAL; e->ecur = 0 - 1; e->bsel = 0 - 1;
-    e->hl_line = 0 - 1;
+    e->vim = ide_vim; e->nu = 1; e->mode = ide_vim ? M_NORMAL : M_INSERT; e->ecur = 0 - 1; e->bsel = 0 - 1;
+    e->wrap = 1;
+    e->hl_lang = 0 - 1;
+    e->fw = ide_fw;
     e->lcx = 0 - 1; e->lcy = 0 - 1;
     e_insline(e, 0, "", 0);
     // the file pane: the top of the disk, every folder closed
@@ -3112,12 +3946,22 @@ int edit_open(char *path) {
     f_reserve(e, 64);
     f_open_dir(e, 0 - 1);
     if (path && path[0]) {
-        if (!e_load(e, path)) { ui_cpy(e->path, path); e_say(e, "New file"); }
+        if (!e_open(w, path, 0)) { ui_ncpy(e->path, path, 128); e_say(e, "New file"); }
     }
     e->modified = 0;
-    if (!e->msg[0]) e_say(e, "VIM keys: i to type, Esc, :w to save, :make (F5) to build, :help is the Help menu");
+    if (!e->msg[0] && e->vim) e_say(e, "VIM keys: i to type, Esc, :w to save, :make (F5) to build, :help is the Help menu");
+    if (!e->msg[0]) e_say(e, "Type to edit; Esc for a command (w, make, e FILE); F5 builds; View > Settings for colours and VIM");
     e_retitle(w);
     return i;
+}
+
+// Open and Save As: the kit's file box, starting at the file's own folder
+static void e_filebox(struct win *w, int save) {
+    struct edit *e;
+    e = E(w);
+    ui_ncpy(e->ask, e->path[0] ? e->path : (save ? "/tmp/untitled.c" : "/usr"), WK_PATH);
+    if (!e->path[0] && !save) ui_cat(e->ask, "/");
+    wk_filebox(w->id, save ? A_SAVEAS : A_OPEN, save, ide_filter, e->ask, WK_PATH);
 }
 
 void edit_command(struct win *w, int menu, int item) {
@@ -3125,35 +3969,42 @@ void edit_command(struct win *w, int menu, int item) {
     e = E(w);
     if (menu == 0) {
         if (item == 0) {
-            if (e->modified) { msgbox(w, "Editor", "Save the changes first (:w), or :q! to drop them.", 0, A_NONE); return; }
-            e_settext(e, "", 0); e->path[0] = 0; e->modified = 0; e->cy = 0; e->cx = 0; e_retitle(w);
+            if (e->modified) { msgbox(w, "IDE", "Save the changes first (Ctrl+S, or :w), or :q! to drop them.", 0, A_NONE); return; }
+            if (e->xobj) { e->xobj = 0; x_close(e); }
+            e_settext(e, "", 0); e->path[0] = 0; e->modified = 0; e->cy = 0; e->cx = 0; e->tsel = 0; e_retitle(w);
         }
-        else if (item == 1) inputbox(w, "Open", "File to edit:", e->path[0] ? e->path : "/usr/", A_OPEN);
+        else if (item == 1) e_filebox(w, 0);
         else if (item == 2) {
-            if (!e->path[0]) inputbox(w, "Save As", "Save as:", "/tmp/untitled.c", A_SAVEAS);
+            if (!e->path[0]) e_filebox(w, 1);
             else { e_save(e, e->path); e_retitle(w); }
         }
-        else if (item == 3) inputbox(w, "Save As", "Save as:", e->path[0] ? e->path : "/tmp/untitled.c", A_SAVEAS);
+        else if (item == 3) e_filebox(w, 1);
         else if (item == 5) win_close(win_index(w));
         return;
     }
-    if (menu == 1) {
+    if (menu == 1) { e_edit(w, item); return; }
+    if (menu == 2) {
         if (item == 0) e_make(w);
-        else if (item == 1) e_ex(w, "run");
+        else if (item == 1) e_run(w);
         else if (item == 2) e_goto_error(w, e->ecur + 1);
         else if (item == 3) e_goto_error(w, e->ecur - 1);
         else if (item == 4) e->bshown = !e->bshown;
         else if (item == 5) e_cancel(w);
         return;
     }
-    if (menu == 2) {
+    if (menu == 3) {
         if (item == 0) e->fshown = !e->fshown;
         else if (item == 1) e->nosyn = !e->nosyn;
         else if (item == 2) { e->wrap = !e->wrap; e->left = 0; }
+        else if (item == 3) e_code(w);
+        else if (item == 5) ide_settings();
         return;
     }
-    msgbox(w, "Editor keys",
-           "Esc for Normal mode, i to insert. hjkl or arrows move; w b e words; dd yy p; u undo; . repeat. :w save, :make or F5 build, F8 next error, F6 run, Ctrl+B the file pane, :syntax off, :set novim for a plain editor.",
+    if (e->vim) msgbox(w, "IDE keys",
+           "Esc for Normal mode, i to insert. hjkl or arrows move; w b e words; dd yy p; u undo; . repeat. :w save, :make or F5 build, F8 next error, F6 run, F7 the code it compiles to, Ctrl+B the file pane, :syntax off, :set novim for a plain editor; View > Settings for Traditional typing.",
+           0, A_NONE);
+    else msgbox(w, "IDE keys",
+           "Type to edit; Shift with the arrows selects; Ctrl+X, C, V cut, copy and paste; Ctrl+A all; Ctrl+Z undo, Ctrl+Y redo; Ctrl+S saves. Esc for a command: w, make, run, e FILE, set nowrap. F5 builds, F6 runs, F7 shows the code it compiles to, F8 the next error, Ctrl+B the file pane; View > Settings for VIM mode, colours and the font.",
            0, A_NONE);
 }
 
@@ -3162,10 +4013,1657 @@ void edit_answer(struct win *w, int action, int yes) {
     e = E(w);
     if (!yes) return;
     if (action == A_OPEN) {
-        if (e->modified) { e_say(e, "No write since last change: :w first"); return; }
-        if (!e_load(e, dialog_text())) { ui_cpy(e->path, dialog_text()); e_settext(e, "", 0); e->modified = 0; e_say(e, "New file"); }
-    } else if (action == A_SAVEAS) e_save(e, dialog_text());
+        if (e->modified) { e_say(e, "No write since last change: save first (Ctrl+S, or :w)"); return; }
+        if (!e_open(w, e->ask, 0)) { ui_ncpy(e->path, e->ask, 128); e_settext(e, "", 0); e->modified = 0; e_say(e, "New file"); }
+    } else if (action == A_SAVEAS) e_save(e, e->ask);
+    else if (action == A_BINARY && !e_load(e, e->pend)) e_say(e, "Cannot open that file");
+    e->tsel = 0;
     e_retitle(w);
+}
+// explore.c -- the IDE's Code tab: the C4 code a C file compiles to, or a
+// compiled file's own, a function at a time, with the C source it came
+// from between the instructions. A cut-down Code Explorer
+// (docs/c4-explorer.md, track E), after the web page's
+// (libjs/web/explore.html): the functions down the left, found by typing
+// part of a name, and the code of the one picked beside them, each line
+// of source the map names shown above the instructions it made, long
+// lines folded (or, with Wrap off, scrolled across). It takes the
+// editor's place in the window, as a tab beside the text, since at
+// 800x600 and below there is no room for both side by side.
+//
+// Two ways in. For a .c file being edited, it compiles the saved file
+// with cc -g -c (c4sc's source map, the SMAP trailer of
+// docs/c4-explorer.md 2.2) into /tmp, on a pipe of its own, apart from
+// the build; again after every save, and when its -O is turned on or
+// off; the editor's cursor picks the function. A compiled file -- a
+// program, an object or a library: anything with C4R's header, and every
+// one C4IX ships carries a map -- opens in it as it is (edit.c, when it
+// opens one), its sources found by the map's paths: as they are, under
+// /usr (the root archive's /usr is the repository, so its src/ is
+// /usr/src), or beside the file. A program linked against shared
+// libraries brings them too, as the loader would (loader.c: a static
+// global __c4_needed names each one): their functions follow the
+// program's in the list, in a colour of their own, and a call into one
+// goes there.
+//
+// It reads each object itself (a module): the code, the patches that
+// say what each operand refers to, the symbols, and the map's files,
+// functions and rows. Each operand is named as libjs/c4r.js's insnText
+// names it (a function, a global, a string, a label, [bp+n]). A click on
+// a row lights every row of its line; a double click (or Enter) on a
+// call goes to the callee, and Back (Alt+Left, or Backspace) comes back;
+// a double click on any other row opens its line in the editor. Without
+// a map the functions come from the symbols, with no source to show.
+//
+// c4lc splices the helpers it calls (<udiv>, <umod>, the soft float
+// __c4d_ and long long __c4ll_ ones) into each unit that uses them, so a
+// program has as many copies as units that needed one; the list names
+// each copy's unit beside it.
+//
+// The opcode names are the machine's (src/c4bb/sim/devices.js, OPNAMES);
+// libjs/tests/test-desktop.mjs checks the copy here against them.
+
+#include "desktop.h"
+
+// the IDE's text grid (edit.c's, IDE Settings' font), and the tab's parts:
+// its headers (a field's height), its footer, how long a name is kept, the
+// source lines with no code shown between two that have, how far back
+// Back goes, the modules one tab holds (a program and the libraries it
+// loads: loader.c's LIB_MAX and one), and the longest source line drawn;
+// then how far the listing looks for a row's lines (xp_lay): the lines a
+// statement may go on to, the labels and braces above one, and the head
+// of a function, shown whole up to this long
+#define XCW ide_cw
+#define XCH ide_ch
+#define XFONT ide_fs
+#define XFACE ide_face
+#define XFOOT (XCH + 4)
+enum { XHDR = 22, XGAP = 3, XHIST = 16, XFILT = 30, XMODS = 9, XSRC = 480,
+       XCONT = 24, XLEAD = 12, XHEAD = 80 };
+// the opcodes it treats apart (OPNAMES' order)
+enum { O_LEA = 0, O_IMM = 1, O_JMP = 2, O_JSR = 3, O_BZ = 4, O_BNZ = 5, O_ADJ = 7, O_JSRI = 61, O_JSRS = 62, O_JMPA = 63,
+       O_LDL = 79, O_PSHL = 81, O_LEAP = 83, O_IMMP = 84, O_STL = 87, O_N = 95 };
+// patch types (load-c4r.c), and symbol classes and attributes (c4r.js)
+enum { P_CODE = -1, P_DATA = -2, S_FUN = 129, S_GLO = 131, S_EXTERN = 16 };
+// the colours, from the IDE's scheme as edit.c passes it (HC_* then SC_*)
+enum { XC_TEXT = 0, XC_KW = 1, XC_TYPE = 2, XC_STR = 3, XC_COM = 4, XC_NUM = 5, XC_PRE = 6,
+       XC_BG = 7, XC_GUT = 8, XC_SEL = 10 };
+
+static char *opnames =
+    "LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,"
+    "OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,"
+    "OPEN,READ,CLOS,PRTF,MALC,FREE,MSET,MCMP,EXIT,"
+    "PUTC,PUTS,RALC,MCPY,STRC,ITH ,_OPC,_BLT,_TRP,OPCD,"
+    "_JMP,_ADJ,C4CF,C4CY,TIME,SIGH,SIGI,USLP,INFO,OPSL,"
+    "C4IV,FLT ,JSRI,JSRS,JMPA,TLEV,DBG ,"
+    "CPUI,CPUN,CPUS,CPUH,"
+    "CAS ,XCHG,FADD,CWAI,CWAK,IPI ,"
+    "LXI ,SXI ,TRAW,"
+    "LDL ,LDG ,PSHL,PSHG,LEAP,IMMP,LIP ,ADDL,STL ,POPA,"
+    "FPU ,"
+    "LH  ,LHU ,SH  ,LSR ,LCU ,";
+
+// a line's colour: a small palette, cycled by line
+static int bands[8] = { 0x5fd7ff, 0xffaf5f, 0x87ff87, 0xff87d7, 0xd7d75f, 0xaf87ff, 0x5fffd7, 0xff8787 };
+
+// One object read: the program shown, or a library it loads
+struct xmod {
+    char path[128];
+    char *buf; int bufn, W;
+    int *code; int ncode; char *data; int ndata, memsz;
+    int *ptype; int *pval;                // per code word: the patch on it, 0 none
+    int nsym; int *sid; int *scls; int *sattr; int *sval; char **sname;
+    int nfile; char **fpath; int *fsize;  // the map's files, their sizes compiled
+    // each file's source, once looked for: its text, where its lines start and how many,
+    // and 1 found, 2 found but not the size it was compiled at, -1 not found
+    // -- and for the compiler's own, the line of the file holding them before their first
+    char **stext; int **sline; int *snl; int *sst; char **spath; int *soff;
+    int nfn; int *fstart; int *flen; int *ffile; int *fline; char **fname;
+    int *funit;                           // the unit each function came with (a helper: the one before it), or -1
+    int nrow; int *roff; int *rfile; int *rline;
+    int fn0;                              // its first function's number among all the tab's
+};
+
+struct xp {
+    // what is shown: a compile of PATH (a .c file), or the compiled file PATH itself
+    char path[128], dir[128], obj[48];
+    int objmode;
+    int pid, out_r, busy, opt, ok, failed;
+    char err0[96], err1[96]; int errn;    // the compiler's last two lines, when it failed
+    char part[96]; int partn;
+    struct xmod *mods[XMODS]; int nmod;   // the program (0), then the libraries it loads
+    int here;                             // module 0's file being edited, or -1
+    // every function, numbered: its module and its number there; one of a name shared in its module
+    int nall; int *gmod; int *gidx; int *gdup;
+    // the function list: all of them in order, and the ones the filter keeps
+    int *lord; int *lvis; int nvis, ltop, lrows, byname, lfollow;
+    char filt[XFILT + 2]; int filtc;
+    // the function shown (a number among all), its module, decoded
+    int cur; struct xmod *cm; int nins; int *ioff; int *iop; int *iarg; int *ilab; int *irow;
+    int lmin, lmax; int *lband;           // its lines in the file edited: a band's colour, or -1
+    // the listing: row i is instruction dins[i], or (dins[i] < 0) piece dseg[i] of line dline[i] of file dfile[i]
+    int *dins; int *dfile; int *dline; int *dseg; int nd, laycols, maxw;
+    int top, left, wrap, sel, rows, cols, lastline, hmod, hfile, hline;   // the view; the row picked; the line lit
+    int hist[XHIST]; int nhist;
+    char gopath[128]; int goline;         // a line asked for in the editor
+    char msg[96], note[160];
+};
+
+static struct xp *X(int *x) { return (struct xp *)x; }
+static char xb[320], xo[XSRC + 8];
+static char *hexd = "0123456789abcdef";
+
+// ---- reading an object -----------------------------------------------------------------------
+
+static int xm_word(struct xmod *m, int p) {
+    char *b;
+    int v;
+    b = m->buf + p;
+    v = (b[0] & 255) | ((b[1] & 255) << 8) | ((b[2] & 255) << 16) | ((b[3] & 255) << 24);
+    if (b[3] & 128) v = v | (-1 << 31);   // a negative word, at either size
+    return v;
+}
+static int up;                            // the map's reading position
+static int xp_u(char *b) {
+    int v, s, c;
+    v = 0; s = 0;
+    c = 128;
+    while (c & 128) { c = b[up] & 255; ++up; if (s < 31) v = v + ((c & 127) << s); s = s + 7; }
+    return v;
+}
+static int xp_s(char *b) {
+    int v, s, c;
+    v = 0; s = 0;
+    c = 128;
+    while (c & 128) { c = b[up] & 255; ++up; if (s < 31) v = v + ((c & 127) << s); s = s + 7; }
+    if ((c & 64) && s < 31) v = v - (1 << s);
+    return v;
+}
+static char *xp_str(char *b, int n) {
+    char *s;
+    s = (char *)ualloc(n + 1);
+    memcpy(s, b + up, n);
+    s[n] = 0;
+    up = up + n;
+    return s;
+}
+static int *xp_ints(int n) { return (int *)ualloc((n + 1) * sizeof(int)); }
+static int *xp_zeros(int n) { int *p; p = xp_ints(n); memset((char *)p, 0, (n + 1) * sizeof(int)); return p; }
+
+static void xm_free(struct xmod *m) {
+    int i;
+    if (m->buf) free(m->buf);
+    if (m->code) { free((char *)m->code); free((char *)m->ptype); free((char *)m->pval); }
+    i = 0; while (i < m->nsym) { free(m->sname[i]); ++i; }
+    if (m->sid) { free((char *)m->sid); free((char *)m->scls); free((char *)m->sattr); free((char *)m->sval); free((char *)m->sname); }
+    i = 0;
+    while (i < m->nfile) {
+        free(m->fpath[i]);
+        if (m->stext && m->stext[i]) { free(m->stext[i]); free((char *)m->sline[i]); free(m->spath[i]); }
+        ++i;
+    }
+    if (m->fpath) { free((char *)m->fpath); free((char *)m->fsize); }
+    if (m->stext) { free((char *)m->stext); free((char *)m->sline); free((char *)m->snl); free((char *)m->sst); free((char *)m->spath); free((char *)m->soff); }
+    i = 0; while (i < m->nfn) { free(m->fname[i]); ++i; }
+    if (m->fstart) { free((char *)m->fstart); free((char *)m->flen); free((char *)m->ffile); free((char *)m->fline); free((char *)m->fname); }
+    if (m->funit) free((char *)m->funit);
+    if (m->roff) { free((char *)m->roff); free((char *)m->rfile); free((char *)m->rline); }
+    free((char *)m);
+}
+
+// The SMAP chunk: files, functions and rows (docs/c4-explorer.md 2.2)
+static int xm_smap(struct xmod *m, char *b, int n) {
+    int flags, i, k, start, off, file, line, d;
+    up = 0;
+    if ((b[0] & 255) != 1) return 0;
+    flags = b[1] & 255;
+    up = 2;
+    m->nfile = xp_u(b);
+    m->fpath = (char **)xp_ints(m->nfile);
+    m->fsize = xp_ints(m->nfile);
+    i = 0;
+    while (i < m->nfile) {
+        k = xp_u(b);
+        m->fpath[i] = xp_str(b, k);
+        m->fsize[i] = xp_u(b);                // its size, then its CRC
+        if (flags & 1) up = up + 4;
+        ++i;
+    }
+    m->nfn = xp_u(b);
+    m->fstart = xp_ints(m->nfn); m->flen = xp_ints(m->nfn);
+    m->ffile = xp_ints(m->nfn); m->fline = xp_ints(m->nfn);
+    m->fname = (char **)xp_ints(m->nfn);
+    start = 0; i = 0;
+    while (i < m->nfn) {
+        start = start + xp_u(b);
+        m->fstart[i] = start;
+        m->flen[i] = xp_u(b);
+        k = xp_u(b);
+        m->fname[i] = xp_str(b, k);
+        m->ffile[i] = xp_u(b);
+        m->fline[i] = xp_u(b);
+        ++i;
+    }
+    m->nrow = xp_u(b);
+    m->roff = xp_ints(m->nrow); m->rfile = xp_ints(m->nrow); m->rline = xp_ints(m->nrow);
+    off = 0; file = 0; line = 0; i = 0;
+    while (i < m->nrow && up < n) {
+        d = xp_u(b);
+        off = off + (d >> 1);
+        if (d & 1) file = xp_u(b);
+        line = line + xp_s(b);
+        m->roff[i] = off; m->rfile[i] = file; m->rline[i] = line;
+        ++i;
+    }
+    m->nrow = i;
+    return 1;
+}
+
+// With no map, the functions are the symbols' own, in address order, each
+// up to the next
+static void xm_symfuncs(struct xmod *m) {
+    int i, n, gap, j, t, *v;
+    n = 0; i = 0;
+    while (i < m->nsym) { if (m->scls[i] == S_FUN && !(m->sattr[i] & S_EXTERN) && m->sval[i] >= 0 && m->sval[i] < m->ncode) ++n; ++i; }
+    if (!n) return;
+    v = xp_ints(n);
+    n = 0; i = 0;
+    while (i < m->nsym) { if (m->scls[i] == S_FUN && !(m->sattr[i] & S_EXTERN) && m->sval[i] >= 0 && m->sval[i] < m->ncode) { v[n] = i; ++n; } ++i; }
+    gap = n / 2;
+    while (gap > 0) {
+        i = gap;
+        while (i < n) {
+            t = v[i]; j = i;
+            while (j >= gap && m->sval[v[j - gap]] > m->sval[t]) { v[j] = v[j - gap]; j = j - gap; }
+            v[j] = t;
+            ++i;
+        }
+        gap = gap / 2;
+    }
+    m->nfn = n;
+    m->fstart = xp_ints(n); m->flen = xp_ints(n); m->ffile = xp_ints(n); m->fline = xp_ints(n);
+    m->fname = (char **)xp_ints(n);
+    i = 0;
+    while (i < n) {
+        m->fstart[i] = m->sval[v[i]];
+        m->flen[i] = (i + 1 < n ? m->sval[v[i + 1]] : m->ncode) - m->fstart[i];
+        m->ffile[i] = 0 - 1; m->fline[i] = 0;
+        m->fname[i] = (char *)ualloc(ui_len(m->sname[v[i]]) + 1);
+        ui_cpy(m->fname[i], m->sname[v[i]]);
+        ++i;
+    }
+    free((char *)v);
+}
+
+// A map file of the compiler's own, as "<c4lc softfp>"
+static int xm_own(struct xmod *m, int f) { return f < 0 || f >= m->nfile || m->fpath[f][0] == '<' || !m->fpath[f][0]; }
+
+// The object at PATH, as libjs/c4r.js's readC4r reads it, into a new
+// module; 0 and a message in MSG if it is not one
+static struct xmod *xm_read(char *path, char *msg) {
+    int st[4], fd, n, p, W, clen, dlen, plen, slen, conl, desl, i, t, a, v, len, tag, u;
+    char *b;
+    struct xmod *m;
+    if (ustat(path, st) < 0 || st[0] != 2) { ui_cpy(msg, "Cannot find "); ui_ncat(msg, path, 96); return 0; }
+    n = st[1];
+    m = (struct xmod *)ualloc(sizeof(struct xmod));
+    memset((char *)m, 0, sizeof(struct xmod));
+    ui_ncpy(m->path, path, 128);
+    m->buf = b = (char *)ualloc(n + 8);
+    fd = uopen(path, O_RD);
+    if (fd < 0 || uread(fd, b, n) != n) { if (fd >= 0) uclose(fd); ui_cpy(msg, "Cannot read the object"); xm_free(m); return 0; }
+    uclose(fd);
+    m->bufn = n;
+    if (n < 13 || b[0] != 'C' || b[1] != '4' || b[2] != 'R') { ui_cpy(msg, "Not a C4R object"); xm_free(m); return 0; }
+    W = (b[4] & 255) / 8;
+    if (W != 4 && W != 8) { ui_cpy(msg, "A word size this cannot read"); xm_free(m); return 0; }
+    m->W = W;
+    p = 5;
+    m->memsz = xm_word(m, p); p = p + W;
+    if (W == 4) p = p + W;
+    p = p + W;                                // the entry
+    clen = xm_word(m, p); p = p + W;
+    dlen = xm_word(m, p); p = p + W;
+    plen = xm_word(m, p); p = p + W;
+    slen = xm_word(m, p); p = p + W;
+    conl = xm_word(m, p); p = p + W;
+    desl = xm_word(m, p); p = p + W;
+    if (m->memsz < dlen) m->memsz = dlen;
+    if (p + W * (clen + 3 * plen + conl + desl + 5) + dlen > n || b[p] != 'C') { ui_cpy(msg, "The object is cut short"); xm_free(m); return 0; }
+    p = p + W;
+    m->ncode = clen;
+    m->code = xp_ints(clen); m->ptype = xp_ints(clen); m->pval = xp_ints(clen);
+    i = 0;
+    while (i < clen) { m->code[i] = xm_word(m, p); m->ptype[i] = 0; p = p + W; ++i; }
+    p = p + W;                                // 'D'
+    m->data = b + p; m->ndata = dlen;
+    p = p + dlen + W;                         // the data, 'P'
+    i = 0;
+    while (i < plen) {
+        t = xm_word(m, p); a = xm_word(m, p + W); v = xm_word(m, p + 2 * W);
+        // only what is patched into the code: a code or data address, or a symbol
+        if ((t == P_CODE || t == P_DATA || t > 0) && a >= 0 && a < clen) { m->ptype[a] = t; m->pval[a] = v; }
+        p = p + 3 * W;
+        ++i;
+    }
+    p = p + W + conl * W + W + desl * W;      // 'c', 'd'
+    if (p + W <= n && b[p] == 'S') {
+        p = p + W;
+        m->sid = xp_ints(slen); m->scls = xp_ints(slen); m->sattr = xp_ints(slen); m->sval = xp_ints(slen);
+        m->sname = (char **)xp_ints(slen);
+        i = 0;
+        while (i < slen && p + 4 * W + 1 <= n) {
+            m->sid[i] = xm_word(m, p); m->scls[i] = xm_word(m, p + 2 * W); m->sattr[i] = xm_word(m, p + 3 * W);
+            p = p + 4 * W;
+            len = b[p] & 255; ++p;
+            if (p + len + W > n) break;
+            up = p; m->sname[i] = xp_str(b, len); p = p + len;
+            m->sval[i] = xm_word(m, p); p = p + W;
+            ++i;
+        }
+        m->nsym = i;
+    }
+    // the extension trailer: 'X', then tag, length and payload, padded, to a 0 tag
+    if (p + W <= n && b[p] == 'X') {
+        p = p + W;
+        while (p + W <= n && (tag = xm_word(m, p)) != 0) {
+            len = xm_word(m, p + W); p = p + 2 * W;
+            if (len < 0 || p + len > n) break;
+            if (b[p - 2 * W] == 'S' && b[p - 2 * W + 1] == 'M' && b[p - 2 * W + 2] == 'A' && b[p - 2 * W + 3] == 'P')
+                xm_smap(m, b + p, len);
+            p = p + ((len + W - 1) & (0 - W));
+        }
+    }
+    if (!m->nfn) xm_symfuncs(m);
+    if (!m->nfn) { ui_cpy(msg, "No functions: the object has no map and no symbols"); xm_free(m); return 0; }
+    // the unit each function came with: its own file, or for a helper
+    // spliced in by the compiler, the file of the function before it
+    m->funit = xp_ints(m->nfn);
+    u = 0 - 1; i = 0;
+    while (i < m->nfn) { if (!xm_own(m, m->ffile[i]) && m->fline[i] > 0) u = m->ffile[i]; m->funit[i] = u; ++i; }
+    m->stext = (char **)xp_zeros(m->nfile); m->sline = (int **)xp_zeros(m->nfile);
+    m->snl = xp_zeros(m->nfile); m->sst = xp_zeros(m->nfile); m->spath = (char **)xp_zeros(m->nfile);
+    m->soff = xp_zeros(m->nfile);
+    return m;
+}
+
+// ---- the sources ------------------------------------------------------------------------------
+
+static int xp_isfile(char *p) { int st[4]; return ustat(p, st) == 0 && st[0] == 2; }
+static void xp_dirof(char *path, char *out) {
+    int k;
+    ui_ncpy(out, path, 128);
+    k = ui_len(out);
+    while (k > 0 && out[k - 1] != '/') --k;
+    if (k > 1) --k;
+    out[k] = 0;
+    if (!out[0]) ui_cpy(out, "/");
+}
+
+// The helpers c4lc brings with it are C kept in strings of its parser:
+// "<c4lc softfp>" is p:fpsrc and "<c4lc long long>" p:llsrc, each from
+// the line after its define's opening quote; the marker that starts it,
+// or 0 if map file I is not one of them
+static char *xp_helper(struct xmod *m, int i) {
+    if (ui_eq(m->fpath[i], "<c4lc softfp>")) return "(define p:fpsrc \"";
+    if (ui_eq(m->fpath[i], "<c4lc long long>")) return "(define p:llsrc \"";
+    return 0;
+}
+
+// Where module M's map file I is on this disk, into OUT: the file edited;
+// the map's path as it is, or under /usr; or beside the module; the
+// compiler's helpers, in its parser's source. 0 if nowhere.
+static int xp_where(struct xp *x, struct xmod *m, int i, char *out) {
+    char *p, dir[128];
+    p = m->fpath[i];
+    if (xp_helper(m, i)) { ui_cpy(out, "/usr/src/c4sp/lisp/c4lc-parse.lisp"); return xp_isfile(out); }
+    if (xm_own(m, i)) return 0;
+    if (m == x->mods[0] && i == x->here) { ui_ncpy(out, x->path, 128); return 1; }
+    if (m == x->mods[0]) ui_ncpy(dir, x->dir, 128); else xp_dirof(m->path, dir);
+    if (p[0] == '/') { if (ui_ncpy(out, p, 128) && xp_isfile(out)) return 1; }
+    else {
+        ui_cpy(out, "/usr/");
+        if (ui_ncat(out, p, 128) && xp_isfile(out)) return 1;
+        if (dir[0] && ui_join(out, dir, p, 128) && xp_isfile(out)) return 1;
+    }
+    if (dir[0] && ui_join(out, dir, ui_base(p), 128) && xp_isfile(out)) return 1;
+    return 0;
+}
+
+// module M's map file I's source, read the first time it is asked for
+static void xp_source(struct xp *x, struct xmod *m, int i) {
+    char p[128];
+    int st[4], fd, n, k, nl, j;
+    char *t, *mk;
+    int *ls;
+    if (!m || i < 0 || i >= m->nfile || m->sst[i]) return;
+    m->sst[i] = 0 - 1;
+    if (!xp_where(x, m, i, p) || ustat(p, st) < 0 || st[1] > 1048576) return;
+    n = st[1];
+    t = (char *)ualloc(n + 1);
+    fd = uopen(p, O_RD);
+    if (fd < 0) { free(t); return; }
+    k = n > 0 ? uread(fd, t, n) : 0;
+    uclose(fd);
+    if (k != n) { free(t); return; }
+    t[n] = 0;
+    nl = 1; k = 0;
+    while (k < n) { if (t[k] == 10) ++nl; ++k; }
+    ls = xp_ints(nl + 1);
+    ls[0] = 0; nl = 1; k = 0;
+    while (k < n) { if (t[k] == 10) { ls[nl] = k + 1; ++nl; } ++k; }
+    ls[nl] = n + 1;                           // so the last line ends at the text's end
+    m->sst[i] = n == m->fsize[i] ? 1 : 2;
+    // the compiler's helpers: their first line is their define's, after the quote
+    if ((mk = xp_helper(m, i))) {
+        k = ui_len(mk); j = 0;
+        while (j < nl && (ls[j] + k > n || memcmp(t + ls[j], mk, k))) ++j;
+        if (j == nl) { free(t); free((char *)ls); return; }
+        m->soff[i] = j;
+        m->sst[i] = 1;
+    }
+    m->stext[i] = t; m->sline[i] = ls; m->snl[i] = nl;
+    m->spath[i] = (char *)ualloc(ui_len(p) + 1);
+    ui_cpy(m->spath[i], p);
+}
+
+// line L (1-based) of module M's map file I, its tabs spaced out to eights,
+// into xo: its length, or -1 if there is no such line to read
+static int xp_line(struct xp *x, struct xmod *m, int i, int l) {
+    int a, b, k;
+    char *s;
+    xp_source(x, m, i);
+    if (!m || i < 0 || i >= m->nfile || m->sst[i] <= 0) return 0 - 1;
+    l = l + m->soff[i];
+    if (l < 1 || l > m->snl[i]) return 0 - 1;
+    a = m->sline[i][l - 1]; b = m->sline[i][l] - 1;
+    if (b > a && m->stext[i][b - 1] == 13) --b;
+    s = m->stext[i];
+    k = 0;
+    while (a < b && k < XSRC) {
+        if (s[a] == 9) { xo[k] = ' '; ++k; while ((k & 7) && k < XSRC) { xo[k] = ' '; ++k; } }
+        else { xo[k] = s[a]; ++k; }
+        ++a;
+    }
+    xo[k] = 0;
+    return k;
+}
+static int xp_blank(char *s, int n) {
+    int i;
+    i = 0;
+    while (i < n) { if (s[i] != ' ') return 0; ++i; }
+    return 1;
+}
+
+// ---- the compile ---------------------------------------------------------------------------
+
+static int xp_seq;
+
+int *xp_new() {
+    struct xp *x;
+    x = (struct xp *)ualloc(sizeof(struct xp));
+    memset((char *)x, 0, sizeof(struct xp));
+    x->cur = 0 - 1; x->here = 0 - 1; x->sel = 0 - 1; x->lastline = 0 - 1; x->hfile = 0 - 1; x->opt = 1; x->wrap = 1;
+    ++xp_seq;
+    ui_cpy(x->obj, "/tmp/.ide-");
+    ui_num(x->obj + ui_len(x->obj), getpid());
+    ui_cat(x->obj, "-");
+    ui_num(x->obj + ui_len(x->obj), xp_seq);
+    ui_cat(x->obj, ".c4o");
+    return (int *)x;
+}
+
+static void xp_unshow(struct xp *x) {
+    if (x->ioff) { free((char *)x->ioff); free((char *)x->iop); free((char *)x->iarg); free((char *)x->ilab); free((char *)x->irow); }
+    if (x->lband) free((char *)x->lband);
+    if (x->dins) { free((char *)x->dins); free((char *)x->dfile); free((char *)x->dline); free((char *)x->dseg); }
+    x->ioff = 0; x->lband = 0; x->dins = 0; x->nins = 0; x->nd = 0; x->laycols = 0;
+}
+
+static void xp_drop(struct xp *x) {
+    int i;
+    xp_unshow(x);
+    i = 0; while (i < x->nmod) { xm_free(x->mods[i]); x->mods[i] = 0; ++i; }
+    if (x->gmod) { free((char *)x->gmod); free((char *)x->gidx); free((char *)x->gdup); }
+    if (x->lord) { free((char *)x->lord); free((char *)x->lvis); }
+    x->gmod = 0; x->lord = 0; x->nmod = 0; x->nall = 0; x->nvis = 0; x->nhist = 0;
+    x->cur = 0 - 1; x->cm = 0; x->here = 0 - 1; x->ok = 0; x->sel = 0 - 1; x->hfile = 0 - 1; x->hline = 0;
+}
+
+static void xp_stop(struct xp *x) {
+    if (!x->busy) return;
+    ukill(x->pid, SIGTERM);
+    uclose(x->out_r);
+    uwait(x->pid);
+    x->busy = 0;
+}
+
+void xp_free(int *xi) {
+    struct xp *x;
+    x = X(xi);
+    xp_stop(x);
+    xp_drop(x);
+    uunlink(x->obj);
+    free((char *)x);
+}
+
+// cc -g -c [-O] -I DIR -o OBJ PATH on pipes, as edit.c's :make runs
+// b4ke; 0 and a message if it cannot start
+int xp_compile(int *xi, char *path, char *dir) {
+    struct xp *x;
+    char **argv;
+    int pin[2], pout[2], s0, s1, s2, k;
+    x = X(xi);
+    xp_stop(x);
+    if (x->objmode) { xp_drop(x); x->objmode = 0; x->byname = 0; x->filt[0] = 0; x->filtc = 0; }
+    ui_ncpy(x->path, path, 128);
+    ui_ncpy(x->dir, dir, 128);
+    if (!ui_ends(path, ".c")) { ui_cpy(x->msg, "Only a C file (.c) has code to show"); return 0; }
+    argv = (char **)ualloc(12 * sizeof(int));
+    k = 0;
+    argv[k] = "cc"; ++k; argv[k] = "-g"; ++k; argv[k] = "-c"; ++k;
+    if (x->opt) { argv[k] = "-O"; ++k; }
+    argv[k] = "-I"; ++k; argv[k] = x->dir; ++k;
+    argv[k] = "-o"; ++k; argv[k] = x->obj; ++k;
+    argv[k] = x->path; ++k; argv[k] = 0;
+    if (upipe(pin) < 0) { free((char *)argv); ui_cpy(x->msg, "No pipe for the compiler"); return 0; }
+    if (upipe(pout) < 0) { uclose(pin[0]); uclose(pin[1]); free((char *)argv); ui_cpy(x->msg, "No pipe for the compiler"); return 0; }
+    s0 = udup(STDIN); s1 = udup(STDOUT); s2 = udup(STDERR);
+    x->pid = 0 - 1;
+    if (s0 >= 0 && s1 >= 0 && s2 >= 0) {
+        ucloexec(pin[1], 1); ucloexec(pout[0], 1);
+        ucloexec(s0, 1); ucloexec(s1, 1); ucloexec(s2, 1);
+        if (udup2(pin[0], STDIN) >= 0 && udup2(pout[1], STDOUT) >= 0 && udup2(pout[1], STDERR) >= 0) {
+            x->pid = spawn("/bin/cc", k, argv);
+            if (x->pid == SPAWN_NOENT) x->pid = spawn("c4ix-cc.c4r", k, argv);   // as cc finds its tools
+        }
+        udup2(s0, STDIN); udup2(s1, STDOUT); udup2(s2, STDERR);
+    }
+    uclose(pin[0]); uclose(pout[1]); uclose(pin[1]);
+    uclose(s0); uclose(s1); uclose(s2);
+    free((char *)argv);
+    if (x->pid < 0) { uclose(pout[0]); ui_cpy(x->msg, "Cannot start cc"); return 0; }
+    x->out_r = pout[0];
+    x->busy = 1; x->failed = 0; x->errn = 0; x->partn = 0;
+    ui_cpy(x->msg, x->opt ? "Compiling with -g -O..." : "Compiling with -g...");
+    return 1;
+}
+
+static void xp_errline(struct xp *x) {
+    x->part[x->partn] = 0;
+    if (x->partn == 0 || (x->part[0] == ';' && x->part[1] == ';')) return;   // c4sc's size line
+    if (x->errn == 2) { ui_cpy(x->err0, x->err1); x->errn = 1; }
+    ui_cpy(x->errn ? x->err1 : x->err0, x->part);
+    ++x->errn;
+}
+
+static int xp_open(struct xp *x, char *path, char *keep);
+
+// The compiler's output, and its end: 1 if the tab changed. Never blocks.
+int xp_tick(int *xi) {
+    struct xp *x;
+    char buf[256], keep[64];
+    int n, i, code;
+    x = X(xi);
+    if (!x->busy) return 0;
+    while ((n = uavail(x->out_r)) > 0) {
+        if (n > 256) n = 256;
+        n = uread(x->out_r, buf, n);
+        if (n <= 0) break;
+        i = 0;
+        while (i < n) {
+            if (buf[i] == 10 || x->partn >= 94) { xp_errline(x); x->partn = 0; }
+            if (buf[i] != 10 && buf[i] != 13) { x->part[x->partn] = buf[i]; ++x->partn; }
+            ++i;
+        }
+    }
+    if (n >= 0) return 0;
+    if (x->partn) { xp_errline(x); x->partn = 0; }
+    uclose(x->out_r);
+    code = uwait(x->pid);
+    x->busy = 0;
+    // the function shown is shown again, in the new code, if it is still there
+    keep[0] = 0;
+    if (x->ok && x->cur >= 0) ui_ncpy(keep, x->cm->fname[x->gidx[x->cur]], 64);
+    xp_drop(x);
+    if (code != 0) { x->failed = 1; ui_cpy(x->msg, "It did not compile:"); return 1; }
+    if (xp_open(x, x->obj, keep)) x->msg[0] = 0;
+    return 1;
+}
+
+int  xp_busy(int *xi) { return X(xi)->busy; }
+int  xp_opt(int *xi) { return X(xi)->opt; }
+
+// ---- every function, and the list ----------------------------------------------------------
+
+static struct xmod *xp_mod(struct xp *x, int g) { return x->mods[x->gmod[g]]; }
+static char *xp_name(struct xp *x, int g) { return x->mods[x->gmod[g]]->fname[x->gidx[g]]; }
+static int xp_lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+static int xp_cmp(char *a, char *b) {
+    while (*a && *a == *b) { ++a; ++b; }
+    return (*a & 255) - (*b & 255);
+}
+// the list's order: the program's functions, then each library's; in each,
+// by name (then address) or by address
+static int xp_before(struct xp *x, int a, int b, int byname) {
+    int c;
+    if (x->gmod[a] != x->gmod[b]) return x->gmod[a] < x->gmod[b];
+    c = byname ? xp_cmp(xp_name(x, a), xp_name(x, b)) : 0;
+    return c < 0 || (c == 0 && x->gidx[a] < x->gidx[b]);
+}
+static void xp_sort(struct xp *x, int *v, int n, int byname) {
+    int i, j, t, gap;
+    gap = n / 2;
+    while (gap > 0) {
+        i = gap;
+        while (i < n) {
+            t = v[i]; j = i;
+            while (j >= gap && xp_before(x, t, v[j - gap], byname)) { v[j] = v[j - gap]; j = j - gap; }
+            v[j] = t;
+            ++i;
+        }
+        gap = gap / 2;
+    }
+}
+// P in S, in either case
+static int xp_has(char *s, char *p) {
+    int i, j;
+    if (!p[0]) return 1;
+    i = 0;
+    while (s[i]) {
+        j = 0;
+        while (p[j] && s[i + j] && xp_lower(s[i + j]) == xp_lower(p[j])) ++j;
+        if (!p[j]) return 1;
+        ++i;
+    }
+    return 0;
+}
+static void xp_filter(struct xp *x) {
+    int i, n;
+    n = 0; i = 0;
+    while (i < x->nall) { if (xp_has(xp_name(x, x->lord[i]), x->filt)) { x->lvis[n] = x->lord[i]; ++n; } ++i; }
+    x->nvis = n; x->ltop = 0; x->lfollow = 1;
+}
+static void xp_order(struct xp *x) {
+    int i;
+    i = 0; while (i < x->nall) { x->lord[i] = i; ++i; }
+    if (x->byname) xp_sort(x, x->lord, x->nall, 1);
+    xp_filter(x);
+}
+// the function named NM, in the modules' order: outside module AVOID
+// first, then in it; -1 if none
+static int xp_named(struct xp *x, char *nm, int avoid) {
+    int g, pass;
+    pass = 0;
+    while (pass < 2) {
+        g = 0;
+        while (g < x->nall) {
+            if ((pass == 0) == (x->gmod[g] != avoid) && ui_eq(xp_name(x, g), nm)) return g;
+            ++g;
+        }
+        ++pass;
+    }
+    return 0 - 1;
+}
+static int xp_listed(struct xp *x, int g) {
+    int k;
+    k = 0;
+    while (k < x->nvis) { if (x->lvis[k] == g) return k; ++k; }
+    return 0 - 1;
+}
+
+// ---- the function shown ------------------------------------------------------------------------
+
+static int xp_operand(int op) {
+    return op <= O_ADJ || op == O_JSRI || op == O_JSRS || (op >= O_LDL && op <= O_IMMP) || op == O_STL;
+}
+
+// the row an offset is in, by binary search; -1 before the first
+static int xm_row(struct xmod *m, int off) {
+    int lo, hi, k, r;
+    lo = 0; hi = m->nrow - 1; r = 0 - 1;
+    while (lo <= hi) { k = (lo + hi) >> 1; if (m->roff[k] <= off) { r = k; lo = k + 1; } else hi = k - 1; }
+    return r;
+}
+// the function an offset is in, by binary search (they are in address
+// order, and do not overlap); -1 if none
+static int xm_fn_at(struct xmod *m, int off) {
+    int lo, hi, k;
+    lo = 0; hi = m->nfn - 1;
+    while (lo <= hi) {
+        k = (lo + hi) >> 1;
+        if (off < m->fstart[k]) hi = k - 1;
+        else if (off >= m->fstart[k] + m->flen[k]) lo = k + 1;
+        else return k;
+    }
+    return 0 - 1;
+}
+
+// decode function G, its labels, and its lines' bands
+static void xp_decode(struct xp *x, int g) {
+    int s, e, i, n, op, k, t, lo, hi, md, l, r, f, here;
+    struct xmod *m;
+    xp_unshow(x);
+    x->cur = g; x->cm = m = xp_mod(x, g); f = x->gidx[g];
+    x->top = 0; x->left = 0; x->sel = 0 - 1;
+    s = m->fstart[f]; e = s + m->flen[f];
+    if (e > m->ncode) e = m->ncode;
+    n = e - s + 1;
+    x->ioff = xp_ints(n); x->iop = xp_ints(n); x->iarg = xp_ints(n); x->ilab = xp_ints(n); x->irow = xp_ints(n);
+    i = s; n = 0;
+    while (i < e) {
+        op = m->code[i];
+        x->ioff[n] = i; x->iop[n] = op; x->ilab[n] = 0; x->irow[n] = xm_row(m, i);
+        if (xp_operand(op) && i + 1 < e) { x->iarg[n] = m->code[i + 1]; i = i + 2; }
+        else { x->iarg[n] = 0; if (xp_operand(op)) x->iop[n] = 0 - 1; i = i + 1; }   // an operand cut off: a word
+        ++n;
+    }
+    x->nins = n;
+    // branch targets inside the function are labels, L1 up in order
+    k = 0;
+    while (k < n) {
+        op = x->iop[k];
+        if ((op == O_JMP || op == O_BZ || op == O_BNZ) && m->ptype[x->ioff[k] + 1] == P_CODE) {
+            t = m->pval[x->ioff[k] + 1];
+            lo = 0; hi = n - 1;
+            while (lo <= hi) { md = (lo + hi) >> 1; if (x->ioff[md] == t) { x->ilab[md] = 1; lo = hi + 1; } else if (x->ioff[md] < t) lo = md + 1; else hi = md - 1; }
+        }
+        ++k;
+    }
+    l = 0; k = 0;
+    while (k < n) { if (x->ilab[k]) { ++l; x->ilab[k] = l; } ++k; }
+    // which of the edited file's lines have code here, and their colours
+    here = m == x->mods[0] ? x->here : 0 - 1;
+    x->lmin = 0; x->lmax = 0 - 1;
+    k = 0;
+    while (here >= 0 && k < n) {
+        r = x->irow[k];
+        if (r >= 0 && m->rfile[r] == here && m->rline[r] > 0) {
+            if (x->lmax < x->lmin) { x->lmin = x->lmax = m->rline[r]; }
+            if (m->rline[r] < x->lmin) x->lmin = m->rline[r];
+            if (m->rline[r] > x->lmax) x->lmax = m->rline[r];
+        }
+        ++k;
+    }
+    if (x->lmax >= x->lmin) {
+        x->lband = xp_ints(x->lmax - x->lmin + 1);
+        k = 0; while (k <= x->lmax - x->lmin) { x->lband[k] = 0 - 1; ++k; }
+        k = 0;
+        while (k < n) {
+            r = x->irow[k];
+            if (r >= 0 && m->rfile[r] == here && m->rline[r] > 0) x->lband[m->rline[r] - x->lmin] = bands[m->rline[r] % 8];
+            ++k;
+        }
+    }
+}
+
+// one row of the listing (counted only, while there is nowhere to put it)
+static int xp_row_add(struct xp *x, int n, int ins, int file, int line, int seg) {
+    if (x->dins) { x->dins[n] = ins; x->dfile[n] = file; x->dline[n] = line; x->dseg[n] = seg; }
+    return n + 1;
+}
+// ... and the rows of a source line, COLS wide (0: one row, scrolled across)
+static int xp_src_rows(struct xp *x, int n, int file, int line, int len, int cols) {
+    int k;
+    if (cols <= 0 || len <= cols) return xp_row_add(x, n, 0 - 1, file, line, 0);
+    k = 0;
+    while (k * cols < len) { n = xp_row_add(x, n, 0 - 1, file, line, k); ++k; }
+    return n;
+}
+
+// ---- which source lines go with a row ----
+//
+// A row names the line its statement starts on. The listing shows that
+// line, the lines the statement goes on to, and some of the lines above
+// it that have no code of their own: all of them in the function's head
+// (its name to its first statement: the parameters, the brace, the
+// locals), a few anywhere else, and past those the run of labels, braces
+// and comments just above it -- so a case's label is over its code.
+
+// the first character of line L that is not a space, or 0 (none, or no line)
+static int xp_lead_c(struct xp *x, struct xmod *m, int i, int l) {
+    int n, k;
+    n = xp_line(x, m, i, l);
+    k = 0;
+    while (k < n && xo[k] == ' ') ++k;
+    return k < n ? xo[k] & 255 : 0;
+}
+static int xp_idc(int c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'; }
+// Line L has no code of its own and reads as part of what follows it: a
+// blank line, a comment, a preprocessor line, a case's or a goto's label,
+// or braces and else and do alone
+static int xp_lead(struct xp *x, struct xmod *m, int i, int l) {
+    int n, k, j;
+    n = xp_line(x, m, i, l);
+    if (n < 0) return 0;
+    k = 0;
+    while (k < n && xo[k] == ' ') ++k;
+    if (k == n || xo[k] == '#' || (xo[k] == '/' && (xo[k + 1] == '/' || xo[k + 1] == '*')) || xo[k] == '*') return 1;
+    // a label: a word, then a colon, and nothing after it but a comment
+    j = k;
+    while (j < n && xp_idc(xo[j] & 255)) ++j;
+    if (j - k == 4 && !memcmp(xo + k, "case", 4)) {
+        // case V: its value, to the colon (past a character's quotes)
+        while (j < n && xo[j] != ':') { if (xo[j] == 39 && j + 2 < n) j = j + 2; ++j; }
+    } else while (j > k && j < n && xo[j] == ' ') ++j;
+    if (j > k && j < n && xo[j] == ':' && xo[j + 1] != ':') {
+        ++j;
+        while (j < n && xo[j] == ' ') ++j;
+        if (j == n || xo[j] == '{' || (xo[j] == '/' && (xo[j + 1] == '/' || xo[j + 1] == '*'))) return 1;
+    }
+    // braces, else and do
+    while (k < n) {
+        if (xo[k] == '{' || xo[k] == '}' || xo[k] == ' ') ++k;
+        else if (!memcmp(xo + k, "else", 4) && !xp_idc(xo[k + 4] & 255)) k = k + 4;
+        else if (!memcmp(xo + k, "do", 2) && !xp_idc(xo[k + 2] & 255)) k = k + 2;
+        else if (xo[k] == '/' && (xo[k + 1] == '/' || xo[k + 1] == '*')) k = n;
+        else return 0;
+    }
+    return 1;
+}
+// Whether line L leaves its statement unfinished: a bracket still open
+// (*DEPTH, carried from line to line, as *CMT carries a comment), an
+// initializer's brace, or an operator or a comma at its end
+static int xp_goes_on(struct xp *x, struct xmod *m, int i, int l, int *depth, int *cmt) {
+    int n, k, c, q, last;
+    n = xp_line(x, m, i, l);
+    if (n < 0) return 0;
+    k = 0; q = 0; last = 0;
+    while (k < n) {
+        c = xo[k] & 255;
+        if (*cmt) { if (c == '*' && xo[k + 1] == '/') { *cmt = 0; ++k; } }
+        else if (q) { if (c == 92) ++k; else if (c == q) q = 0; }
+        else if (c == '/' && xo[k + 1] == '/') k = n;
+        else if (c == '/' && xo[k + 1] == '*') { *cmt = 1; ++k; }
+        else if (c == '"' || c == 39) { q = c; last = c; }
+        else if (c == '(' || c == '[' || (c == '{' && (last == '=' || *depth > 0))) { *depth = *depth + 1; last = c; }
+        else if (c == ')' || c == ']' || (c == '}' && *depth > 0)) { *depth = *depth - 1; last = c; }
+        else if (c != ' ') last = c;
+        ++k;
+    }
+    if (*depth != 0) return *depth > 0;
+    return last == ',' || last == '=' || last == '+' || last == '-' || last == '*' || last == '/' || last == '%' ||
+           last == '&' || last == '|' || last == '^' || last == '<' || last == '>' || last == '?' || last == '!' || last == 92;
+}
+// Line L of file I has a row of the function shown
+static int xp_mapped(struct xp *x, int i, int l) {
+    int k, r;
+    struct xmod *m;
+    m = x->cm;
+    k = 0;
+    while (k < x->nins) { r = x->irow[k]; if (r >= 0 && m->rfile[r] == i && m->rline[r] == l) return 1; ++k; }
+    return 0;
+}
+// The last line of the statement that starts at line L of file I: the
+// lines it goes on to, up to a preprocessor's, or past its brackets one
+// with code of its own (an if's last line can hold its body)
+static int xp_stmt_end(struct xp *x, struct xmod *m, int i, int l) {
+    int e, depth, cmt;
+    depth = 0; cmt = 0; e = l;
+    if (!xp_goes_on(x, m, i, l, &depth, &cmt)) return l;
+    while (e - l < XCONT) {
+        if (xp_line(x, m, i, e + 1) < 0 || xp_lead_c(x, m, i, e + 1) == '#' || (depth <= 0 && xp_mapped(x, i, e + 1))) return e;
+        ++e;
+        if (!xp_goes_on(x, m, i, e, &depth, &cmt)) return e;
+    }
+    return e;
+}
+
+// The listing's rows, for source COLS wide (0 when it is not wrapped):
+// each instruction, after the source lines of its row when that is a new
+// one (above); blank lines are left out. Counted only while x->dins is 0.
+static int xp_text(struct xp *x, int k, char *mn, char *d);
+static int xp_lay(struct xp *x, int cols) {
+    int f, k, r, l, lf, lr, ll, hi, a, e, n, len, fi, hd;
+    struct xmod *m;
+    m = x->cm; f = x->gidx[x->cur];
+    n = 0; x->maxw = 0;
+    // the file and line of the last row, the last line shown and the
+    // furthest: the line before the function's, so that its own first
+    // line is shown
+    lf = m->ffile[f]; lr = ll = hi = m->fline[f] - 1;
+    hd = 1;                                   // until a row past the function's own line
+    k = 0;
+    while (k < x->nins) {
+        r = x->irow[k];
+        if (r >= 0 && m->rline[r] > 0 && (m->rfile[r] != lf || m->rline[r] != lr)) {
+            fi = m->rfile[r]; l = m->rline[r];
+            // a line the statement before it went on to is shown already
+            if (fi != lf || l <= lr || l > ll) {
+                a = l;
+                if (fi == lf && l > ll) {
+                    if ((hd && l - ll <= XHEAD) || l - ll <= XGAP + 1) a = ll + 1;
+                    else while (a - 1 > ll && l - a < XLEAD && xp_lead(x, m, fi, a - 1)) --a;
+                    // not again what a loop's body showed before its condition came back up
+                    if (a <= hi) a = hi < l ? hi + 1 : l;
+                }
+                if (fi == m->ffile[f] && l > m->fline[f]) hd = 0;
+                e = xp_stmt_end(x, m, fi, l);
+                while (a <= e) {
+                    len = xp_line(x, m, fi, a);
+                    if (a == l || (len > 0 && !xp_blank(xo, len))) {
+                        n = xp_src_rows(x, n, fi, a, len, cols);
+                        if (len > x->maxw) x->maxw = len;
+                    }
+                    ++a;
+                }
+                if (fi != lf || e > hi) hi = e;
+                ll = e;
+            }
+            lf = fi; lr = l;
+        }
+        n = xp_row_add(x, n, k, r >= 0 ? m->rfile[r] : 0 - 1, r >= 0 ? m->rline[r] : 0, 0);
+        ++k;
+    }
+    return n;
+}
+static void xp_layout(struct xp *x, int cols) {
+    int k, n, w;
+    char mn[8];
+    if (x->dins) { free((char *)x->dins); free((char *)x->dfile); free((char *)x->dline); free((char *)x->dseg); }
+    x->dins = 0;
+    n = xp_lay(x, cols) + 1;                  // count them, then make them
+    x->dins = xp_ints(n); x->dfile = xp_ints(n); x->dline = xp_ints(n); x->dseg = xp_ints(n);
+    n = xp_lay(x, cols);
+    x->nd = n;
+    // the widest instruction, for the bar across: a label's room, the
+    // mnemonic's, and its operand, which can be a long string
+    k = 0;
+    while (k < x->nins) {
+        xp_text(x, k, mn, xb);
+        w = 10 + ui_len(xb) + (x->ilab[k] ? 4 : 0);
+        if (w > x->maxw) x->maxw = w;
+        ++k;
+    }
+    x->laycols = cols > 0 ? cols : 0 - 1;
+}
+
+// Show function G; PUSH keeps the one shown before for Back
+static void xp_show(struct xp *x, int g, int push) {
+    int i;
+    if (g < 0 || g >= x->nall) return;
+    if (push && x->cur >= 0 && x->cur != g) {
+        if (x->nhist == XHIST) { i = 1; while (i < XHIST) { x->hist[i - 1] = x->hist[i]; ++i; } --x->nhist; }
+        x->hist[x->nhist] = x->cur; ++x->nhist;
+    }
+    if (g != x->cur || !x->ioff) xp_decode(x, g);
+    x->lfollow = 1;
+}
+static void xp_back(struct xp *x) {
+    if (!x->nhist) return;
+    --x->nhist;
+    xp_show(x, x->hist[x->nhist], 0);
+}
+
+// the libraries module M loads, as the loader finds them: a static global
+// __c4_needed for each, whose value is the data offset of its path
+static void xp_needs(struct xp *x, struct xmod *m) {
+    int i, k, j, n;
+    char path[128];
+    struct xmod *l;
+    i = 0;
+    while (i < m->nsym && x->nmod < XMODS) {
+        if (m->scls[i] == S_GLO && ui_eq(m->sname[i], "__c4_needed") && m->sval[i] >= 0 && m->sval[i] < m->ndata) {
+            k = m->sval[i]; n = 0;
+            while (k + n < m->ndata && m->data[k + n] && n < 127) { path[n] = m->data[k + n]; ++n; }
+            path[n] = 0;
+            j = 0;
+            while (j < x->nmod && !ui_eq(x->mods[j]->path, path)) ++j;
+            if (j == x->nmod && (l = xm_read(path, x->note))) { x->mods[x->nmod] = l; ++x->nmod; }
+        }
+        ++i;
+    }
+}
+
+// The object at PATH as module 0, the libraries it loads after it, every
+// function numbered, and the list; shows KEEP (by name) if it is there,
+// else a compiled file's main, or the first function of its own (not
+// one of the compiler's, as "<udiv>"). 0 if it cannot be read.
+static int xp_open(struct xp *x, char *path, char *keep) {
+    struct xmod *m;
+    int i, j, k, g, *v;
+    x->note[0] = 0;
+    if (!(m = xm_read(path, x->msg))) return 0;
+    x->mods[0] = m; x->nmod = 1;
+    // the file edited, by its path, else by its name
+    i = 0;
+    while (!x->objmode && i < m->nfile && x->here < 0) { if (ui_eq(m->fpath[i], x->path)) x->here = i; ++i; }
+    i = 0;
+    while (!x->objmode && i < m->nfile && x->here < 0) { if (ui_eq(ui_base(m->fpath[i]), ui_base(x->path))) x->here = i; ++i; }
+    i = 0;
+    while (i < x->nmod) { xp_needs(x, x->mods[i]); ++i; }
+    x->nall = 0; i = 0;
+    while (i < x->nmod) { x->mods[i]->fn0 = x->nall; x->nall = x->nall + x->mods[i]->nfn; ++i; }
+    x->gmod = xp_ints(x->nall); x->gidx = xp_ints(x->nall); x->gdup = xp_zeros(x->nall);
+    g = 0; i = 0;
+    while (i < x->nmod) { j = 0; while (j < x->mods[i]->nfn) { x->gmod[g] = i; x->gidx[g] = j; ++g; ++j; } ++i; }
+    // names a module has more than once: by name, side by side
+    v = xp_ints(x->nall);
+    k = 0; while (k < x->nall) { v[k] = k; ++k; }
+    xp_sort(x, v, x->nall, 1);
+    k = 1;
+    while (k < x->nall) {
+        if (x->gmod[v[k]] == x->gmod[v[k - 1]] && ui_eq(xp_name(x, v[k]), xp_name(x, v[k - 1]))) { x->gdup[v[k]] = 1; x->gdup[v[k - 1]] = 1; }
+        ++k;
+    }
+    free((char *)v);
+    x->lord = xp_ints(x->nall); x->lvis = xp_ints(x->nall);
+    x->ok = 1;
+    xp_order(x);
+    g = 0 - 1;
+    if (keep && keep[0]) g = xp_named(x, keep, 0 - 1);
+    if (g < 0 && x->objmode) g = xp_named(x, "main", 0 - 1);
+    k = 0;
+    while (g < 0 && x->objmode && k < x->nvis) { if (xp_name(x, x->lvis[k])[0] != '<') g = x->lvis[k]; ++k; }
+    if (g < 0 && x->objmode && x->nvis) g = x->lvis[0];
+    if (g >= 0) xp_show(x, g, 0);
+    return 1;
+}
+
+int xp_load(int *xi, char *path, char *dir) {
+    struct xp *x;
+    x = X(xi);
+    xp_stop(x);
+    xp_drop(x);
+    x->objmode = 1; x->byname = 1; x->failed = 0; x->msg[0] = 0; x->note[0] = 0;
+    x->filt[0] = 0; x->filtc = 0;
+    ui_ncpy(x->path, path, 128);
+    ui_ncpy(x->dir, dir, 128);
+    return xp_open(x, path, 0);
+}
+
+// The function for the cursor's LINE in the file edited: the one with
+// code from that line, else the last one this file starts at or before it
+static int xp_fn_for(struct xp *x, int line) {
+    int i, f, best;
+    struct xmod *m;
+    m = x->mods[0];
+    i = 0;
+    while (i < m->nrow) {
+        if (m->rfile[i] == x->here && m->rline[i] == line && (f = xm_fn_at(m, m->roff[i])) >= 0) return f;
+        ++i;
+    }
+    best = 0 - 1;
+    i = 0;
+    while (i < m->nfn) {
+        if (m->ffile[i] == x->here && m->fline[i] <= line && (best < 0 || m->fline[i] >= m->fline[best])) best = i;
+        ++i;
+    }
+    return best;
+}
+
+// The band beside source LINE (1-based) of the function shown, or -1
+int xp_band(int *xi, int line) {
+    struct xp *x;
+    x = X(xi);
+    if (!x->ok || !x->lband || line < x->lmin || line > x->lmax) return 0 - 1;
+    return x->lband[line - x->lmin];
+}
+
+// the first row of line LINE of the file edited, or -1
+static int xp_row_of(struct xp *x, int line) {
+    int k;
+    k = 0;
+    while (k < x->nd) { if (x->cm == x->mods[0] && x->dfile[k] == x->here && x->dline[k] == line) return k; ++k; }
+    return 0 - 1;
+}
+
+// The editor's cursor on LINE (1-based), when it moves: its function, its
+// line lit, and the view on it. edit.c calls this as it draws.
+void xp_cursor(int *xi, int line) {
+    struct xp *x;
+    int f, k;
+    x = X(xi);
+    if (!x->ok || x->objmode || (line == x->lastline && x->cur >= 0)) return;
+    f = xp_fn_for(x, line);
+    // before every function: this file's first, if nothing is shown yet
+    k = 0;
+    while (f < 0 && x->cur < 0 && k < x->mods[0]->nfn) { if (x->mods[0]->ffile[k] == x->here) f = k; ++k; }
+    if (f < 0 && x->cur < 0 && x->mods[0]->nfn) f = 0;
+    if (f >= 0) xp_show(x, f, 0);
+    x->hmod = 0; x->hfile = x->here; x->hline = line;
+    x->lastline = line;
+    x->sel = 0 - 2;                           // the view goes to the line when it is laid out
+}
+
+// The line asked for in the editor (after xp_mouse or xp_key said 2): its
+// file into PATH (128 bytes), and its number
+int xp_goto(int *xi, char *path) {
+    struct xp *x;
+    x = X(xi);
+    ui_ncpy(path, x->gopath, 128);
+    return x->goline;
+}
+
+// ---- an operand, as libjs/c4r.js's insnText says it --------------------------------------------
+
+static char *xm_symname(struct xmod *m, int id) {
+    int i;
+    i = 0;
+    while (i < m->nsym) { if (m->sid[i] == id) return m->sname[i]; ++i; }
+    return 0;
+}
+// the function starting at OFF: the symbols', then the map's; 0 if none
+static char *xm_fn_named(struct xmod *m, int off) {
+    int i;
+    i = 0;
+    while (i < m->nsym) { if (m->scls[i] == S_FUN && !(m->sattr[i] & S_EXTERN) && m->sval[i] == off) return m->sname[i]; ++i; }
+    i = xm_fn_at(m, off);
+    if (i >= 0 && m->fstart[i] == off) return m->fname[i];
+    return 0;
+}
+// the global a data offset is in, or -1
+static int xm_global(struct xmod *m, int off) {
+    int i, g, next;
+    g = 0 - 1;
+    i = 0;
+    while (i < m->nsym) {
+        if (m->scls[i] == S_GLO && !(m->sattr[i] & S_EXTERN) && m->sval[i] <= off && (g < 0 || m->sval[i] > m->sval[g])) g = i;
+        ++i;
+    }
+    if (g < 0) return g;
+    next = m->memsz;
+    i = 0;
+    while (i < m->nsym) {
+        if (m->scls[i] == S_GLO && !(m->sattr[i] & S_EXTERN) && m->sval[i] > m->sval[g] && m->sval[i] < next) next = m->sval[i];
+        ++i;
+    }
+    if (next <= m->sval[g]) next = m->sval[g] + 1;
+    return off < next ? g : 0 - 1;
+}
+// the printable C string at a data offset: its length (200 at most), or
+// -1. The data's end ends one too: c4lc leaves the last literal's NUL to
+// the zeroed memory after it.
+static int xm_cstr(struct xmod *m, int off) {
+    int i, c;
+    if (off < 0 || off >= m->ndata) return 0 - 1;
+    i = off;
+    while (i < m->ndata) {
+        c = m->data[i] & 255;
+        if (c == 0) return i - off;
+        if ((c < 32 && c != 9 && c != 10 && c != 13 && c != 27) || c > 126) return 0 - 1;
+        ++i;
+        if (i - off == 200) return 200;
+    }
+    return i - off;
+}
+static void xp_hex(char *d, int v) {
+    char t[12];
+    int n;
+    ui_cat(d, "0x");
+    n = 0;
+    if (v == 0) { t[0] = '0'; n = 1; }
+    while (v != 0 && n < 8) { t[n] = hexd[v & 15]; v = (v >> 4) & 0xfffffff; ++n; }
+    d = d + ui_len(d);
+    while (n > 0) { --n; *d = t[n]; ++d; }
+    *d = 0;
+}
+// a string literal, quoted and escaped as JSON.stringify does it
+static void xm_quote(struct xmod *m, char *d, int off, int n, int max) {
+    int i, c, k;
+    k = ui_len(d);
+    d[k] = '"'; ++k;
+    i = 0;
+    while (i < n && k < max - 8) {
+        c = m->data[off + i] & 255;
+        if (c == '"' || c == 92) { d[k] = 92; d[k + 1] = c; k = k + 2; }
+        else if (c == 10) { d[k] = 92; d[k + 1] = 'n'; k = k + 2; }
+        else if (c == 13) { d[k] = 92; d[k + 1] = 'r'; k = k + 2; }
+        else if (c == 9) { d[k] = 92; d[k + 1] = 't'; k = k + 2; }
+        else if (c == 27) { d[k] = 0; ui_cat(d, "\\u001b"); k = k + 6; }
+        else { d[k] = c; ++k; }
+        ++i;
+    }
+    d[k] = '"'; d[k + 1] = 0;
+}
+
+// instruction K's mnemonic into M and its operand into D; the operand's
+// colour
+static int xp_text(struct xp *x, int k, char *mn, char *d) {
+    int op, a, w, t, v, f, g, n, j;
+    char *nm;
+    struct xmod *m;
+    m = x->cm;
+    op = x->iop[k]; a = x->iarg[k]; w = x->ioff[k] + 1;
+    d[0] = 0;
+    if (op < 0) { ui_cpy(mn, ".word"); ui_num(d, m->code[x->ioff[k]]); return XC_NUM; }
+    if (op < O_N) { memcpy(mn, opnames + op * 5, 4); mn[4] = 0; j = 3; while (j > 0 && mn[j] == ' ') { mn[j] = 0; --j; } }
+    else { ui_cpy(mn, "?"); ui_num(mn + 1, op); }
+    if (!xp_operand(op)) return XC_TEXT;
+    t = m->ptype[w]; v = m->pval[w];
+    if (t == P_CODE) {
+        f = xm_fn_at(m, v);
+        if ((op == O_JMP || op == O_BZ || op == O_BNZ) && f == x->gidx[x->cur]) {
+            j = 0;
+            while (j < x->nins) { if (x->ioff[j] == v && x->ilab[j]) { ui_cpy(d, "L"); ui_num(d + 1, x->ilab[j]); return XC_PRE; } ++j; }
+            xp_hex(d, v); return XC_PRE;
+        }
+        if ((nm = xm_fn_named(m, v))) { if (op != O_JSR) ui_cpy(d, "&"); ui_cat(d, nm); return XC_TYPE; }
+        if (f >= 0) { ui_cpy(d, m->fname[f]); ui_cat(d, "+"); ui_num(d + ui_len(d), v - m->fstart[f]); return XC_TYPE; }
+        xp_hex(d, v); return XC_NUM;
+    }
+    if (t == P_DATA) {
+        // a switch's table of addresses, which c4lc puts after its unit's
+        // globals with no name of its own: its IMM is a JMPA's, a few on
+        j = k + 1;
+        while (j < x->nins && j <= k + 3 && x->iop[j] != O_JMPA) ++j;
+        if (op == O_IMM && j < x->nins && j <= k + 3) { ui_cpy(d, "jump table, data+"); ui_num(d + ui_len(d), v); return XC_NUM; }
+        g = xm_global(m, v);
+        n = xm_cstr(m, v);
+        // a unit's literals follow its globals with no symbol of their own
+        if (g >= 0 && n >= 2 && v - m->sval[g] >= m->W && v > 0 && m->data[v - 1] == 0) g = 0 - 1;
+        if (g >= 0) {
+            ui_cpy(d, op == O_JSRI ? "*" : "&");
+            ui_cat(d, m->sname[g]);
+            if (v != m->sval[g]) { ui_cat(d, "+"); ui_num(d + ui_len(d), v - m->sval[g]); }
+            return XC_TYPE;
+        }
+        if (n >= 0) {
+            if (n > 200) n = 200;
+            xm_quote(m, d, v, n, 240);
+            if (n == 200) ui_cat(d, "...");
+            return XC_STR;
+        }
+        ui_cpy(d, "data+"); ui_num(d + 5, v); return XC_NUM;
+    }
+    if (t > 0) {
+        nm = xm_symname(m, t);
+        if (nm) ui_cpy(d, nm); else { ui_cpy(d, "symbol "); ui_num(d + 7, t); }
+        return XC_TYPE;
+    }
+    if (op == O_LEA || op == O_LDL || op == O_STL || op == O_PSHL || op == O_LEAP || op == O_JSRS) {
+        ui_cpy(d, "[bp");
+        if (a >= 0) ui_cat(d, "+");
+        ui_num(d + ui_len(d), a);
+        ui_cat(d, "]");
+        return XC_NUM;
+    }
+    // a plain number, INT_MIN too (ui_num's): only a patch makes an
+    // operand an address
+    ui_num(d, a);
+    return XC_NUM;
+}
+
+// ---- drawing ---------------------------------------------------------------------------------
+
+// the function list's width in a tab CW wide
+static int xp_lw(int cw) { int w; w = cw / 4; if (w < 120) w = 120; if (w > 220) w = 220; return w; }
+// how many hex digits the code's offsets take, four at least
+static int xp_ow(struct xp *x) { int n, v; n = 1; v = x->cm ? x->cm->ncode >> 4 : 0; while (v) { ++n; v = v >> 4; } return n < 4 ? 4 : n; }
+// "file:line" of map file F of module M
+static void xp_where_s(struct xmod *m, char *d, int f, int l) {
+    ui_cpy(d, m && f >= 0 && f < m->nfile ? ui_base(m->fpath[f]) : "?");
+    ui_cat(d, ":");
+    ui_num(d + ui_len(d), l);
+}
+// the code area's buttons: Wrap, Back, and -O for a compile
+static int xp_bw(struct xp *x) { return x->objmode ? 76 : 116; }
+
+// the list: the filter, its order, the names
+static void xp_draw_list(struct xp *x, int ox, int oy, int w, int h, int *cols, int focused) {
+    int rows, i, k, g, y, c, n;
+    struct xmod *m;
+    d_rect(ox, oy, w, XHDR, C_FACE);
+    ui_field(ox, oy, w - 34, x->filt, x->filtc, focused);
+    if (!x->filt[0] && x->ok) {
+        ui_num(xb, x->nvis); ui_cat(xb, x->nvis == 1 ? " function" : " functions");
+        d_clip(ox + 2, oy + 2, w - 38, XHDR - 4);
+        d_text(ox + 8, oy + 5, C_SHADOW, F_SANS, xb);
+        d_clip_end();
+    }
+    ui_button(ox + w - 32, oy + 1, 30, XHDR - 2, "A-Z", x->byname, 0);
+    rows = (h - XHDR - 4) / XCH;
+    if (rows < 1) rows = 1;
+    x->lrows = rows;
+    if (x->lfollow) {
+        k = xp_listed(x, x->cur);
+        if (k >= 0 && k < x->ltop) x->ltop = k;
+        if (k >= 0 && k >= x->ltop + rows) x->ltop = k - rows + 1;
+        x->lfollow = 0;
+    }
+    if (x->ltop > x->nvis - rows) x->ltop = x->nvis - rows;
+    if (x->ltop < 0) x->ltop = 0;
+    y = oy + XHDR;
+    d_rect(ox, y, w - 17, h - XHDR, cols[XC_BG]);
+    d_clip(ox, y, w - 17, h - XHDR);
+    i = 0;
+    while (x->ok && i < rows && x->ltop + i < x->nvis) {
+        g = x->lvis[x->ltop + i];
+        m = xp_mod(x, g);
+        // a library's in a colour of its own; the file edited's own, and the rest dimmer
+        c = x->gmod[g] > 0 ? cols[XC_TYPE] : !x->objmode && m->ffile[x->gidx[g]] != x->here ? cols[XC_COM] : cols[XC_TEXT];
+        if (g == x->cur) { d_rect(ox, y + 2 + i * XCH, w - 17, XCH, cols[XC_SEL]); c = cols[XC_KW]; }
+        n = ui_len(xp_name(x, g));
+        d_textn(ox + 4, y + 2 + i * XCH, c, XFONT, XFACE, XCW, xp_name(x, g), n);
+        // a name the module has more than once: the unit each copy came with
+        k = m->funit[x->gidx[g]];
+        if (x->gdup[g] && k >= 0) d_text(ox + 4 + (n + 1) * XCW, y + 2 + i * XCH, cols[XC_COM], F_SANS, ui_base(m->fpath[k]));
+        ++i;
+    }
+    if (x->ok && !x->nvis) d_text(ox + 4, y + 4, cols[XC_COM], F_SANS, "None by that name");
+    d_clip_end();
+    ui_scrollbar(ox + w - 17, y, h - XHDR, x->nvis, rows, x->ltop);
+}
+
+// the code: its header, then the listing
+static void xp_draw_code(struct xp *x, int ox, int oy, int cw, int ch, int *cols) {
+    char mn[8];
+    int rows, y, k, j, c, i, sx, n, ow, c1, cm, ry, lw, bw, hot, hb, lh, cols0, f, a;
+    struct xmod *m;
+    m = x->cm;
+    // the header: the function, where it is, Wrap, Back and -O
+    bw = xp_bw(x);
+    d_rect(ox, oy, cw, XHDR, C_FACE);
+    d_bevel(ox, oy, cw, XHDR, B_RAISED);
+    ui_cpy(xb, "Code");
+    if (x->ok && x->cur >= 0) {
+        f = x->gidx[x->cur];
+        ui_cpy(xb, m->fname[f]);
+        ui_cat(xb, " ("); ui_num(xb + ui_len(xb), m->flen[f]); ui_cat(xb, " words");
+        if (m->ffile[f] >= 0 && m->fline[f] > 0) { ui_cat(xb, ", "); xp_where_s(m, xb + ui_len(xb), m->ffile[f], m->fline[f]); }
+        else if (m->funit[f] >= 0) { ui_cat(xb, ", with "); ui_cat(xb, ui_base(m->fpath[m->funit[f]])); }
+        if (x->gmod[x->cur] > 0) { ui_cat(xb, ", in "); ui_cat(xb, ui_base(m->path)); }
+        ui_cat(xb, ")");
+    }
+    d_clip(ox, oy, cw - bw - 4, XHDR);
+    d_text(ox + 6, oy + 5, C_DARK, F_SANS, xb);
+    d_clip_end();
+    ui_button(ox + cw - bw, oy + 2, 44, XHDR - 4, "Wrap", x->wrap, 0);
+    ui_button(ox + cw - bw + 48, oy + 2, 26, XHDR - 4, "<", 0, 0);
+    if (!x->objmode) ui_button(ox + cw - 40, oy + 2, 36, XHDR - 4, "-O", x->opt, 0);
+
+    // the listing, laid out for its width
+    lw = cw - 17;
+    ow = xp_ow(x);
+    c1 = ow + 3;                              // labels, and the source's text
+    cols0 = (lw - 6) / XCW - c1;
+    if (cols0 < 8) cols0 = 8;
+    x->cols = (lw - 6) / XCW;
+    if (x->ok && x->cur >= 0 && x->laycols != (x->wrap ? cols0 : 0 - 1)) {
+        // laid out again: the view stays on the instruction at its top
+        k = x->top; a = 0 - 1;
+        while (x->dins && k < x->nd && a < 0) { if (x->dins[k] >= 0) a = x->dins[k]; ++k; }
+        xp_layout(x, x->wrap ? cols0 : 0);
+        if (a >= 0) { k = 0; while (k < x->nd && x->dins[k] != a) ++k; x->top = k; }
+    }
+    hb = !x->wrap;
+    lh = ch - XHDR - (hb ? 16 : 0);
+    rows = (lh - 4) / XCH;
+    if (rows < 1) rows = 1;
+    x->rows = rows;
+    if (x->sel == 0 - 2) {
+        // the cursor's line, from xp_cursor: into view
+        x->sel = 0 - 1;
+        k = xp_row_of(x, x->hline);
+        if (k >= 0 && (k < x->top || k >= x->top + rows)) x->top = k - rows / 3;
+    }
+    if (x->top > x->nd - rows) x->top = x->nd - rows;
+    if (x->top < 0) x->top = 0;
+    if (x->left > x->maxw + c1 + 2 - x->cols) x->left = x->maxw + c1 + 2 - x->cols;
+    if (x->left < 0 || x->wrap) x->left = 0;
+    y = oy + XHDR;
+    d_rect(ox, y, lw, lh, cols[XC_BG]);
+    sx = ox + 6 - x->left * XCW;
+    d_clip(ox, y, lw, lh);
+    k = x->top; i = 0;
+    while (x->ok && x->cur >= 0 && k < x->nd && i < rows) {
+        ry = y + 2 + i * XCH;
+        hot = x->dline[k] > 0 && x->gmod[x->cur] == x->hmod && x->dfile[k] == x->hfile && x->dline[k] == x->hline;
+        if (x->dins[k] < 0) {
+            // a line of source: its number where the offsets are, its text where the labels are
+            d_rect(ox, ry, lw, XCH, hot ? cols[XC_SEL] : cols[XC_GUT]);
+            d_rect(ox + 1, ry, 3, XCH, bands[x->dline[k] % 8]);
+            if (x->dseg[k] == 0) {
+                ui_num(xb, x->dline[k]);
+                n = ui_len(xb);
+                d_textn(sx + (ow + 1 - n) * XCW, ry, cols[XC_COM], XFONT, XFACE, XCW, xb, n);
+            }
+            n = xp_line(x, m, x->dfile[k], x->dline[k]);
+            if (n >= 0) {
+                // a wrapped line's piece, or the whole line scrolled across
+                a = x->wrap && x->laycols > 0 ? x->dseg[k] * x->laycols : 0;
+                n = n - a;
+                if (x->wrap && x->laycols > 0 && n > x->laycols) n = x->laycols;
+                if (n > 0) d_textn(sx + c1 * XCW, ry, cols[XC_TEXT], XFONT, XFACE, XCW, xo + a, n);
+            }
+            else { xp_where_s(m, xb, x->dfile[k], x->dline[k]); d_textn(sx + c1 * XCW, ry, cols[XC_COM], XFONT, XFACE, XCW, xb, ui_len(xb)); }
+        } else {
+            // an instruction: its offset (in hex), a label, the mnemonic and its operand
+            j = x->dins[k];
+            if (hot) d_rect(ox, ry, lw, XCH, cols[XC_SEL]);
+            if (x->dline[k] > 0) d_rect(ox + 1, ry, 3, XCH, bands[x->dline[k] % 8]);
+            xb[0] = 0;
+            xp_hex(xb, x->ioff[j]);
+            n = ui_len(xb + 2);
+            d_textn(sx + (ow + 1 - n) * XCW, ry, cols[XC_COM], XFONT, XFACE, XCW, xb + 2, n);
+            cm = c1 + 5;
+            if (x->ilab[j]) {
+                ui_cpy(xb, "L"); ui_num(xb + 1, x->ilab[j]); ui_cat(xb, ":");
+                d_textn(sx + c1 * XCW, ry, cols[XC_PRE], XFONT, XFACE, XCW, xb, ui_len(xb));
+                if (c1 + ui_len(xb) + 1 > cm) cm = c1 + ui_len(xb) + 1;
+            }
+            c = xp_text(x, j, mn, xb);
+            d_textn(sx + cm * XCW, ry, cols[XC_KW], XFONT, XFACE, XCW, mn, ui_len(mn));
+            if (xb[0]) d_textn(sx + (cm + 5) * XCW, ry, cols[c], XFONT, XFACE, XCW, xb, ui_len(xb));
+        }
+        if (k == x->sel) d_recto(ox, ry, lw, XCH, cols[XC_KW]);
+        ++k; ++i;
+    }
+    d_clip_end();
+    if (x->ok && x->cur < 0) d_text(ox + 6, y + 4, cols[XC_COM], F_SANS, "Pick a function from the list");
+    ui_scrollbar(ox + cw - 17, y, lh, x->nd, rows, x->top);
+    if (hb) {
+        ui_hscrollbar(ox, y + lh, cw - 17, x->maxw + c1 + 2, x->cols, x->left);
+        d_rect(ox + cw - 17, y + lh, 17, 16, C_FACE);
+    }
+    // a failed compile's last words, over the listing
+    if (x->failed && !x->busy) {
+        if (x->errn > 0) d_textn(ox + 6, y + 4, cols[XC_STR], XFONT, XFACE, XCW, x->err0, ui_len(x->err0));
+        if (x->errn > 1) d_textn(ox + 6, y + 4 + XCH, cols[XC_STR], XFONT, XFACE, XCW, x->err1, ui_len(x->err1));
+    }
+}
+
+// The tab at OX, OY, CW by CH: the list, the code, and a footer across
+// both; for a text MODIFIED since it was saved, COLS the IDE's scheme
+void xp_draw(int *xi, int ox, int oy, int cw, int ch, int *cols, int modified, int focused) {
+    struct xp *x;
+    char mn[8];
+    int lw, h, y, k, j, f, i;
+    struct xmod *m;
+    x = X(xi);
+    lw = xp_lw(cw);
+    h = ch - XFOOT;
+    xp_draw_list(x, ox, oy, lw, h, cols, focused);
+    d_rect(ox + lw, oy, 2, h, C_SHADOW);
+    xp_draw_code(x, ox + lw + 2, oy, cw - lw - 2, h, cols);
+
+    // the footer: what is going on, the row picked, or what is shown
+    y = oy + h;
+    d_rect(ox, y, cw, XFOOT, C_FACE);
+    d_bevel(ox, y, cw, XFOOT, B_SUNKEN);
+    xb[0] = 0;
+    m = x->cm;
+    f = x->ok && x->cur >= 0 ? m->ffile[x->gidx[x->cur]] : 0 - 1;
+    if (f >= 0) xp_source(x, m, f);
+    if (x->busy || !x->ok) ui_cpy(xb, x->msg[0] ? x->msg : "Save the file, and the code it compiles to is shown here");
+    else if (x->failed) ui_cpy(xb, x->msg);
+    else if (x->note[0]) ui_cpy(xb, x->note);
+    else if (x->sel >= 0 && x->sel < x->nd && x->dline[x->sel] > 0) {
+        k = x->sel;
+        xp_where_s(m, xb, x->dfile[k], x->dline[k]);
+        if ((j = x->dins[k]) >= 0) { ui_cat(xb, "  "); xp_text(x, j, mn, xo); ui_cat(xb, mn); ui_cat(xb, " "); ui_ncat(xb, xo, 300); }
+        else if (x->dfile[k] >= 0 && m->sst[x->dfile[k]] > 0) { ui_cat(xb, "  "); ui_ncat(xb, m->spath[x->dfile[k]], 300); }
+    }
+    else if (modified && !x->objmode) ui_cpy(xb, "Changed since it was compiled: save to see the new code");
+    else if (f >= 0 && m->sst[f] < 0 && !xm_own(m, f)) { ui_cpy(xb, "No source on this disk for "); ui_ncat(xb, m->fpath[f], 300); }
+    else if (f >= 0 && m->sst[f] == 2) { ui_ncpy(xb, m->spath[f], 200); ui_cat(xb, " has changed since this was compiled"); }
+    else if (x->objmode) {
+        m = x->mods[0];
+        ui_cpy(xb, ui_base(x->path)); ui_cat(xb, ": ");
+        ui_num(xb + ui_len(xb), m->nfn); ui_cat(xb, m->nfn == 1 ? " function, " : " functions, ");
+        ui_num_commas(xb + ui_len(xb), m->ncode); ui_cat(xb, " words of code, ");
+        if (m->nrow) { ui_cat(xb, "a map of "); ui_num(xb + ui_len(xb), m->nfile); ui_cat(xb, m->nfile == 1 ? " file" : " files"); }
+        else ui_cat(xb, "no source map");
+        i = 1;
+        while (i < x->nmod) { ui_cat(xb, i == 1 ? "; loads " : ", "); ui_ncat(xb, ui_base(x->mods[i]->path), 300); ++i; }
+    }
+    else if (x->here < 0) ui_cpy(xb, "The map does not name this file");
+    else ui_cpy(xb, x->opt ? "Compiled with -g -O" : "Compiled with -g");
+    d_clip(ox, y, cw, XFOOT);
+    d_text(ox + 4, y + 3, C_DARK, F_SANS, xb);
+    d_clip_end();
+}
+
+// ---- the mouse and the keys -------------------------------------------------------------------
+
+// Row K followed: a call (or a function's address) goes to the callee, in
+// this tab, in a library if that is where it is; anything else with a
+// line, to the line, in the editor (2)
+static int xp_follow(struct xp *x, int k) {
+    int j, t, v, f, d, g;
+    char *nm;
+    struct xmod *m;
+    m = x->cm;
+    j = x->dins[k];
+    if (j >= 0 && x->iop[j] >= 0 && xp_operand(x->iop[j])) {
+        t = m->ptype[x->ioff[j] + 1]; v = m->pval[x->ioff[j] + 1];
+        g = 0 - 1;
+        if (t == P_CODE) { f = xm_fn_at(m, v); if (f >= 0 && m->fstart[f] == v) g = m->fn0 + f; }
+        else if (t > 0 && (nm = xm_symname(m, t))) {
+            // an extern: another module's, the libraries' first
+            g = xp_named(x, nm, x->gmod[x->cur]);
+            if (g < 0) { ui_cpy(x->note, nm); ui_cat(x->note, " is not in this file or the libraries it loads: it is linked in from elsewhere"); return 1; }
+        }
+        if (g >= 0 && g != x->cur) { xp_show(x, g, 1); return 1; }
+    }
+    d = x->dfile[k];
+    if (x->dline[k] <= 0 || d < 0) return 1;
+    xp_source(x, m, d);
+    if (m->sst[d] <= 0) { ui_cpy(x->note, "No source on this disk for "); ui_ncat(x->note, m->fpath[d], 150); return 1; }
+    ui_ncpy(x->gopath, m->spath[d], 128);
+    x->goline = x->dline[k] + m->soff[d];
+    if (m == x->mods[0] && d == x->here) x->lastline = x->goline;   // the editor's cursor is going there: nothing to follow
+    return 2;
+}
+
+static int xp_mouse_list(struct xp *x, int ev, int px, int py, int w, int h) {
+    int t, k;
+    if (py < XHDR) {
+        if (ev != E_DOWN) return 0;
+        if (ui_hit(px, py, w - 32, 1, 30, XHDR - 2)) { x->byname = !x->byname; if (x->ok) xp_order(x); return 1; }
+        if (px < w - 34) x->filtc = ui_field_hit(px, 0, w - 34, x->filt, x->filtc);
+        return 1;
+    }
+    if (px >= w - 17) {
+        t = ui_scroll_click(px, py, w - 17, XHDR, h - XHDR, x->nvis, x->lrows, x->ltop);
+        if (t >= 0) x->ltop = t;
+        return 1;
+    }
+    k = x->ltop + (py - XHDR - 2) / XCH;
+    if (x->ok && k >= 0 && k < x->nvis) xp_show(x, x->lvis[k], 1);
+    return 1;
+}
+
+static int xp_mouse_code(struct xp *x, int ev, int px, int py, int cw, int ch) {
+    int t, k, bw, lh;
+    lh = ch - XHDR - (x->wrap ? 0 : 16);
+    if (py < XHDR) {
+        if (ev != E_DOWN) return 0;
+        bw = xp_bw(x);
+        if (ui_hit(px, py, cw - bw, 2, 44, XHDR - 4)) { x->wrap = !x->wrap; x->left = 0; return 1; }
+        if (ui_hit(px, py, cw - bw + 48, 2, 26, XHDR - 4)) { xp_back(x); return 1; }
+        if (!x->objmode && ui_hit(px, py, cw - 40, 2, 36, XHDR - 4)) {
+            x->opt = !x->opt;
+            if (x->path[0]) xp_compile((int *)x, x->path, x->dir);
+            return 0 - 1;
+        }
+        return 0;
+    }
+    if (px >= cw - 17) {
+        t = ui_scroll_click(px, py, cw - 17, XHDR, lh, x->nd, x->rows, x->top);
+        if (t >= 0) x->top = t;
+        return 1;
+    }
+    if (py >= XHDR + lh) {
+        t = ui_hscroll_click(px, py, 0, XHDR + lh, cw - 17, x->maxw + xp_ow(x) + 5, x->cols, x->left);
+        if (t >= 0) x->left = t;
+        return 1;
+    }
+    if (!x->ok || x->cur < 0) return 0;
+    k = x->top + (py - XHDR - 2) / XCH;
+    if (k < 0 || k >= x->nd) return 0;
+    x->sel = k;
+    if (x->dline[k] > 0) { x->hmod = x->gmod[x->cur]; x->hfile = x->dfile[k]; x->hline = x->dline[k]; }
+    if (ev == E_DBL) return xp_follow(x, k);
+    return 1;
+}
+
+// A mouse event at PX, PY in the tab, CW by CH (a wheel's PY is how far,
+// and PX where): 1 if it did something, 0 if not, 2 for a line to go to
+// in the editor (xp_goto), -1 when -O was turned on or off (and it
+// compiles again), -2 while a bar is dragged
+int xp_mouse(int *xi, int ev, int px, int py, int cw, int ch) {
+    struct xp *x;
+    int lw, h, t, ccw, lh;
+    x = X(xi);
+    lw = xp_lw(cw);
+    h = ch - XFOOT;
+    ccw = cw - lw - 2;                        // the code's width, right of the list
+    lh = h - XHDR - (x->wrap ? 0 : 16);
+    x->note[0] = 0;
+    if (ev == E_WHEEL) { if (px < lw) x->ltop = x->ltop + py * 3; else x->top = x->top + py * 3; return 1; }
+    if (ev == E_MOVE) {
+        // a thumb being dragged, named by where its bar is, as the click named it
+        t = ui_scroll_drag(lw - 17, XHDR, py);
+        if (t >= 0) { x->ltop = t; return 0 - 2; }
+        t = ui_scroll_drag(ccw - 17, XHDR, py);
+        if (t >= 0) { x->top = t; return 0 - 2; }
+        t = ui_scroll_drag(0, XHDR + lh, px - lw - 2);
+        if (t >= 0) { x->left = t; return 0 - 2; }
+        return 0;
+    }
+    if ((ev != E_DOWN && ev != E_DBL) || py >= h) return 0;
+    if (px < lw) return xp_mouse_list(x, ev, px, py, lw, h);
+    if (px < lw + 2) return 0;
+    return xp_mouse_code(x, ev, px - lw - 2, py, ccw, h);
+}
+
+// A key: typing finds a function by name (the first the filter keeps is
+// shown), Up and Down go through the list, PgUp and PgDn scroll the
+// code, Enter follows the row picked, Backspace (with nothing typed) or
+// Alt+Left goes back. 1 if it was used, 2 for a line to go to in the
+// editor; Esc with nothing typed is not used (edit.c goes back to the
+// text).
+int xp_key(int *xi, int code, int ch, int mods) {
+    struct xp *x;
+    int k;
+    x = X(xi);
+    x->note[0] = 0;
+    if ((mods & M_ALT) && code == KEY_LEFT) { xp_back(x); return 1; }
+    if (code == KEY_UP || code == KEY_DOWN) {
+        k = xp_listed(x, x->cur);
+        if (k < 0) k = code == KEY_DOWN ? 0 - 1 : x->nvis;
+        k = code == KEY_DOWN ? k + 1 : k - 1;
+        if (k >= 0 && k < x->nvis) xp_show(x, x->lvis[k], 0);
+        return 1;
+    }
+    if (code == KEY_PGUP) { x->top = x->top - (x->rows - 1); return 1; }
+    if (code == KEY_PGDN) { x->top = x->top + (x->rows - 1); return 1; }
+    if ((mods & M_CTRL) && code == KEY_HOME) { x->top = 0; return 1; }
+    if ((mods & M_CTRL) && code == KEY_END) { x->top = x->nd; return 1; }
+    if (code == KEY_ENTER) { if (x->ok && x->sel >= 0 && x->sel < x->nd) return xp_follow(x, x->sel); return 1; }
+    if (code == KEY_ESC) {
+        if (!x->filt[0]) return 0;
+        x->filt[0] = 0; x->filtc = 0;
+        if (x->ok) xp_filter(x);
+        return 1;
+    }
+    if (code == KEY_BACK && !x->filt[0]) { xp_back(x); return 1; }
+    if (ui_field_key(x->filt, XFILT, &x->filtc, code, ch, mods) && x->ok) {
+        xp_filter(x);
+        if (x->nvis && xp_listed(x, x->cur) != 0) xp_show(x, x->lvis[0], 0);
+    }
+    return 1;
 }
 // files.c -- Files, the file manager. docs/c4ix-desktop.md.
 //
@@ -3174,9 +5672,19 @@ void edit_answer(struct win *w, int action, int yes) {
 // inside, which is how /bin's are named) runs in a new
 // Terminal, a source file opens in the Editor, anything else in the Text Editor.
 // Object files and libraries (.c4o, .c4l, .c4s) are C4R inside too, but
-// only c4rlink and the loader use them: they say so rather than run.
+// only c4rlink and the loader use them, so they open in the IDE's Code
+// tab, which shows their code; File > Show Code does that for a program.
 // New Folder, Delete (confirmed)
 // and Rename go through the kernel's mkdir, unlink and rename.
+//
+// A right click on an item opens a menu of what can be done with it:
+// Open, Open in IDE (a program, an object file or a library into the IDE's
+// Code tab; a source into its editor), Rename, Delete and Download, and New
+// Folder; on the empty part of the list, New Folder and Refresh; on a
+// folder in the tree, which it shows, Expand or Collapse, New Folder in it
+// and Refresh. The bar between the tree and the list is a splitter, which
+// sizes the tree; the width it is left at is every Files window's, kept
+// in /etc/desktop.cfg (theme_tree).
 //
 // Several items can be selected, as in Explorer: Ctrl-click adds or
 // removes one, Shift-click (or Shift with the arrows) takes the range from
@@ -3188,9 +5696,20 @@ void edit_answer(struct win *w, int action, int yes) {
 // to drag, as every bar on the desktop has: ui_scroll_drag) and the wheel. It follows the selection only when that moves,
 // not at every redraw, or the bar could never leave it. A folder with
 // folders in it has a +/- box: click it, double-click the row, or use
-// Left/Right or -/+ to collapse and expand. A collapsed folder stays
-// collapsed through a reload (by the hash of its path), but the folders
-// above the one being shown always open.
+// Left/Right or -/+ to collapse and expand. Each folder's folders are in
+// name order, whatever order the list is in. The tree starts collapsed but
+// for the root, so it shows the root's folders and nothing deeper; a
+// folder opened stays open through a reload (by the hash of its path),
+// one new to the tree comes in collapsed, and the folders above the one
+// being shown always open.
+//
+// The list is sorted by name, type (the extension), size or date, either
+// way round, folders first always: View > Sort, or a click on a column's
+// header (again reverses it), which shows the order with an arrow. One
+// order for every Files window, kept in /etc/desktop.cfg as Settings'
+// choices are (theme_sort). Names sort without regard to case. The date
+// is the VFS's modification order (vfs.c, vfs_touch): C4IX has no clock
+// every host keeps, but a later change always sorts after an earlier one.
 
 #include "desktop.h"
 
@@ -3198,14 +5717,18 @@ void edit_answer(struct win *w, int action, int yes) {
 // archive's tree (some 70 folders, 80 files in the largest), and to fit
 // ST_BYTES with room to spare.
 enum { MAXE = 400, NAMEW = 64, MAXT = 256, TPW = 128, MAXDEPTH = 10, TREE_W = 180, ROW_H = 17, TOOL_H = 30, STATUS_H = 20 };
+// the splitter between the tree and the list: its width; the narrowest
+// the tree and the list may be made
+enum { SPW = 6, TREE_MIN = 100, LIST_MIN = 280 };
 // a tree node's flags: it has folders under it, and it is collapsed
-enum { T_KIDS = 1, T_COLL = 2, MAXCOLL = 64 };
+enum { T_KIDS = 1, T_COLL = 2, MAXOPEN = 64 };
 
 struct files {
     char path[128];
     int n, sel, top;                   // the list: entries, selection, first row shown
     char name[MAXE * NAMEW];
     int isdir[MAXE], size[MAXE], prog[MAXE];
+    int mtime[MAXE];                   // ST_MTIME: the order things changed in
     int nt, tsel, ttop;                // the tree: folders, their depth, the one shown
     char tpath[MAXT * TPW];
     int tdepth[MAXT];
@@ -3215,6 +5738,7 @@ struct files {
     int tleft;                         // the tree scrolled across: 6-pixel steps
     char mark[MAXE];                   // the selected items (sel is the one with the focus)
     int anchor;                        // where a Shift-click's range starts
+    int tw, twx, tdrag;                // the tree's width: chosen, as drawn; its splitter being dragged
 };
 
 static struct files *F(struct win *w) { return (struct files *)w->st; }
@@ -3222,9 +5746,15 @@ static void mark_only(struct files *f, int i);
 static char tbuf[256];
 
 static struct wk_menu menus[3];
-static char *file_items[8];
-static char *view_items[3];
+static char *file_items[9];
+static char *view_items[10];
 static char *go_items[2];
+// View's sort items, each with WK_CHECKED before it: the item is the
+// string from its second byte on, or from its first when it is the one in use
+enum { V_SORT = 2, V_ASC = 7, V_DESC = 8 };
+enum { VCHK_W = 16 };
+static char vchk[6 * VCHK_W];
+static char *vlabel[6] = { "Sort by Name", "Sort by Type", "Sort by Size", "Sort by Date", "Ascending", "Descending" };
 
 static char *ename(struct files *f, int i) { return f->name + i * NAMEW; }
 
@@ -3234,9 +5764,118 @@ static void join(char *out, char *dir, char *name) {
     ui_cat(out, name);
 }
 
-static int before(char *a, char *b) {
+// ---- the order ----
+
+static int lower(int c) { c = c & 255; return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+
+// names without regard to case; the same but for case, in byte order
+static int namecmp(char *a, char *b) {
+    char *p, *q;
+    p = a; q = b;
+    while (*p && lower(*p) == lower(*q)) { ++p; ++q; }
+    if (lower(*p) != lower(*q)) return lower(*p) - lower(*q);
     while (*a && *a == *b) { ++a; ++b; }
-    return (*a & 255) < (*b & 255);
+    return (*a & 255) - (*b & 255);
+}
+
+// what follows a name's last '.', or "" (a leading '.' is not one)
+static char *ext_of(char *s) {
+    char *e;
+    e = 0;
+    if (*s == '.') ++s;
+    while (*s) { if (*s == '.') e = s + 1; ++s; }
+    return e ? e : s;
+}
+
+// Entry I against entry J in the order in use: below 0 if I goes first.
+// Folders first either way; what the order leaves equal goes by name.
+static int cmp(struct files *f, int i, int j) {
+    int key, r;
+    if (f->isdir[i] != f->isdir[j]) return f->isdir[j] - f->isdir[i];
+    key = theme_sort() / 2;
+    r = 0;
+    if (key == SORT_TYPE && !f->isdir[i]) r = namecmp(ext_of(ename(f, i)), ext_of(ename(f, j)));
+    else if (key == SORT_SIZE) r = f->size[i] < f->size[j] ? 0 - 1 : f->size[i] > f->size[j];
+    else if (key == SORT_DATE) r = f->mtime[i] < f->mtime[j] ? 0 - 1 : f->mtime[i] > f->mtime[j];
+    if (!r) r = namecmp(ename(f, i), ename(f, j));
+    return theme_sort() & 1 ? 0 - r : r;
+}
+
+// entry SRC's name and facts into slot DST
+static void e_move(struct files *f, int dst, int src) {
+    ui_cpy(ename(f, dst), ename(f, src));
+    f->isdir[dst] = f->isdir[src]; f->size[dst] = f->size[src];
+    f->prog[dst] = f->prog[src]; f->mtime[dst] = f->mtime[src];
+}
+
+// Sort the list: an insertion sort of the entries' numbers, then each
+// entry moved once into place, a cycle of the permutation at a time, so
+// a name is copied once rather than at every step. The spare slot is
+// the one past the last, kept free for it.
+static int ord[MAXE];
+static void sort_list(struct files *f) {
+    int i, j, k, t;
+    i = 0;
+    while (i < f->n) {
+        t = i;
+        j = i;
+        while (j > 0 && cmp(f, t, ord[j - 1]) < 0) { ord[j] = ord[j - 1]; --j; }
+        ord[j] = t;
+        ++i;
+    }
+    // row R is to hold entry ord[R]
+    i = 0;
+    while (i < f->n) {
+        if (ord[i] != i) {
+            e_move(f, MAXE - 1, i);
+            j = i;
+            while (ord[j] != i) { k = ord[j]; e_move(f, j, k); ord[j] = j; j = k; }
+            e_move(f, j, MAXE - 1);
+            ord[j] = j;
+        }
+        ++i;
+    }
+}
+
+// View's check marks, for the order in use
+static void sort_marks() {
+    int k, s, on;
+    s = theme_sort();
+    k = 0;
+    while (k < 6) {
+        vchk[k * VCHK_W] = WK_CHECKED;
+        ui_cpy(vchk + k * VCHK_W + 1, vlabel[k]);
+        if (k < 4) on = k == s / 2;
+        else on = k - 4 == (s & 1);
+        view_items[k < 4 ? V_SORT + k : V_ASC + k - 4] = vchk + k * VCHK_W + (on ? 0 : 1);
+        ++k;
+    }
+}
+
+// the list sorted again, the focus kept on the same item
+static void resort(struct files *f) {
+    char nm[NAMEW];
+    int i;
+    nm[0] = 0;
+    if (f->sel >= 0 && f->sel < f->n) ui_cpy(nm, ename(f, f->sel));
+    sort_list(f);
+    i = 0;
+    while (i < f->n && !ui_eq(ename(f, i), nm)) ++i;
+    f->sel = i < f->n ? i : 0;
+    mark_only(f, f->sel);
+}
+
+// Another order, kept, and every Files window's list in it
+static void set_sort(int sort) {
+    int i;
+    theme_set_sort(sort);
+    sort_marks();
+    i = wk_next(0);
+    while (i) {
+        if (wk_class_of(i) == kind_class(K_FILES)) resort(F(win_get(i)));
+        i = wk_next(i);
+    }
+    mark_dirty();
 }
 
 // an object file or a library: linked into programs, never run itself
@@ -3244,40 +5883,27 @@ static int is_linkable(char *p) {
     return ui_ends(p, ".c4o") || ui_ends(p, ".c4l") || ui_ends(p, ".c4s");
 }
 
-// Read a directory: folders first, then files, each alphabetical.
+// Read a directory, in the order in use. Slot MAXE - 1 is sort_list's.
 static void load(struct files *f) {
-    int i, j, r, s, d, st[4];
+    int i, r, st[ST_MTIME + 1];
     char nm[NAMEW];
     f->n = 0;
     i = 0;
-    while (f->n < MAXE) {
+    while (f->n < MAXE - 1) {
         r = ureaddir(f->path, i, nm);
         if (r < 0) break;
         ui_cpy(ename(f, f->n), nm);
         f->isdir[f->n] = r;
         join(tbuf, f->path, nm);
-        st[2] = 0;
-        f->size[f->n] = (!r && ustat(tbuf, st) == 0) ? st[1] : 0;
-        f->prog[f->n] = !r && !is_linkable(nm) && (st[2] || ui_ends(nm, ".c4r"));
+        st[ST_SIZE] = 0; st[ST_PROG] = 0; st[ST_MTIME] = 0;
+        ustat2(tbuf, st, ST_MTIME + 1);
+        f->size[f->n] = r ? 0 : st[ST_SIZE];
+        f->mtime[f->n] = st[ST_MTIME];
+        f->prog[f->n] = !r && !is_linkable(nm) && (st[ST_PROG] || ui_ends(nm, ".c4r"));
         ++f->n;
         ++i;
     }
-    // insertion sort
-    i = 1;
-    while (i < f->n) {
-        j = i;
-        while (j > 0) {
-            if (f->isdir[j] > f->isdir[j - 1] ||
-                (f->isdir[j] == f->isdir[j - 1] && before(ename(f, j), ename(f, j - 1)))) {
-                ui_cpy(nm, ename(f, j)); ui_cpy(ename(f, j), ename(f, j - 1)); ui_cpy(ename(f, j - 1), nm);
-                d = f->isdir[j]; f->isdir[j] = f->isdir[j - 1]; f->isdir[j - 1] = d;
-                s = f->size[j]; f->size[j] = f->size[j - 1]; f->size[j - 1] = s;
-                s = f->prog[j]; f->prog[j] = f->prog[j - 1]; f->prog[j - 1] = s;
-                --j;
-            } else break;
-        }
-        ++i;
-    }
+    sort_list(f);
     if (f->sel >= f->n) f->sel = f->n - 1;
     if (f->sel < 0) f->sel = 0;
     if (f->top > f->sel) f->top = f->sel;
@@ -3336,26 +5962,72 @@ static int del_tree(char *dir) {
     return bad;
 }
 
-// Every folder, depth first, for the tree. DIR is copied in first thing,
-// so a caller may pass a buffer the recursion will reuse.
-static void tree_walk(struct files *f, char *dir, int depth) {
-    int i, r, me;
+// The folders open in the tree, by the hash of the path, while it is
+// made again (tree_load)
+static int t_open[MAXOPEN], t_nopen;
+
+static int phash(char *s);
+
+// Is DIR the folder shown, or one above it?
+static int t_above(struct files *f, char *dir) {
+    int n;
+    n = ui_len(dir);
+    if (n == 1 && dir[0] == '/') return 1;
+    return !memcmp(f->path, dir, n) && (f->path[n] == 0 || f->path[n] == '/');
+}
+
+// Has DIR a folder in it? One a directory still on the host (stat's
+// device 3: vfs.c, vfs_lazydir) is taken to have, as the games' do: to
+// look would make its entries.
+static int t_haskids(char *dir) {
+    int i, r, st[ST_WORDS];
     char nm[NAMEW];
+    if (ustat2(dir, st, ST_WORDS) >= 0 && st[ST_DEV] == 3) return 1;
+    i = 0;
+    while ((r = ureaddir(dir, i, nm)) >= 0) { if (r == 1) return 1; ++i; }
+    return 0;
+}
+
+// The tree's folders, depth first, each folder's own by name (as namecmp
+// orders them) -- but only in the open folders and those above the one
+// shown: the rest are a row each, with a box if they have folders, and
+// are read when opened (t_toggle). Every folder on the disk was walked at
+// every click once, hundreds with the games' sources: a second each.
+// DIR is copied in first thing, so a caller may pass a buffer the
+// recursion will reuse. A folder's folders are taken smallest first, a
+// pass over it for each -- the next name after the last one taken --
+// rather than with a list of them at every level of the recursion.
+static void tree_walk(struct files *f, char *dir, int depth) {
+    int i, r, me, took, found, h;
+    char nm[NAMEW], last[NAMEW], next[NAMEW];
     if (f->nt >= MAXT || depth > MAXDEPTH) return;
     me = f->nt;
     ui_cpy(f->tpath + me * TPW, dir);
     f->tdepth[me] = depth;
     f->tflag[me] = 0;
     ++f->nt;
-    i = 0;
-    while (1) {
-        r = ureaddir(f->tpath + me * TPW, i, nm);
-        if (r < 0) break;
-        if (r == 1 && f->nt < MAXT) {
-            join(tbuf, f->tpath + me * TPW, nm);
-            tree_walk(f, tbuf, depth + 1);
+    if (depth > 0 && !t_above(f, dir)) {
+        h = phash(dir);
+        i = 0;
+        while (i < t_nopen && t_open[i] != h) ++i;
+        if (i == t_nopen) {
+            if (depth < MAXDEPTH && t_haskids(dir)) f->tflag[me] = T_KIDS;
+            return;
         }
-        ++i;
+    }
+    took = 0;
+    while (f->nt < MAXT) {
+        found = 0;
+        i = 0;
+        while ((r = ureaddir(f->tpath + me * TPW, i, nm)) >= 0) {
+            if (r == 1 && (!took || namecmp(nm, last) > 0) && (!found || namecmp(nm, next) < 0)) { ui_cpy(next, nm); found = 1; }
+            ++i;
+        }
+        if (!found) break;
+        ui_cpy(last, next);
+        took = 1;
+        join(tbuf, f->tpath + me * TPW, next);
+        tree_walk(f, tbuf, depth + 1);
     }
     // a box only where a folder below was taken: not past MAXDEPTH or MAXT
     if (f->nt > me + 1) f->tflag[me] = T_KIDS;
@@ -3368,24 +6040,28 @@ static int phash(char *s) {
     return h;
 }
 
-// The tree again, from the disk. What was collapsed stays so, but every
-// folder above the one shown opens, so the selection can be seen.
+// The tree again, from the disk. A folder with folders in it is collapsed
+// unless it was open before -- the first time, only the root is -- but
+// every folder above the one shown opens, so the selection can be seen.
 static void tree_load(struct files *f) {
-    int old[MAXCOLL], no, i, j, h, d;
-    no = 0;
+    int first, i, j, h, d;
+    first = f->nt == 0;
+    t_nopen = 0;
     i = 0;
     while (i < f->nt) {
-        if ((f->tflag[i] & T_COLL) && no < MAXCOLL) { old[no] = phash(f->tpath + i * TPW); ++no; }
+        if ((f->tflag[i] & T_KIDS) && !(f->tflag[i] & T_COLL) && t_nopen < MAXOPEN) { t_open[t_nopen] = phash(f->tpath + i * TPW); ++t_nopen; }
         ++i;
     }
     f->nt = 0;
     tree_walk(f, "/", 0);
     i = 0;
-    while (i < f->nt && no) {
-        h = phash(f->tpath + i * TPW);
-        j = 0;
-        while (j < no && old[j] != h) ++j;
-        if (j < no) f->tflag[i] = f->tflag[i] | T_COLL;
+    while (i < f->nt) {
+        if ((f->tflag[i] & T_KIDS) && !(first && i == 0)) {
+            h = phash(f->tpath + i * TPW);
+            j = 0;
+            while (j < t_nopen && t_open[j] != h) ++j;
+            if (j == t_nopen) f->tflag[i] = f->tflag[i] | T_COLL;
+        }
         ++i;
     }
     f->tsel = 0;
@@ -3452,14 +6128,15 @@ static int t_maxw(struct files *f) {
     }
     return mx;
 }
-enum { THB_X = 4, THB_W = TREE_W - 22 };
-static int t_hvis() { return THB_W / 6; }
-static int t_hbar(struct files *f) { return t_maxw(f) > t_hvis(); }
+enum { THB_X = 4 };
+#define THB_W (f->twx - 22)
+static int t_hvis(struct files *f) { return THB_W / 6; }
+static int t_hbar(struct files *f) { return t_maxw(f) > t_hvis(f); }
 static int t_rows(struct files *f, int ch) { return (ch - TOOL_H - STATUS_H - 2 - 6 - (t_hbar(f) ? 16 : 0)) / ROW_H; }
 static int t_hby(int ch) { return ch - STATUS_H - 2 - 18; }
 static void t_hclamp(struct files *f) {
     int max;
-    max = t_maxw(f) - t_hvis();
+    max = t_maxw(f) - t_hvis(f);
     if (max < 0) max = 0;
     if (f->tleft > max) f->tleft = max;
     if (f->tleft < 0) f->tleft = 0;
@@ -3472,7 +6149,15 @@ static int t_clamp(struct files *f, int rows) {
     if (f->ttop < 0) f->ttop = 0;
     return max;
 }
-enum { TSB_X = 2 + TREE_W - 18 };
+#define TSB_X (2 + f->twx - 18)
+// the tree's width in a window CW wide: the one chosen, as far as the list keeps its own
+static int t_width(struct files *f, int cw) {
+    int w;
+    w = f->tw;
+    if (w > cw - SPW - 4 - LIST_MIN) w = cw - SPW - 4 - LIST_MIN;
+    if (w < TREE_MIN) w = TREE_MIN;
+    return w;
+}
 
 static void go(struct win *w, char *path) {
     struct files *f;
@@ -3514,7 +6199,16 @@ static void t_toggle(struct win *w, int i) {
     f = F(w);
     if (i < 0 || i >= f->nt || !(f->tflag[i] & T_KIDS)) return;
     f->tflag[i] = f->tflag[i] ^ T_COLL;
-    if (!(f->tflag[i] & T_COLL)) return;
+    if (!(f->tflag[i] & T_COLL)) {
+        // opened, and its folders not read yet: the tree again, with it open
+        if (i + 1 >= f->nt || f->tdepth[i + 1] <= f->tdepth[i]) {
+            d = f->ttop;
+            tree_load(f);
+            f->ttop = d;
+            f->tfollow = 0;
+        }
+        return;
+    }
     d = f->tdepth[i];
     j = i + 1;
     while (j < f->nt && f->tdepth[j] > d) { if (j == f->tsel) { t_select(w, i); return; } ++j; }
@@ -3553,7 +6247,7 @@ static void open_sel(struct win *w) {
     join(tbuf, f->path, ename(f, f->sel));
     if (f->isdir[f->sel]) go(w, tbuf);
     else if (f->prog[f->sel]) run_command(tbuf);
-    else if (is_linkable(tbuf)) msgbox(w, "Cannot Run", "Object files and libraries are linked into programs, not run.", 0, A_NONE);
+    else if (is_linkable(tbuf)) edit_open(tbuf);
     else if (is_source(tbuf)) edit_open(tbuf);
     else note_open(tbuf);
 }
@@ -3564,10 +6258,13 @@ int files_open(char *path) {
     i = win_open(K_FILES, "Files", 600, 420, sizeof(struct files));
     if (i < 0) return i;
     w = win_get(i);
+    F(w)->tw = theme_tree();
     menus[0].title = "File"; menus[1].title = "View"; menus[2].title = "Go";
     file_items[0] = "Open"; file_items[1] = "New Folder"; file_items[2] = "Delete";
-    file_items[3] = "Rename"; file_items[4] = "-"; file_items[5] = "Close"; file_items[6] = 0;
-    view_items[0] = "Refresh"; view_items[1] = 0;
+    file_items[3] = "Rename"; file_items[4] = "Show Code"; file_items[5] = "Download";
+    file_items[6] = "-"; file_items[7] = "Close"; file_items[8] = 0;
+    view_items[0] = "Refresh"; view_items[1] = "-"; view_items[6] = "-"; view_items[9] = 0;
+    sort_marks();
     go_items[0] = "Up"; go_items[1] = 0;
     menus[0].items = file_items; menus[1].items = view_items; menus[2].items = go_items;
     wk_menu(i, menus, 3);
@@ -3590,6 +6287,25 @@ static void small_icon(int dir, int prog, int x, int y) {
 
 static int widths[3];
 static char *labels[3];
+// the columns, left to right, and the order a click on each sorts by
+static int col_sort[3] = { SORT_NAME, SORT_SIZE, SORT_TYPE };
+
+// the arrow on the header of the column the list is sorted by: up for
+// ascending, down for descending (by date has no column)
+static void sort_arrow(int x, int y) {
+    int k, r, down;
+    down = theme_sort() & 1;
+    k = 0;
+    while (k < 3 && col_sort[k] != theme_sort() / 2) { x = x + widths[k]; ++k; }
+    if (k == 3) return;
+    x = x + widths[k] - 14;
+    r = 0;
+    while (r < 4) {
+        if (down) d_rect(x + r, y + r, 7 - 2 * r, 1, C_SHADOW);
+        else d_rect(x + 3 - r, y + r, 1 + 2 * r, 1, C_SHADOW);
+        ++r;
+    }
+}
 
 // the +/- box on a folder with folders in it, centred where its lines meet
 static void t_box(int x, int y, int coll) {
@@ -3603,6 +6319,7 @@ void files_draw(struct win *w, int ox, int oy, int cw, int ch, int focused) {
     struct files *f;
     int i, y, lx, lw, lh, rows, tx, th, trows, sel_bg, nv, r, hb, dx;
     f = F(w);
+    f->twx = t_width(f, cw);
     d_rect(ox, oy, cw, ch, C_FACE);
     // the toolbar: Up, and the address
     ui_button(ox + 4, oy + 4, 26, 22, "", 0, 0);
@@ -3612,15 +6329,15 @@ void files_draw(struct win *w, int ox, int oy, int cw, int ch, int focused) {
     ui_field(ox + 86, oy + 4, cw - 90, f->path, 0, 0);
     // the tree
     tx = ox + 2; th = ch - TOOL_H - STATUS_H - 2;
-    d_rect(tx, oy + TOOL_H, TREE_W, th, C_WHITE);
-    d_bevel(tx, oy + TOOL_H, TREE_W, th, B_SUNKEN);
+    d_rect(tx, oy + TOOL_H, f->twx, th, C_WHITE);
+    d_bevel(tx, oy + TOOL_H, f->twx, th, B_SUNKEN);
     trows = t_rows(f, ch);
     nv = t_shown(f);
     hb = t_hbar(f);
     t_hclamp(f);
     dx = f->tleft * 6;
     // the names and lines stay inside the tree, under its bars
-    d_clip(tx + 2, oy + TOOL_H + 2, TREE_W - 4 - (nv > trows ? 16 : 0), th - 4 - (hb ? 16 : 0));
+    d_clip(tx + 2, oy + TOOL_H + 2, f->twx - 4 - (nv > trows ? 16 : 0), th - 4 - (hb ? 16 : 0));
     if (f->tfollow) {
         r = t_row(f, f->tsel);
         if (r >= 0 && r < f->ttop) f->ttop = r;
@@ -3655,14 +6372,16 @@ void files_draw(struct win *w, int ox, int oy, int cw, int ch, int focused) {
     }
     d_clip_end();
     if (nv > trows) ui_scrollbar(ox + TSB_X, oy + TOOL_H + 2, th - 4 - (hb ? 16 : 0), nv, trows, f->ttop);
-    if (hb) ui_hscrollbar(ox + THB_X, oy + t_hby(ch), THB_W, t_maxw(f), t_hvis(), f->tleft);
-    // the list
-    lx = tx + TREE_W + 4; lw = cw - TREE_W - 8;
+    if (hb) ui_hscrollbar(ox + THB_X, oy + t_hby(ch), THB_W, t_maxw(f), t_hvis(f), f->tleft);
+    // the splitter, and the list
+    ui_splitter(tx + f->twx, oy + TOOL_H, SPW, th);
+    lx = tx + f->twx + SPW; lw = cw - f->twx - SPW - 4;
     d_rect(lx, oy + TOOL_H, lw, th, C_WHITE);
     d_bevel(lx, oy + TOOL_H, lw, th, B_SUNKEN);
     widths[0] = lw - 4 - 16 - 170; widths[1] = 70; widths[2] = 100;
     labels[0] = "Name"; labels[1] = "Size"; labels[2] = "Type";
     ui_header(lx + 2, oy + TOOL_H + 2, widths, labels, 3);
+    sort_arrow(lx + 2, oy + TOOL_H + 9);
     lh = th - 22;
     rows = (lh - 4) / ROW_H;
     if (f->sel < f->top) f->top = f->sel;
@@ -3695,16 +6414,103 @@ void files_draw(struct win *w, int ox, int oy, int cw, int ch, int focused) {
 
 // ---- input ------------------------------------------------------------------------------
 
+// The right click's menus: their items as drawn, and what each does
+enum { P_OPEN = 1, P_IDE = 2, P_NEWDIR = 3, P_RENAME = 4, P_DELETE = 5, P_DOWNLOAD = 6,
+       P_REFRESH = 7, P_TOGGLE = 8, P_MAX = 12 };
+static char *pop_items[P_MAX];
+static int pop_act[P_MAX], pop_n;
+static void pop_add(char *label, int act) { pop_items[pop_n] = label; pop_act[pop_n] = act; ++pop_n; pop_items[pop_n] = 0; }
+
+// what opens in the IDE: a compiled file (into its Code tab), or a source
+static int ide_ok(struct files *f, int i) {
+    if (f->isdir[i]) return 0;
+    return f->prog[i] || is_linkable(ename(f, i)) || is_source(ename(f, i));
+}
+
+// A right click on the list: on an item (taking it, unless it is among
+// those selected already), or on the list's empty part
+static void pop_list(struct win *w, int row, int x, int y) {
+    struct files *f;
+    f = F(w);
+    pop_n = 0;
+    if (row >= 0 && row < f->n) {
+        if (!f->mark[row]) mark_only(f, row);
+        f->sel = row;
+        pop_add("Open", P_OPEN);
+        if (ide_ok(f, row)) pop_add("Open in IDE", P_IDE);
+        pop_add("-", 0);
+        pop_add("Rename", P_RENAME);
+        pop_add("Delete", P_DELETE);
+        pop_add("-", 0);
+        pop_add("New Folder", P_NEWDIR);
+        pop_add("Download", P_DOWNLOAD);
+    } else {
+        pop_add("New Folder", P_NEWDIR);
+        pop_add("Refresh", P_REFRESH);
+    }
+    wk_popup(w->id, x, y, pop_items);
+}
+
+// ... and on a folder in the tree, the one now shown
+static void pop_tree(struct win *w, int x, int y) {
+    struct files *f;
+    f = F(w);
+    pop_n = 0;
+    if (f->tflag[f->tsel] & T_KIDS) pop_add(f->tflag[f->tsel] & T_COLL ? "Expand" : "Collapse", P_TOGGLE);
+    pop_add("New Folder", P_NEWDIR);
+    pop_add("Refresh", P_REFRESH);
+    wk_popup(w->id, x, y, pop_items);
+}
+
+// an item of those menus chosen
+static void pop_do(struct win *w, int k) {
+    struct files *f;
+    f = F(w);
+    if (k < 0 || k >= pop_n) return;
+    k = pop_act[k];
+    if (k == P_OPEN) open_sel(w);
+    else if (k == P_IDE && f->sel >= 0 && f->sel < f->n) {
+        // a compiled file opens in the IDE's Code tab alone, as its own
+        // File > Open does one (edit.c, e_open); a source in its editor
+        join(tbuf, f->path, ename(f, f->sel));
+        edit_open(tbuf);
+    }
+    else if (k == P_NEWDIR) files_command(w, 0, 1);
+    else if (k == P_RENAME) files_command(w, 0, 3);
+    else if (k == P_DELETE) files_command(w, 0, 2);
+    else if (k == P_DOWNLOAD) files_command(w, 0, 5);
+    else if (k == P_REFRESH) files_command(w, 1, 0);
+    else if (k == P_TOGGLE) t_toggle(w, f->tsel);
+}
+
+// The pointer: arrows, but for the splitter's left and right
+int files_pointer(struct win *w, int x, int y, int cw, int ch) {
+    struct files *f;
+    f = F(w);
+    f->twx = t_width(f, cw);
+    if (x >= 2 + f->twx && x < 2 + f->twx + SPW && y >= TOOL_H && y < ch - STATUS_H) return PTR_COLS;
+    return PTR_ARROW;
+}
+
 void files_mouse(struct win *w, int ev, int x, int y, int cw, int ch) {
     struct files *f;
-    int th, lx, lw, rows, row, t, lh, trows, nv, node, bx;
+    int th, lx, lw, rows, row, t, lh, trows, nv, node, bx, k;
     f = F(w);
+    f->twx = t_width(f, cw);
     th = ch - TOOL_H - STATUS_H - 2;
-    lx = 2 + TREE_W + 4; lw = cw - TREE_W - 8;
+    lx = 2 + f->twx + SPW; lw = cw - f->twx - SPW - 4;
     lh = th - 22;
     rows = (lh - 4) / ROW_H;
     trows = t_rows(f, ch);
     nv = t_shown(f);
+    // the splitter let go: its width kept, for Files windows opened after
+    if (ev == E_UP) { if (f->tdrag) { f->tdrag = 0; theme_set_tree(f->tw); } return; }
+    if (ev == E_MOVE && f->tdrag && (t = ui_split_drag(x)) >= 0) {
+        f->tw = t;
+        if (f->tw > cw - SPW - 4 - LIST_MIN) f->tw = cw - SPW - 4 - LIST_MIN;
+        if (f->tw < TREE_MIN) f->tw = TREE_MIN;
+        return;
+    }
     if (ev == E_MOVE) {
         t = ui_scroll_drag(TSB_X, TOOL_H + 2, y);
         if (t >= 0) { f->ttop = t; t_clamp(f, trows); return; }
@@ -3718,7 +6524,7 @@ void files_mouse(struct win *w, int ev, int x, int y, int cw, int ch) {
         }
         return;
     }
-    if (ev == E_WHEEL && x < 2 + TREE_W) {
+    if (ev == E_WHEEL && x < 2 + f->twx) {
         f->ttop = f->ttop + y * 3;
         t_clamp(f, trows);
         return;
@@ -3734,26 +6540,38 @@ void files_mouse(struct win *w, int ev, int x, int y, int cw, int ch) {
     }
     if (ev != E_DOWN && ev != E_DBL) return;
     if (ui_hit(x, y, 4, 4, 26, 22)) { if (ev == E_DOWN) up(w); return; }
+    if (ev == E_DOWN && wm_button == 0 && ui_split_click(x, y, 2 + f->twx, TOOL_H, SPW, th, f->twx)) { f->tdrag = 1; return; }
     if (nv > trows && ui_hit(x, y, TSB_X, TOOL_H + 2, 16, th - 4 - (t_hbar(f) ? 16 : 0))) {
         if (ev != E_DOWN) return;
         t = ui_scroll_click(x, y, TSB_X, TOOL_H + 2, th - 4 - (t_hbar(f) ? 16 : 0), nv, trows, f->ttop);
         if (t >= 0) f->ttop = t;
         return;
     }
-    if (t_hbar(f) && ui_hit(x, y, 2, t_hby(ch), TREE_W, 16)) {
+    if (t_hbar(f) && ui_hit(x, y, 2, t_hby(ch), f->twx, 16)) {
         if (ev != E_DOWN) return;
-        t = ui_hscroll_click(x, y, THB_X, t_hby(ch), THB_W, t_maxw(f), t_hvis(), f->tleft);
+        t = ui_hscroll_click(x, y, THB_X, t_hby(ch), THB_W, t_maxw(f), t_hvis(f), f->tleft);
         if (t >= 0) f->tleft = t;
         return;
     }
-    if (ui_hit(x, y, 2, TOOL_H, TREE_W, th)) {
+    if (ui_hit(x, y, 2, TOOL_H, f->twx, th)) {
         f->pane = 1;
         node = t_at(f, f->ttop + (y - TOOL_H - 3) / ROW_H);
         if (node < 0) return;
+        // a right click: that folder shown, and its menu
+        if (wm_button == 2) { if (ev == E_DOWN) { t_select(w, node); pop_tree(w, x, y); } return; }
         bx = 2 + 18 + f->tdepth[node] * 14 - 13 - f->tleft * 6;
         if (x >= bx - 2 && x < bx + 11 && (f->tflag[node] & T_KIDS)) { if (ev == E_DOWN) t_toggle(w, node); return; }
         if (ev == E_DOWN) t_select(w, node);
         else t_toggle(w, node);
+        return;
+    }
+    // A column's header: sort by it, or the other way round if it is
+    // already. Each click, not the E_DBL that follows a second quick one.
+    if (ui_hit(x, y, lx + 2, TOOL_H + 2, lw - 4 - 16, 18)) {
+        if (ev != E_DOWN) return;
+        t = x - lx - 2 - (lw - 4 - 16 - 170);
+        k = col_sort[t < 0 ? 0 : t < 70 ? 1 : 2];
+        set_sort(theme_sort() / 2 == k ? theme_sort() ^ 1 : k * 2);
         return;
     }
     t = ui_scroll_click(x, y, lx + lw - 18, TOOL_H + 20, lh - 2, f->n, rows, f->top);
@@ -3761,6 +6579,7 @@ void files_mouse(struct win *w, int ev, int x, int y, int cw, int ch) {
     if (ui_hit(x, y, lx, TOOL_H + 22, lw, lh)) {
         f->pane = 0;
         row = f->top + (y - TOOL_H - 22) / ROW_H;
+        if (wm_button == 2) { if (ev == E_DOWN) pop_list(w, row, x, y); return; }
         if (row >= 0 && row < f->n) {
             f->sel = row;
             if (ev == E_DBL) { mark_only(f, row); open_sel(w); }
@@ -3821,8 +6640,10 @@ void files_key(struct win *w, int code, int ch, int mods) {
 void files_command(struct win *w, int menu, int item) {
     struct files *f;
     char path[256], name[NAMEW];
-    int n, i, dirs;
+    char *av[3];
+    int n, i, dirs, pid;
     f = F(w);
+    if (menu == WK_POPUP) { pop_do(w, item); return; }
     if (menu == 0) {
         if (item == 0) open_sel(w);
         else if (item == 1) inputbox(w, "New Folder", "Name of the new folder:", "New Folder", A_NEWDIR);
@@ -3849,8 +6670,26 @@ void files_command(struct win *w, int menu, int item) {
             }
         }
         else if (item == 3 && f->n) inputbox(w, "Rename", "New name:", ename(f, f->sel), A_RENAME);
-        else if (item == 5) win_close(win_index(w));
-    } else if (menu == 1) { load(f); tree_load(f); }
+        else if (item == 4 && f->n && f->sel >= 0 && f->sel < f->n && !f->isdir[f->sel]) {
+            // the IDE's Code tab, for a compiled file (edit.c knows one by its header)
+            join(tbuf, f->path, ename(f, f->sel));
+            edit_open(tbuf);
+        }
+        else if (item == 5 && f->n && f->sel >= 0 && f->sel < f->n) {
+            // to the web page, which saves it where the browser keeps
+            // downloads, a folder as a tar: persist's download (/bin/download).
+            // The desktop waits for it, as it does for persist save
+            join(path, f->path, ename(f, f->sel));
+            av[0] = "download"; av[1] = path; av[2] = 0;
+            if ((pid = spawn("/bin/download", 2, av)) < 0 || uwait(pid) != 0)
+                msgbox(w, "Download", "It could not be downloaded: only the web page takes downloads.", 0, A_NONE);
+        }
+        else if (item == 7) win_close(win_index(w));
+    } else if (menu == 1) {
+        if (item == 0) { load(f); tree_load(f); }
+        else if (item >= V_SORT && item < V_SORT + N_SORTS) set_sort((item - V_SORT) * 2 + (theme_sort() & 1));
+        else if (item == V_ASC || item == V_DESC) set_sort(theme_sort() / 2 * 2 + (item == V_DESC));
+    }
     else if (menu == 2) up(w);
 }
 
@@ -3888,6 +6727,195 @@ void files_answer(struct win *w, int action, int yes) {
         load(f); tree_load(f);
     }
 }
+// hl.c -- the IDE's syntax colouring (edit.c): what each character of a
+// line is, for C and JavaScript, Lisp, Forth, shell scripts and Makefiles,
+// and B4KE build files. A module of its own since edit.c grew past what
+// C4IX's compiler can hold at once (docs/c4ix-desktop.md, part twenty).
+//
+// Each line is coloured on its own, character by character, into hlc;
+// the one thing carried from line to line is being inside a C comment.
+
+#include "desktop.h"
+
+static int hlc[HL_MAX];
+
+static int hl_isword(int c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+// The language a file's name says it is
+int hl_lang(char *p) {
+    if (ui_ends(p, ".c") || ui_ends(p, ".h")) return L_C;
+    if (ui_ends(p, ".js") || ui_ends(p, ".mjs")) return L_JS;
+    if (ui_ends(p, ".lisp") || ui_ends(p, ".scm") || ui_ends(p, ".el")) return L_LISP;
+    if (ui_ends(p, ".f") || ui_ends(p, ".fs") || ui_ends(p, ".fth") || ui_ends(p, ".4th")) return L_FORTH;
+    if (ui_ends(p, ".sh") || ui_ends(p, "Makefile") || ui_ends(p, ".mk")) return L_SH;
+    if (ui_ends(p, ".b4k") || ui_ends(p, ".B4K")) return L_B4K;
+    return L_TEXT;
+}
+
+// Is S[0..N) one of LIST's words? LIST has a space before each word and
+// after the last.
+int hl_inwords(char *s, int n, char *list) {
+    int i, k;
+    i = 0;
+    while (list[i]) {
+        if (list[i] == ' ' && list[i + 1]) {
+            k = 0;
+            while (k < n && list[i + 1 + k] == s[k]) ++k;
+            if (k == n && list[i + 1 + k] == ' ') return 1;
+        }
+        ++i;
+    }
+    return 0;
+}
+
+static void hl_paint(int i, int j, int c) {
+    while (i < j && i < HL_MAX) { hlc[i] = c; ++i; }
+}
+
+static char *c_kw = " if else while for do switch case default break continue return goto sizeof typedef struct union enum static extern const volatile register inline restrict ";
+static char *c_ty = " int char short long unsigned signed void float double ";
+static char *js_kw = " function var let const if else for while do return new class this null true false undefined import export from of in typeof instanceof await async break continue switch case default throw try catch finally delete yield ";
+static char *lisp_kw = " define lambda if begin let let* letrec set! cond else and or not quote next define-macro when unless do case ";
+static char *forth_kw = " IF ELSE THEN BEGIN WHILE REPEAT UNTIL AGAIN DO ?DO LOOP +LOOP LEAVE UNLOOP EXIT ; : VARIABLE CONSTANT VALUE CREATE DOES> RECURSE DEFER IS TO CASE OF ENDOF ENDCASE IMMEDIATE POSTPONE ['] [CHAR] LITERAL :NONAME {: :} :M ;M ";
+static char *sh_kw = " if then else elif fi for in do done while until case esac function return export local set exit break continue shift ";
+
+// a string from I (its quote) to its end, \ escapes skipped
+static int hl_strend(char *s, int n, int i) {
+    int q;
+    q = s[i];
+    ++i;
+    while (i < n && s[i] != q) { if (s[i] == 92) ++i; ++i; }
+    return i < n ? i + 1 : n;
+}
+
+// C and JavaScript; ST 1 is inside /* */
+static int hl_c(char *s, int n, int st, int js) {
+    int i, j, c, nb;
+    i = 0; nb = 0;
+    while (i < n) {
+        c = s[i];
+        if (st == 1) {
+            j = i;
+            while (j < n && !(s[j] == '*' && j + 1 < n && s[j + 1] == '/')) ++j;
+            if (j < n) { j = j + 2; st = 0; }
+            hl_paint(i, j, HC_COM); i = j;
+        } else if (c == '/' && i + 1 < n && s[i + 1] == '/') { hl_paint(i, n, HC_COM); i = n; }
+        else if (c == '/' && i + 1 < n && s[i + 1] == '*') { hl_paint(i, i + 2, HC_COM); i = i + 2; st = 1; }
+        else if (c == '"' || c == 39 || (js && c == '`')) { j = hl_strend(s, n, i); hl_paint(i, j, HC_STR); i = j; }
+        else if (!js && c == '#' && !nb) {
+            j = i + 1;
+            while (j < n && s[j] == ' ') ++j;
+            while (j < n && hl_isword(s[j])) ++j;
+            hl_paint(i, j, HC_PRE); i = j;
+        } else if (c >= '0' && c <= '9' && (i == 0 || !hl_isword(s[i - 1]))) {
+            j = i;
+            while (j < n && (hl_isword(s[j]) || s[j] == '.')) ++j;
+            hl_paint(i, j, HC_NUM); i = j;
+        } else if (hl_isword(c)) {
+            j = i;
+            while (j < n && hl_isword(s[j])) ++j;
+            if (hl_inwords(s + i, j - i, js ? js_kw : c_kw)) hl_paint(i, j, HC_KW);
+            else if (!js && hl_inwords(s + i, j - i, c_ty)) hl_paint(i, j, HC_TYPE);
+            i = j;
+        } else ++i;
+        if (c != ' ' && c != 9) nb = 1;
+    }
+    return st;
+}
+
+static int hl_lispword(int c) { return c > ' ' && c != '(' && c != ')' && c != '"' && c != ';' && c != 39; }
+static void hl_lisp(char *s, int n) {
+    int i, j, c;
+    i = 0;
+    while (i < n) {
+        c = s[i];
+        if (c == ';') { hl_paint(i, n, HC_COM); i = n; }
+        else if (c == '"') { j = hl_strend(s, n, i); hl_paint(i, j, HC_STR); i = j; }
+        else if (hl_lispword(c)) {
+            j = i;
+            while (j < n && hl_lispword(s[j])) ++j;
+            if ((c >= '0' && c <= '9') || (c == '-' && j > i + 1 && s[i + 1] >= '0' && s[i + 1] <= '9') || c == '#')
+                hl_paint(i, j, HC_NUM);
+            else if (hl_inwords(s + i, j - i, lisp_kw)) hl_paint(i, j, HC_KW);
+            i = j;
+        } else ++i;
+    }
+}
+
+// Forth: blank-separated words, case not mattering; \ and ( comment, S" ." C"
+// ABORT" take a string, and : the name it defines
+static void hl_forth(char *s, int n) {
+    int i, j, k, c, def;
+    char up[24];
+    i = 0; def = 0;
+    while (i < n) {
+        if (s[i] == ' ' || s[i] == 9) { ++i; }
+        else {
+            j = i;
+            while (j < n && s[j] != ' ' && s[j] != 9) ++j;
+            k = 0;
+            while (k < j - i && k < 23) { c = s[i + k]; up[k] = c >= 'a' && c <= 'z' ? c - 32 : c; ++k; }
+            if (j - i == 1 && s[i] == 92) { hl_paint(i, n, HC_COM); j = n; }
+            else if (j - i == 1 && s[i] == '(') {
+                k = j; while (k < n && s[k] != ')') ++k;
+                if (k < n) ++k;
+                hl_paint(i, k, HC_COM); j = k;
+            } else if (j - i <= 23 && j > i && s[j - 1] == '"' && (j - i == 2 || (j - i == 6 && up[0] == 'A'))) {
+                hl_paint(i, j, HC_KW);
+                k = j + 1; while (k < n && s[k] != '"') ++k;
+                if (k < n) ++k;
+                hl_paint(j, k, HC_STR); j = k;
+            } else if (def) { hl_paint(i, j, HC_TYPE); def = 0; }
+            else if ((s[i] >= '0' && s[i] <= '9') || (s[i] == '-' && j > i + 1 && s[i + 1] >= '0' && s[i + 1] <= '9'))
+                hl_paint(i, j, HC_NUM);
+            else if (j - i <= 23 && hl_inwords(up, j - i, forth_kw)) {
+                hl_paint(i, j, HC_KW);
+                if (j - i == 1 && s[i] == ':') def = 1;
+            }
+            i = j;
+        }
+    }
+}
+
+// shell, Makefiles and B4KE: # comments, quotes, $variables; a B4KE line's
+// first word, in capitals, is its directive
+static void hl_sh(char *s, int n, int b4k) {
+    int i, j, c, first;
+    i = 0; first = 1;
+    while (i < n) {
+        c = s[i];
+        if (c == '#' && (i == 0 || s[i - 1] == ' ' || s[i - 1] == 9)) { hl_paint(i, n, HC_COM); i = n; }
+        else if (c == '"' || c == 39) { j = hl_strend(s, n, i); hl_paint(i, j, HC_STR); i = j; first = 0; }
+        else if (c == '$') {
+            j = i + 1;
+            if (j < n && (s[j] == '{' || s[j] == '(')) { c = s[j] == '{' ? '}' : ')'; while (j < n && s[j] != c) ++j; if (j < n) ++j; }
+            else { while (j < n && hl_isword(s[j])) ++j; }
+            hl_paint(i, j, HC_TYPE); i = j; first = 0;
+        } else if (hl_isword(c)) {
+            j = i;
+            while (j < n && hl_isword(s[j])) ++j;
+            if (b4k && first && c >= 'A' && c <= 'Z') hl_paint(i, j, HC_KW);
+            else if (!b4k && hl_inwords(s + i, j - i, sh_kw)) hl_paint(i, j, HC_KW);
+            else if (c >= '0' && c <= '9') hl_paint(i, j, HC_NUM);
+            i = j; first = 0;
+        } else { if (c != ' ' && c != 9) first = 0; ++i; }
+    }
+}
+
+// Colour N characters of S as language LANG; ST is the state at its start
+// (1: inside a C comment), and the state at its end comes back. hl_at
+// then says what each character is (HC_*).
+int hl_line(char *s, int n, int st, int lang) {
+    hl_paint(0, n, HC_TEXT);
+    if (lang == L_C || lang == L_JS) return hl_c(s, n, st, lang == L_JS);
+    if (lang == L_LISP) hl_lisp(s, n);
+    else if (lang == L_FORTH) hl_forth(s, n);
+    else if (lang == L_SH || lang == L_B4K) hl_sh(s, n, lang == L_B4K);
+    return 0;
+}
+int hl_at(int i) { return i < HL_MAX ? hlc[i] : HC_TEXT; }
 // host.c -- what the window kit asks of its host (winkit.h), from C4IX:
 // memory from the kernel, and files in its filesystem.
 
@@ -3918,32 +6946,54 @@ int wk_readdir(char *dir, int i, char *name) { return ureaddir(dir, i, name); }
 // and draws. It draws what is the desktop's own -- its picture and icons
 // under the windows, the taskbar and the Go menu over them -- and keeps
 // Settings' choices in /etc/desktop.cfg. The windows are the kit's.
+// The taskbar's tray has the volume: the sound card's master, which
+// every program's sound goes through (libjs/guest/snd.h).
 
 #include "desktop.h"
 #define printf uprintf
 #include "wkgui.h"
 
 enum { START_W = 200, N_ICONS = 6 };
+// the sound card's master volume (libjs/guest/snd.h), written here and
+// not through snd.c: the desktop is linked whole by the host's Makefile
+// too, without the card's functions
+enum { SND_MASTER = 0x4bc, SND_MUTE = 256, C4I_SND = 0x8000 };
 static int running;
-static int start_open, start_hot;
+static int vol_open, vol_drag;
 static int icon_t, icon_k;
 static int cpu_shown, cpu_n;
+static int frame_waiting;          // a program's framebuffer frame (term.c): no 25 ms wait
+
+void mark_frame() { frame_waiting = 1; }
 static char tbuf[128];
 
 // ---- Settings' choices -------------------------------------------------------
 //
 // The colour scheme (the kit's), the desktop's own colour, its picture, the
-// screen saver and its wait, and the look.
+// screen saver and its wait, the look, the screen's size, the volume, and
+// the interface's font; and the order Files lists in.
 static int swatches[8] = { 0x008080, 0x000040, 0x000000, 0x3a4a5a, 0x205030, 0x502850, 0xa09070, 0x606060 };
 enum { T_MODERN = 8 };
 static int cur_scheme, cur_bg;
 static int cur_wall;               // the picture (wall.c) under everything, or the colour
 static int cur_saver, cur_wait;    // the screen saver (savers.c, 0 none) and after how many minutes
+static int cur_sort;               // Files' order: SORT_* * 2, plus 1 for descending
+static int cur_tree = 180;         // Files' folder tree: its width (its splitter)
+// The sizes offered: the window kit lays itself out at any of them, and
+// the page scales the display to its pane. 640x480 still fits Settings,
+// the Go menu and the desktop's icons.
+enum { N_SIZES = 3 };
+static int size_w[N_SIZES] = { 640, 800, 1024 }, size_h[N_SIZES] = { 480, 600, 768 };
+static char *size_names[N_SIZES] = { "640x480", "800x600", "1024x768" };
+static int cur_size;
+static int cur_vol, cur_mute;      // the volume, 0-100 as the tray shows it, and muted
+static int cur_font, cur_fsize;    // the interface's face and size (the kit's, wk_font_use)
 
 static void theme_init() {
     cur_scheme = T_MODERN; cur_bg = 0 - 1; cur_wall = 1; cur_saver = 1; cur_wait = 5; wk.style = S_FLAT;
+    cur_size = 1; cur_vol = 100; cur_mute = 0; cur_font = 0; cur_fsize = 1;
 }
-static void theme_apply() { wk_scheme_use(cur_scheme, cur_bg); }
+static void theme_apply() { wk_scheme_use(cur_scheme, cur_bg); wk_font_use(cur_font, cur_fsize); }
 int theme_count() { return wk_scheme_count(); }
 char *theme_name(int i) { return wk_scheme_name(i); }
 int theme_scheme() { return cur_scheme; }
@@ -3951,13 +7001,18 @@ int theme_bg() { return cur_bg; }
 int theme_wall() { return cur_wall; }
 int theme_saver() { return cur_saver; }
 int theme_wait() { return cur_wait; }
+int theme_sort() { return cur_sort; }
+int theme_tree() { return cur_tree; }
+int theme_font() { return cur_font; }
+int theme_fsize() { return cur_fsize; }
 int theme_swatch(int i) { return i >= 0 && i < 8 ? swatches[i] : 0; }
 
-// /etc/desktop.cfg: "scheme N bg V wall W saver S wait M style L", read
+// /etc/desktop.cfg: "scheme N bg V wall W saver S wait M style L sort O
+// res W H vol V mute M font F fsize Z tree T", read
 // when the desktop starts, so a choice outlives Power Off (and, with
 // persist, a reload of the page). Read into a buffer longer than any
 // file it takes, zeroed, so looking a few bytes ahead stays inside it.
-static char cfg[128];
+static char cfg[160];
 static int cfg_num(char *s, int *v) {
     int n, neg, k;
     n = 0; neg = 0; k = 0;
@@ -3967,10 +7022,10 @@ static int cfg_num(char *s, int *v) {
     return k;
 }
 static void theme_load() {
-    int fd, n, i, v;
+    int fd, n, i, v, h, k;
     if ((fd = uopen("/etc/desktop.cfg", O_RD)) < 0) return;
-    memset(cfg, 0, 128);
-    n = uread(fd, cfg, 111);
+    memset(cfg, 0, 160);
+    n = uread(fd, cfg, 143);
     uclose(fd);
     if (n <= 0) return;
     cfg[n] = 0;
@@ -3985,6 +7040,18 @@ static void theme_load() {
         if (cfg[i] == 's' && cfg[i + 1] == 'a' && cfg[i + 5] == ' ') { cfg_num(cfg + i + 6, &v); if (v >= 0 && v < saver_count()) cur_saver = v; }
         if (cfg[i] == 's' && cfg[i + 1] == 't' && cfg[i + 5] == ' ') { cfg_num(cfg + i + 6, &v); if (v >= 0 && v < N_STYLES) wk.style = v; }
         if (cfg[i] == 'w' && cfg[i + 1] == 'a' && cfg[i + 2] == 'i' && cfg[i + 4] == ' ') { cfg_num(cfg + i + 5, &v); if (v >= 1 && v <= 60) cur_wait = v; }
+        if (cfg[i] == 's' && cfg[i + 1] == 'o' && cfg[i + 4] == ' ') { cfg_num(cfg + i + 5, &v); if (v >= 0 && v < N_SORTS * 2) cur_sort = v; }
+        if (cfg[i] == 'r' && cfg[i + 1] == 'e' && cfg[i + 2] == 's' && cfg[i + 3] == ' ') {
+            k = cfg_num(cfg + i + 4, &v);
+            cfg_num(cfg + i + 5 + k, &h);
+            k = 0;
+            while (k < N_SIZES) { if (size_w[k] == v && size_h[k] == h) cur_size = k; ++k; }
+        }
+        if (cfg[i] == 'v' && cfg[i + 1] == 'o' && cfg[i + 2] == 'l' && cfg[i + 3] == ' ') { cfg_num(cfg + i + 4, &v); if (v >= 0 && v <= 100) cur_vol = v; }
+        if (cfg[i] == 'm' && cfg[i + 1] == 'u' && cfg[i + 4] == ' ') { cfg_num(cfg + i + 5, &v); cur_mute = v != 0; }
+        if (cfg[i] == 'f' && cfg[i + 1] == 'o' && cfg[i + 4] == ' ') { cfg_num(cfg + i + 5, &v); if (v >= 0 && v < WK_FACES) cur_font = v; }
+        if (cfg[i] == 'f' && cfg[i + 1] == 's' && cfg[i + 5] == ' ') { cfg_num(cfg + i + 6, &v); if (v >= 0 && v < WK_SIZES) cur_fsize = v; }
+        if (cfg[i] == 't' && cfg[i + 1] == 'r' && cfg[i + 4] == ' ') { cfg_num(cfg + i + 5, &v); if (v >= 100 && v < 2000) cur_tree = v; }
         ++i;
     }
     theme_apply();
@@ -4003,6 +7070,20 @@ static void theme_save() {
     ui_num(cfg + ui_len(cfg), cur_wait);
     ui_cat(cfg, " style ");
     ui_num(cfg + ui_len(cfg), wk.style);
+    ui_cat(cfg, " sort ");
+    ui_num(cfg + ui_len(cfg), cur_sort);
+    ui_cat(cfg, " res ");
+    ui_num(cfg + ui_len(cfg), size_w[cur_size]);
+    ui_cat(cfg, " ");
+    ui_num(cfg + ui_len(cfg), size_h[cur_size]);
+    ui_cat(cfg, " vol ");
+    ui_num(cfg + ui_len(cfg), cur_vol);
+    ui_cat(cfg, cur_mute ? " mute 1 font " : " mute 0 font ");
+    ui_num(cfg + ui_len(cfg), cur_font);
+    ui_cat(cfg, " fsize ");
+    ui_num(cfg + ui_len(cfg), cur_fsize);
+    ui_cat(cfg, " tree ");
+    ui_num(cfg + ui_len(cfg), cur_tree);
     ui_cat(cfg, "\n");
     write(fd, cfg, ui_len(cfg));
     uclose(fd);
@@ -4026,11 +7107,52 @@ void theme_set_style(int style) {
     theme_save();
     wk_redraw_all();
 }
+// Files' order, kept as the rest are; each Files window sorts its own list
+void theme_set_sort(int sort) {
+    if (sort >= 0 && sort < N_SORTS * 2) cur_sort = sort;
+    theme_save();
+}
+// Files' folder tree dragged to a width: the one a Files window opens with
+void theme_set_tree(int w) {
+    if (w >= 100 && w < 2000) cur_tree = w;
+    theme_save();
+}
 void theme_set_saver(int which, int wait) {
     if (which >= 0 && which < saver_count()) cur_saver = which;
     if (wait >= 1 && wait <= 60) cur_wait = wait;
     theme_save();
     wk_redraw_all();
+}
+
+// The interface's font: the face and size the kit draws F_SANS and F_BOLD in
+void theme_set_font(int face, int size) {
+    if (face >= 0 && face < WK_FACES) cur_font = face;
+    if (size >= 0 && size < WK_SIZES) cur_fsize = size;
+    theme_apply();
+    theme_save();
+    wk_redraw_all();
+}
+
+// The screen's size: asked of the display now (the page sizes its canvas,
+// the kit lays the windows out again, the picture is stretched to it)
+int display_count() { return N_SIZES; }
+char *display_name(int i) { return i >= 0 && i < N_SIZES ? size_names[i] : ""; }
+int display_cur() { return cur_size; }
+void display_set(int i) {
+    if (i < 0 || i >= N_SIZES) return;
+    cur_size = i;
+    theme_save();
+    if (wk.sw != size_w[i] || wk.sh != size_h[i]) wk_screen(size_w[i], size_h[i]);
+    wk_redraw_all();
+}
+
+// The volume, to the sound card: its master, 0-255, from the tray's
+// 0-100 squared, so the slider's middle sounds about half as loud
+static void volume_apply() {
+    int v;
+    if (!(__c4_info() & C4I_SND)) return;
+    v = cur_vol * cur_vol * 255 / 10000;
+    *(int *)SND_MASTER = cur_mute ? v | SND_MUTE : v;
 }
 
 // Settings' Preview: the saver now, past the click that asked for it
@@ -4082,38 +7204,160 @@ static void desktop(int x, int y, int w, int h) {
 }
 
 // ---- the Go menu: a banner down the left, then the tools -----------------------------
+//
+// A row starts something, or opens another menu beside it: Games, and in
+// that a group of games. The tools are listed here. The games list
+// themselves in /etc/desktop.apps (games/README.md).
 
-enum { GO_RUN = 0 - 1, GO_OFF = 0 - 2, GO_WOLF = 0 - 3, GO_DOOM = 0 - 4, GO_TYRIAN = 0 - 5, GO_ROTT = 0 - 6 };
-struct go_item { char *label; int kind; };
+enum { GO_RUN = 0 - 1, GO_OFF = 0 - 2, GO_CMD = 0 - 3 };
+enum { M_GO, M_GAMES, M_GROUPS, N_MENUS = 12, N_GAMES = 128, APPS_MAX = 8192, GO_ROW = 26, GO_DEPTH = 3 };
+struct go_item { char *label; int kind; int opens; char *cmd; int menu; };
 static struct go_item start_items[] = {
-    { "Terminal", K_TERM }, { "Files", K_FILES }, { "Text Editor", K_NOTE }, { "Editor", K_EDIT },
+    { "Terminal", K_TERM }, { "Files", K_FILES }, { "Text Editor", K_NOTE }, { "IDE", K_EDIT },
     { "Calculator", K_CALC }, { "System Monitor", K_TASKS }, { "Settings", K_SETTINGS },
     { "About C4IX", K_ABOUT }, { "-", 0 },
-    { "Wolfenstein 3D", GO_WOLF }, { "Doom", GO_DOOM }, { "Tyrian", GO_TYRIAN },
-    { "Rise of the Triad", GO_ROTT }, { "Run...", GO_RUN }, { "-", 0 }, { "Power Off...", GO_OFF }
+    { "Games", 0, M_GAMES }, { "Run...", GO_RUN }, { "-", 0 }, { "Power Off...", GO_OFF }
 };
 static int n_start;
+// The rows of every menu but Go, each menu's together (games_load)
+static struct go_item game_items[N_GAMES];
+static int n_games, n_menus;
+static int menu_first[N_MENUS], menu_n[N_MENUS];
 
-// The games are optional (games/README.md in c4): each one's entry is in
-// the menu only where its program is on the disk -- until programs list
-// themselves in /etc/desktop.apps (docs/c4-explorer.md, W2)
-static char *game_path(int kind) {
-    if (kind == GO_WOLF) return "/usr/games/wolf3d/wolf3d.c4r";
-    if (kind == GO_DOOM) return "/usr/games/doom/doom.c4r";
-    if (kind == GO_TYRIAN) return "/usr/games/tyrian/tyrian.c4r";
-    if (kind == GO_ROTT) return "/usr/games/rott/rott.c4r";
+static struct go_item *menu_items(int m) { return m ? &game_items[menu_first[m]] : start_items; }
+static int menu_count(int m) { return m ? menu_n[m] : n_start; }
+
+// the field at s ends at the next |: the one after it, or 0 if this was the last
+static char *next_field(char *s) {
+    while (*s && *s != '|') ++s;
+    if (!*s) return 0;
+    *s = 0;
+    return s + 1;
+}
+
+// A command's program is on the disk: at the path it names, or else by name
+// in /usr/games/bin, where a game's programs are (vfs-games.py)
+static int program_there(char *cmd) {
+    char path[96], *d;
+    int k, st[8];
+    d = path;
+    k = 0;
+    while (cmd[k] && cmd[k] != ' ' && cmd[k] != '/') ++k;
+    if (cmd[k] != '/') { ui_cpy(path, "/usr/games/bin/"); d = path + ui_len(path); }
+    k = 0;
+    while (cmd[k] && cmd[k] != ' ' && k < 80) { d[k] = cmd[k]; ++k; }
+    d[k] = 0;
+    return ustat(path, st) == 0;
+}
+
+static void game_add(char *label, int kind, char *cmd, int menu, int opens) {
+    struct go_item *it;
+    it = &game_items[n_games];
+    ++n_games;
+    it->label = label; it->kind = kind; it->cmd = cmd; it->menu = menu; it->opens = opens;
+}
+
+// the menu of a group of games, new the first time it is named; 0 if there is no room
+static int game_group(char *name) {
+    int k;
+    k = 0;
+    while (k < n_games) {
+        if (game_items[k].opens && ui_eq(game_items[k].label, name)) return game_items[k].opens;
+        ++k;
+    }
+    if (n_menus == N_MENUS || n_games == N_GAMES) return 0;
+    game_add(name, 0, 0, M_GAMES, n_menus);
+    ++n_menus;
+    return n_menus - 1;
+}
+
+// the word w is one of s's, which are separated by spaces
+static int has_word(char *s, char *w) {
+    int n;
+    n = ui_len(w);
+    while (*s) {
+        while (*s == ' ') ++s;
+        if (!memcmp(s, w, n) && (s[n] == 0 || s[n] == ' ')) return 1;
+        while (*s && *s != ' ') ++s;
+    }
     return 0;
 }
+
+// A line of /etc/desktop.apps: CATEGORY|NAME|COMMAND|FLAGS, cut up where it
+// is. CATEGORY is Games, or Games/GROUP for a menu of its own within Games.
+// Any other category is not this menu's. Nor is a line whose program is not
+// on the disk. FLAGS, which may be left out, are words: `window` says the
+// program plays in a window of its own, with no Terminal, from here and from
+// Files (tools.c, run_command). docs/c4-explorer.md's W2 would add `single`
+// to them, and its fields after them.
+static void game_line(char *s) {
+    char *name, *cmd, *group, *flags;
+    int menu;
+    if (!(name = next_field(s)) || !(cmd = next_field(name))) return;
+    if ((flags = next_field(cmd))) next_field(flags);
+    if (flags && cmd[0] && has_word(flags, "window")) desk_window_app(cmd);
+    group = s;
+    while (*group && *group != '/') ++group;
+    if (*group) { *group = 0; ++group; }
+    if (!ui_eq(s, "Games") || !name[0] || !cmd[0] || !program_there(cmd)) return;
+    menu = group[0] ? game_group(group) : M_GAMES;
+    if (menu && n_games < N_GAMES) game_add(name, GO_CMD, cmd, menu, 0);
+}
+
+// In a menu, its groups first, then by name
+static int game_before(struct go_item *a, struct go_item *b) {
+    char *p, *q;
+    if (a->menu != b->menu) return a->menu < b->menu;
+    if (!a->opens != !b->opens) return a->opens != 0;
+    p = a->label; q = b->label;
+    while (*p && *p == *q) { ++p; ++q; }
+    return (*p & 255) < (*q & 255);
+}
+
+static void games_load() {
+    struct go_item t;
+    char *buf, *s, *e;
+    int fd, n, k, j;
+    n_menus = M_GROUPS;
+    if ((fd = uopen("/etc/desktop.apps", O_RD)) < 0) return;
+    if (!(buf = wk_alloc(APPS_MAX))) { uclose(fd); return; }
+    n = uread(fd, buf, APPS_MAX - 1);
+    uclose(fd);
+    s = buf;
+    while (n > 0 && *s) {
+        e = s;
+        while (*e && *e != 10) ++e;
+        k = *e;
+        *e = 0;
+        game_line(s);
+        s = k ? e + 1 : e;
+    }
+    k = 1;
+    while (k < n_games) {
+        memcpy((char *)&t, (char *)&game_items[k], sizeof(struct go_item));
+        j = k;
+        while (j > 0 && game_before(&t, &game_items[j - 1])) {
+            memcpy((char *)&game_items[j], (char *)&game_items[j - 1], sizeof(struct go_item));
+            --j;
+        }
+        memcpy((char *)&game_items[j], (char *)&t, sizeof(struct go_item));
+        ++k;
+    }
+    k = n_games;
+    while (k > 0) { --k; menu_first[game_items[k].menu] = k; ++menu_n[game_items[k].menu]; }
+}
+
+// Games is in the menu only where there is one to list
 static void start_games() {
-    int k, n, st[8];
-    char *p;
+    int k, n;
+    games_load();
     k = 0;
     n = 0;
     while (k < n_start) {
-        p = game_path(start_items[k].kind);
-        if (!p || ustat(p, st) == 0) {
+        if (!start_items[k].opens || menu_n[start_items[k].opens]) {
             start_items[n].label = start_items[k].label;
             start_items[n].kind = start_items[k].kind;
+            start_items[n].opens = start_items[k].opens;
             ++n;
         }
         ++k;
@@ -4121,68 +7365,196 @@ static void start_games() {
     n_start = n;
 }
 
+// What is open: Go, then what it opened, each over the last
+struct go_panel { int menu, x, y, w, h, rows, colw, hot; };
+static struct go_panel go_open[GO_DEPTH];
+static int go_depth;               // how many: 0 is the menu shut
+static int go_x;                   // where the pointer was
+
 static int start_height() {
     int k, h;
     h = 6; k = 0;
-    while (k < n_start) { h = h + (start_items[k].label[0] == '-' ? 8 : 26); ++k; }
+    while (k < n_start) { h = h + (start_items[k].label[0] == '-' ? 8 : GO_ROW); ++k; }
     return h;
 }
 
-static void draw_start() {
-    int mx, my, mw, mh, k, iy;
+static void go_start() {
+    struct go_panel *p;
+    p = &go_open[0];
+    p->menu = M_GO; p->hot = 0 - 1;
+    p->x = 2; p->w = START_W; p->h = start_height();
+    p->y = wk.sh - TASK_H - p->h;
+    p->rows = n_start; p->colw = START_W - 29;
+    go_depth = 1;
+}
+
+// where row k of a menu is: Go's right of its banner and with its rules,
+// the others in columns
+static void go_row_at(struct go_panel *p, int k, int *x, int *y) {
+    int j, t;
+    if (p->menu) {
+        *x = p->x + 3 + k / p->rows * p->colw;
+        *y = p->y + 3 + k % p->rows * GO_ROW;
+        return;
+    }
+    t = p->y + 3;
+    j = 0;
+    while (j < k) { t = t + (start_items[j].label[0] == '-' ? 8 : GO_ROW); ++j; }
+    *x = p->x + 26;
+    *y = t;
+}
+
+// Open the menu that row k of level l opens, beside that row: as many rows
+// as fit above the taskbar to a column, as many columns as that takes, and
+// over its parent if the screen has no room to the right.
+static void go_flyout(int l, int k) {
+    struct go_panel *p, *q;
+    struct go_item *items;
+    int x, y, n, wide, j, room;
+    p = &go_open[l];
+    q = &go_open[l + 1];
+    q->menu = menu_items(p->menu)[k].opens;
+    q->hot = 0 - 1;
+    n = menu_count(q->menu);
+    items = menu_items(q->menu);
+    wide = 0;
+    j = 0;
+    while (j < n) { if (ui_len(items[j].label) > wide) wide = ui_len(items[j].label); ++j; }
+    q->colw = wide * (7 + wk.fsize) + 34;
+    room = (wk.sh - TASK_H - 6) / GO_ROW;
+    q->rows = n < room ? n : room;
+    q->w = (n + q->rows - 1) / q->rows * q->colw + 6;
+    q->h = q->rows * GO_ROW + 6;
+    go_row_at(p, k, &x, &y);
+    q->x = x + p->colw - 1;
+    if (q->x + q->w > wk.sw) q->x = wk.sw - q->w;
+    if (q->x < 0) q->x = 0;
+    q->y = y - 3;
+    if (q->y + q->h > wk.sh - TASK_H) q->y = wk.sh - TASK_H - q->h;
+    if (q->y < 0) q->y = 0;
+    go_depth = l + 2;
+}
+
+static void draw_go_panel(struct go_panel *p) {
+    struct go_item *items;
+    int n, k, x, y, a, rgb;
     char c[2], *banner;
-    mw = START_W; mh = start_height();
-    mx = 2; my = wk.sh - TASK_H - mh;
-    gui_rect(mx, my, mw, mh, C_FACE);
-    d_bevel(mx, my, mw, mh, B_RAISED);
-    gui_rect(mx + 3, my + 3, 22, mh - 6, ui_style == S_FLAT ? C_TITLE : C_SHADOW);
-    c[1] = 0;
-    banner = "C4IX";
+    gui_rect(p->x, p->y, p->w, p->h, C_FACE);
+    d_bevel(p->x, p->y, p->w, p->h, B_RAISED);
+    if (p->menu == M_GO) {
+        gui_rect(p->x + 3, p->y + 3, 22, p->h - 6, ui_style == S_FLAT ? C_TITLE : C_SHADOW);
+        c[1] = 0;
+        banner = "C4IX";
+        k = 0;
+        while (k < 4) { c[0] = banner[k]; gui_text2(p->x + 8, p->y + p->h - 30 - (3 - k) * 18, C_WHITE, 16, F_BOLD, 0, c, 1); ++k; }
+    }
+    items = menu_items(p->menu);
+    n = menu_count(p->menu);
     k = 0;
-    while (k < 4) { c[0] = banner[k]; gui_text2(mx + 8, my + mh - 30 - (3 - k) * 18, C_WHITE, 16, F_BOLD, 0, c, 1); ++k; }
-    iy = my + 3;
-    k = 0;
-    while (k < n_start) {
-        if (start_items[k].label[0] == '-') {
-            gui_rect(mx + 28, iy + 3, mw - 32, 1, C_SHADOW); gui_rect(mx + 28, iy + 4, mw - 32, 1, C_LIGHT);
-            iy = iy + 8;
+    while (k < n) {
+        go_row_at(p, k, &x, &y);
+        if (items[k].label[0] == '-') {
+            gui_rect(x + 2, y + 3, p->w - 32, 1, C_SHADOW); gui_rect(x + 2, y + 4, p->w - 32, 1, C_LIGHT);
         } else {
-            if (k == start_hot) gui_rect(mx + 26, iy, mw - 29, 26, C_SEL);
-            if (start_items[k].kind > 0) d_icon(start_items[k].kind, mx + 32, iy + 5);
-            d_text(mx + 56, iy + 7, k == start_hot ? C_WHITE : C_DARK, F_SANS, start_items[k].label);
-            iy = iy + 26;
+            rgb = k == p->hot ? C_WHITE : C_DARK;
+            if (k == p->hot) gui_rect(x, y, p->colw, GO_ROW, C_SEL);
+            if (items[k].kind > 0) d_icon(items[k].kind, x + 6, y + 5);
+            d_text(x + (p->menu == M_GO ? 30 : 10), y + 7, rgb, F_SANS, items[k].label);
+            // a row that opens a menu has an arrow at its right
+            a = 0;
+            while (items[k].opens && a < 5) { gui_rect(x + p->colw - 14 + a, y + 8 + a, 1, 9 - a - a, rgb); ++a; }
         }
         ++k;
     }
 }
 
-static int start_hit(int x, int y) {
-    int mh, my, k, iy;
-    mh = start_height();
-    my = wk.sh - TASK_H - mh;
-    if (x < 28 || x >= START_W + 2 || y < my || y >= my + mh) return 0 - 1;
-    iy = my + 3;
+static void draw_start() {
+    int l;
+    l = 0;
+    while (l < go_depth) { draw_go_panel(&go_open[l]); ++l; }
+}
+
+static int go_hit(struct go_panel *p, int px, int py) {
+    struct go_item *items;
+    int n, k, x, y;
+    items = menu_items(p->menu);
+    n = menu_count(p->menu);
     k = 0;
-    while (k < n_start) {
-        if (start_items[k].label[0] == '-') iy = iy + 8;
-        else { if (y >= iy && y < iy + 26) return k; iy = iy + 26; }
+    while (k < n) {
+        go_row_at(p, k, &x, &y);
+        if (items[k].label[0] != '-' && ui_hit(px, py, x, y, p->colw, GO_ROW)) return k;
         ++k;
     }
     return 0 - 1;
 }
 
-static void start_pick(int k) {
-    int kind;
-    start_open = 0; wk_redraw_all();
-    if (k < 0) return;
-    kind = start_items[k].kind;
-    if (kind > 0) launch(kind);
-    else if (kind == GO_RUN) inputbox(0, "Run", "Program to run:", "", A_RUN);
-    else if (kind == GO_OFF) running = 0;
-    else if (kind == GO_WOLF) run_command("wolf3d");
-    else if (kind == GO_DOOM) run_command("doom");
-    else if (kind == GO_TYRIAN) run_command("tyrian");
-    else if (kind == GO_ROTT) run_command("rott");
+// the topmost menu at (x, y), or -1
+static int go_under(int x, int y) {
+    struct go_panel *p;
+    int l;
+    l = go_depth;
+    while (l > 0) {
+        --l;
+        p = &go_open[l];
+        if (ui_hit(x, y, p->x, p->y, p->w, p->h)) return l;
+    }
+    return 0 - 1;
+}
+
+// The pointer moved. Over a row, that row lights, and if it opens a menu the
+// menu opens; what any other row had open closes. Except on the way across:
+// moving right, over the rows below the one that opened a menu, nothing
+// changes, so the menu is still there when the pointer arrives.
+static void go_move(int x, int y) {
+    struct go_panel *p;
+    int l, k, depth, hot;
+    l = go_under(x, y);
+    if (l < 0) {
+        go_x = x;
+        p = &go_open[go_depth - 1];
+        if (p->hot >= 0) { p->hot = 0 - 1; wk_redraw_all(); }
+        return;
+    }
+    p = &go_open[l];
+    k = go_hit(p, x, y);
+    if (l < go_depth - 1 && k != p->hot && x > go_x) { go_x = x; return; }
+    go_x = x;
+    depth = go_depth;
+    hot = p->hot;
+    if (l < go_depth - 1 && k == hot) {
+        // back on the row that opened the next: that one stays, what it opened goes
+        go_depth = l + 2;
+        if (go_open[l + 1].hot >= 0 || depth != go_depth) { go_open[l + 1].hot = 0 - 1; wk_redraw_all(); }
+        return;
+    }
+    p->hot = k;
+    go_depth = l + 1;
+    if (k >= 0 && menu_items(p->menu)[k].opens) go_flyout(l, k);
+    if (k != hot || depth != go_depth) wk_redraw_all();
+}
+
+static void start_pick(struct go_item *it) {
+    if (it->kind > 0) launch(it->kind);
+    else if (it->kind == GO_RUN) inputbox(0, "Run", "Program to run:", "", A_RUN);
+    else if (it->kind == GO_OFF) running = 0;
+    else if (it->kind == GO_CMD) run_command(it->cmd);
+}
+
+// A press: as a move first (a touch has none before it), then a row that
+// starts something does, a row that opens a menu has done, and anywhere else
+// shuts the menu.
+static void go_press(int x, int y) {
+    struct go_item *it;
+    int l, k;
+    go_x = x;
+    go_move(x, y);
+    l = go_under(x, y);
+    k = l < 0 ? 0 - 1 : go_hit(&go_open[l], x, y);
+    it = k < 0 ? 0 : &menu_items(go_open[l].menu)[k];
+    if (it && it->opens) return;
+    go_depth = 0;
+    wk_redraw_all();
+    if (it) start_pick(it);
 }
 
 // ---- the taskbar ----------------------------------------------------------------------
@@ -4194,12 +7566,81 @@ static int n_buttons() {
     while (w) { if (w->used && !w->dialog) ++n; w = w->next; }
     return n;
 }
-static int button_w() { int n, w; n = n_buttons(); if (!n) return 150; w = (wk.sw - 64 - 154) / n - 4; return w > 150 ? 150 : w; }
+static int button_w() { int n, w; n = n_buttons(); if (!n) return 150; w = (wk.sw - 64 - 178) / n - 4; return w > 150 ? 150 : w; }
 
-// The CPU meter beside the clock: System Monitor's number (tasks_cpu_usage),
+// The CPU meter beside the tray: System Monitor's number (tasks_cpu_usage),
 // taken every two seconds; a click opens System Monitor on Performance.
-enum { CPU_W = 66 };
-static int cpu_x() { return wk.sw - 146; }
+// The tray: the volume's speaker, then the clock, in one panel.
+enum { CPU_W = 66, TRAY_W = 96 };
+static int cpu_x() { return wk.sw - 170; }
+static int tray_x() { return wk.sw - 4 - TRAY_W; }
+
+// ---- the volume: the tray's speaker, and the popup it opens ---------------------------
+//
+// A slider (loud at the top, as Windows has it) and Mute, over the tray.
+// Each change goes to the sound card at once; the choice is remembered
+// when the popup closes, or when Mute is clicked.
+enum { VOL_W = 76, VOL_H = 190, VOL_TOP = 34, VOL_LEN = 100 };
+static int vol_x() { return wk.sw - 4 - VOL_W; }
+static int vol_y() { return wk.sh - TASK_H - VOL_H; }
+
+// the speaker, 16 by 16 at x, y: its waves by the volume, a red cross muted
+static void speaker(int x, int y) {
+    gui_rect(x + 1, y + 6, 4, 5, C_DARK);
+    gui_rect(x + 5, y + 5, 2, 7, C_DARK);
+    gui_rect(x + 7, y + 3, 2, 11, C_DARK);
+    if (cur_mute) {
+        gui_line(x + 11, y + 5, x + 15, y + 11, 0xd02020); gui_line(x + 11, y + 11, x + 15, y + 5, 0xd02020);
+        gui_line(x + 12, y + 5, x + 16, y + 11, 0xd02020); gui_line(x + 12, y + 11, x + 16, y + 5, 0xd02020);
+        return;
+    }
+    if (cur_vol > 0) gui_rect(x + 11, y + 6, 1, 5, C_DARK);
+    if (cur_vol > 33) { gui_rect(x + 13, y + 4, 1, 9, C_DARK); gui_rect(x + 12, y + 3, 1, 1, C_DARK); gui_rect(x + 12, y + 13, 1, 1, C_DARK); }
+    if (cur_vol > 66) { gui_rect(x + 15, y + 3, 1, 11, C_DARK); gui_rect(x + 14, y + 2, 1, 1, C_DARK); gui_rect(x + 14, y + 14, 1, 1, C_DARK); }
+}
+
+static void draw_volume() {
+    int x, y, ty, k;
+    x = vol_x(); y = vol_y();
+    gui_rect(x, y, VOL_W, VOL_H, C_FACE);
+    if (ui_style == S_FLAT) gui_recto(x, y, VOL_W, VOL_H, C_SHADOW); else d_bevel(x, y, VOL_W, VOL_H, B_RAISED);
+    d_text(x + 16, y + 10, C_DARK, F_BOLD, "Volume");
+    // the track, its marks, and the thumb where the volume is
+    gui_rect(x + VOL_W / 2 - 2, y + VOL_TOP, 4, VOL_LEN, C_SHADOW);
+    gui_rect(x + VOL_W / 2 - 1, y + VOL_TOP + 1, 2, VOL_LEN - 2, C_DARK);
+    k = 0;
+    while (k <= 10) { gui_rect(x + VOL_W / 2 + 14, y + VOL_TOP + k * VOL_LEN / 10, k % 5 ? 3 : 6, 1, C_SHADOW); ++k; }
+    ty = y + VOL_TOP + (100 - cur_vol) * VOL_LEN / 100 - 5;
+    gui_rect(x + VOL_W / 2 - 11, ty, 22, 10, ui_style == S_FLAT ? C_TITLE : C_FACE);
+    if (ui_style != S_FLAT) d_bevel(x + VOL_W / 2 - 11, ty, 22, 10, B_RAISED);
+    ui_num(tbuf, cur_vol);
+    ui_cat(tbuf, "%");
+    d_text(x + VOL_W / 2 - ui_len(tbuf) * 3, y + VOL_TOP + VOL_LEN + 8, C_DARK, F_SANS, tbuf);
+    // Mute: a check box
+    k = y + VOL_H - 26;
+    gui_rect(x + 12, k, 13, 13, C_WHITE);
+    if (ui_style == S_FLAT) gui_recto(x + 12, k, 13, 13, C_SHADOW); else d_bevel(x + 12, k, 13, 13, B_SUNKEN);
+    if (cur_mute) {
+        gui_line(x + 15, k + 6, x + 17, k + 9, C_DARK); gui_line(x + 17, k + 9, x + 22, k + 3, C_DARK);
+        gui_line(x + 15, k + 7, x + 17, k + 10, C_DARK); gui_line(x + 17, k + 10, x + 22, k + 4, C_DARK);
+    }
+    d_text(x + 31, k, C_DARK, F_SANS, "Mute");
+}
+
+// the volume for a point on the slider
+static void vol_slide(int y) {
+    int v;
+    v = 100 - (y - vol_y() - VOL_TOP) * 100 / VOL_LEN;
+    if (v < 0) v = 0;
+    if (v > 100) v = 100;
+    if (v != cur_vol) { cur_vol = v; volume_apply(); wk_redraw_all(); }
+}
+
+static void vol_close() {
+    vol_open = 0; vol_drag = 0;
+    theme_save();
+    wk_redraw_all();
+}
 
 static void draw_taskbar() {
     int k, i, bx, bw, secs, h, m, f, ty;
@@ -4208,8 +7649,8 @@ static void draw_taskbar() {
     ty = wk.sh - TASK_H;
     gui_rect(0, ty, wk.sw, TASK_H, C_FACE);
     gui_rect(0, ty + (ui_style == S_FLAT ? 0 : 1), wk.sw, 1, ui_style == S_FLAT ? C_SHADOW : C_LIGHT);
-    gui_rect(2, ty + 4, 56, 22, ui_style == S_FLAT && start_open ? C_LIGHT : C_FACE);
-    if (ui_style != S_FLAT || start_open) d_bevel(2, ty + 4, 56, 22, start_open ? B_PRESSED : B_RAISED);
+    gui_rect(2, ty + 4, 56, 22, ui_style == S_FLAT && go_depth ? C_LIGHT : C_FACE);
+    if (ui_style != S_FLAT || go_depth) d_bevel(2, ty + 4, 56, 22, go_depth ? B_PRESSED : B_RAISED);
     // C4IX's mark: a cake (C4IX, C4KE -- cakes), its candle lit
     k = ty + 4;
     gui_rect(8, k + 13, 15, 6, 0x8b5a2b);
@@ -4247,8 +7688,10 @@ static void draw_taskbar() {
     ui_num(tbuf + 4, cpu_shown);
     ui_cat(tbuf, "%");
     d_text(cpu_x() + 17, ty + 9, C_DARK, F_SANS, tbuf);
-    gui_rect(wk.sw - 76, ty + 4, 72, 22, C_FACE);
-    if (ui_style != S_FLAT) d_bevel(wk.sw - 76, ty + 4, 72, 22, B_SUNKEN);
+    gui_rect(tray_x(), ty + 4, TRAY_W, 22, C_FACE);
+    if (ui_style != S_FLAT) d_bevel(tray_x(), ty + 4, TRAY_W, 22, B_SUNKEN);
+    if (vol_open && ui_style == S_FLAT) gui_rect(tray_x() + 1, ty + 5, 24, 20, C_LIGHT);
+    speaker(tray_x() + 5, ty + 7);
     secs = gui_clock();
     h = secs / 3600; m = (secs / 60) % 60;
     p = tbuf;
@@ -4256,16 +7699,17 @@ static void draw_taskbar() {
     else { if (h % 12 >= 10) { *p = '1'; ++p; } *p = '0' + (h % 12) % 10; ++p; }
     *p = ':'; ++p; *p = '0' + m / 10; ++p; *p = '0' + m % 10; ++p;
     *p = ' '; ++p; *p = h < 12 ? 'A' : 'P'; ++p; *p = 'M'; ++p; *p = 0;
-    d_text(wk.sw - 64, ty + 9, C_DARK, F_SANS, tbuf);
+    d_text(tray_x() + 32, ty + 9, C_DARK, F_SANS, tbuf);
 }
 
 // over the windows: the taskbar, and the Go menu while it is open
 static void front() {
     if (wk_in_damage(0, wk.sh - TASK_H, wk.sw, TASK_H)) draw_taskbar();
-    if (start_open) draw_start();
+    if (go_depth) draw_start();
+    if (vol_open) draw_volume();
 }
 
-static int popup() { return start_open; }
+static int popup() { return go_depth || vol_open; }
 
 // ---- input the shell takes before the windows, and where there are none ----
 
@@ -4273,23 +7717,35 @@ static int mouse_front(int ev, int x, int y, int b) {
     int k, bw, ty;
     struct win *w;
     ty = wk.sh - TASK_H;
+    if (vol_open) {
+        if (ev == E_MOVE) {
+            if (vol_drag && (b & 1)) vol_slide(y);
+            else vol_drag = 0;
+            return 1;
+        }
+        if (ev != E_DOWN) return 0;
+        if (ui_hit(x, y, vol_x() + VOL_W / 2 - 12, vol_y() + VOL_TOP - 6, 24, VOL_LEN + 12)) { vol_drag = 1; vol_slide(y); return 1; }
+        if (ui_hit(x, y, vol_x() + 8, vol_y() + VOL_H - 30, VOL_W - 12, 20)) {
+            cur_mute = !cur_mute; volume_apply(); theme_save(); wk_redraw_all();
+            return 1;
+        }
+        if (ui_hit(x, y, vol_x(), vol_y(), VOL_W, VOL_H)) return 1;
+        // elsewhere, the speaker too: the popup closes, and the click goes no further
+        vol_close();
+        return 1;
+    }
     if (ev == E_MOVE) {
-        if (!start_open) return 0;
-        k = start_hit(x, y);
-        if (k != start_hot) { start_hot = k; wk_redraw_all(); }
+        if (!go_depth) return 0;
+        go_move(x, y);
         return 1;
     }
     if (ev != E_DOWN) return 0;
-    if (start_open) {
-        k = start_hit(x, y);
-        start_open = 0; wk_redraw_all();
-        if (k >= 0) start_pick(k);
-        return 1;
-    }
+    if (go_depth) { go_press(x, y); return 1; }
     if (y < ty) return 0;
     if (wk_modal()) return 1;
-    if (ui_hit(x, y, 2, ty + 4, 56, 22)) { start_open = 1; start_hot = 0 - 1; wk_redraw_all(); return 1; }
+    if (ui_hit(x, y, 2, ty + 4, 56, 22)) { go_start(); wk_redraw_all(); return 1; }
     if (ui_hit(x, y, cpu_x(), ty + 4, CPU_W, 22)) { tasks_open_perf(); wk_redraw_all(); return 1; }
+    if (ui_hit(x, y, tray_x(), ty + 4, 26, 22)) { vol_open = 1; vol_drag = 0; wk_redraw_all(); return 1; }
     bw = button_w();
     k = 0; w = win_first();
     while (w) {
@@ -4325,11 +7781,12 @@ static int key(int down, int code, int ch, int mods) {
     icon_k = 0 - 1;
     // Ctrl+Shift+Esc: System Monitor, from anywhere
     if (code == KEY_ESC && (mods & M_CTRL) && (mods & M_SHIFT)) { tasks_open(); return 1; }
-    if (start_open && code == KEY_ESC) { start_open = 0; wk_redraw_all(); return 1; }
+    if (go_depth && code == KEY_ESC) { go_depth = 0; wk_redraw_all(); return 1; }
+    if (vol_open && code == KEY_ESC) { vol_close(); return 1; }
     return 0;
 }
 
-static int pointer(int x, int y) { return start_open || y >= wk.sh - TASK_H ? PTR_ARROW : 0 - 1; }
+static int pointer(int x, int y) { return go_depth || vol_open || y >= wk.sh - TASK_H ? PTR_ARROW : 0 - 1; }
 
 // a dialog no window asked: Run
 static void answer(int dialog, int yes) {
@@ -4338,6 +7795,7 @@ static void answer(int dialog, int yes) {
 
 // the screen changed size: the taskbar along its new bottom, and the picture stretched again
 static void resized() {
+    go_depth = 0;
     wk_set_area(0, 0, wk.sw, wk.sh - TASK_H);
     wall_resize();
 }
@@ -4368,31 +7826,55 @@ static void shutdown_screen() {
     gui_show();
 }
 
-enum { RING = 65536, EVENTS = GUI_M_MOVE | GUI_M_BUTTONS | GUI_M_KEYS | GUI_M_WHEEL | GUI_M_WINDOW };
+// The ring's command half takes the largest frame the desktop sends, one
+// of the picture's tiles (wall.c): 128x96 at 1024x768, 48 KB. A frame
+// longer than half of it is placed only when the ring's head happens to
+// allow (gui_frame), so the half is 128 KB.
+// GUI_M_REL: the mouse's motion while it is locked to the display, which
+// only a canvas that asked for it (window.h's L) has it be (term.c)
+enum { RING = 262144, EVENTS = GUI_M_MOVE | GUI_M_BUTTONS | GUI_M_KEYS | GUI_M_WHEEL | GUI_M_WINDOW | GUI_M_REL };
+
+// The display lets the mouse go, and the kit draws its pointer again
+void desk_unlock() { gui_cursor(GUI_PTR_ARROW); wk_repoint(); }
 
 int main(int argc, char **argv) {
     int *region, k, busy, secs, clock_min, last_tick, last_draw, input, start_ms, second_draw;
     int last_input, last_frame, aside, ev[4];
 
     if (!gui_present()) { printf("desktop: not fitted\n"); return 0; }
+    // Run in the background (init --desktop has the console's shell run
+    // "desktop &"), the desktop's stdin is a pipe that has ended: sh.c
+    // gives a background job no input. The desktop never reads it, but
+    // its sleep (SYS_EVWAIT, below) wakes for every pipe it reads, and one
+    // at its end is always ready, so the desktop would never sleep. Its
+    // stdin becomes its stdout, which is no pipe it reads. Fd 0 stays
+    // open: the Terminals' spawns (term.c, start) save and put back 0.
+    if (uavail(STDIN) < 0) udup2(STDOUT, STDIN);
     // the display, from the kernel, giving way to a game that asks for it
     // (include/display.h, and "aside" below)
     if (!udisplay_take(DISP_YIELDS)) { printf("desktop: a program has the display\n"); return 1; }
     if (!(region = ualloc(RING))) { printf("desktop: no memory for the display's ring\n"); udisplay_give(); return 1; }
-    if (!gui_attach(region, RING, 800, 600)) { printf("desktop: the display refused the ring\n"); udisplay_give(); return 1; }
-    // GUI_M_WINDOW too: a resize or a focus change from the page means the
-    // canvas may have been cleared, and the scene is drawn again
-    gui_events(EVENTS);
-    n_start = sizeof(start_items) / sizeof(start_items[0]);
-    start_games();
     theme_init();
     theme_apply();                     // the default scheme, unless the file names one
     theme_load();
+    // at the size Settings chose: 800x600 unless the file names another
+    if (!gui_attach(region, RING, size_w[cur_size], size_h[cur_size])) { printf("desktop: the display refused the ring\n"); udisplay_give(); return 1; }
+    // GUI_M_WINDOW too: a resize or a focus change from the page means the
+    // canvas may have been cleared, and the scene is drawn again
+    gui_events(EVENTS);
+    volume_apply();
+    n_start = sizeof(start_items) / sizeof(start_items[0]);
+    start_games();
     // the kit's Notepad, as this desktop has always called it
     notepad_name = "Text Editor";
     notepad_about = "Text Editor for C4IX: edits text in the RAM filesystem.";
     notepad_home = "/";
     notepad_untitled = "/tmp/untitled.txt";
+    notepad_filebox = 1;
+    notepad_filter = "All Files (*)|*|Text Documents (*.txt)|*.txt|C Source (*.c;*.h)|*.c;*.h";
+    // its Format menu's choices, kept beside the desktop's and the IDE's
+    notepad_cfg = "/etc/notepad.cfg";
+    umkdir("/etc");
     wk_init(&shell);
     wall_load("/usr/share/splash/c4ix.c4p.gz");
     icon_k = 0 - 1;
@@ -4442,6 +7924,8 @@ int main(int argc, char **argv) {
                 wk_redraw_all();
                 continue;
             }
+            // the mouse locked to a canvas: its motion and buttons the program's
+            if (term_lock_event(ev)) continue;
             wk_event(ev);
         }
         // the first frame, once more half a second in, in case the page was
@@ -4449,6 +7933,7 @@ int main(int argc, char **argv) {
         if (!second_draw && now_ms() - start_ms >= 500) { second_draw = 1; wk_redraw_all(); }
         // the windows closed meanwhile freed; the terminals' pipes read; the timers due
         wk_tick();
+        term_lock_tick();
         // the CPU meter, every other MACHINE second, and a redraw only when
         // it moved: machine time is what its numbers count (cpustat's ms)
         // and what the desktop sleeps on. Host time runs at another rate
@@ -4484,7 +7969,11 @@ int main(int argc, char **argv) {
         // A redraw: the whole scene, or what is damaged. Input gets one at
         // once; a program pouring out text (raycast, top) gets at most one
         // every 25 ms -- it can print far faster than a person can read.
-        if (wk_dirty() && (input || __time() - last_draw >= 25)) {
+        // A game's frame gets one at once too: it sends the next only when
+        // told this one was drawn (wk_drawn), so it cannot flood the
+        // desktop, and held back it would be held to 40 frames a second.
+        if (wk_dirty() && (input || frame_waiting || __time() - last_draw >= 25)) {
+            frame_waiting = 0;
             wk_redraw(0);
             last_draw = __time();
             wk_drawn();                // the frames just shown have been read: their programs may draw again
@@ -4553,6 +8042,10 @@ struct tasks {
     int ival[MAXP];                            // Interval: thousands of cycles in the last sample
     int mem[MAXP];                             // bytes held; -1 for the idle row, which shows none
     int heap, heapused;                        // the heap, when the host says (else 0)
+    int largest;                               // ... its biggest block, KB (/proc/meminfo)
+    int swap, swapfree;                        // swap, KB, 0 if there is none
+    int pgin, pgout, held;                     // pages in and out a second, tasks held (mmu.c)
+    int swin, swout, swms;                     // the counts as last read, and when
     long long time[MAXP];                      // CPU Time, in cycles
     char name[MAXP * NAMEW];
     struct cpusample s[2];                     // this snapshot and the one before
@@ -4581,6 +8074,53 @@ static int row(struct tasks *t, int id, char *name, int privs, int state, int sy
     t->name[k * NAMEW + NAMEW - 1] = 0;
     ++t->n;
     return k;
+}
+
+// /proc/meminfo's value for NAME in BUF ("name value" lines), 0 if it has none
+static char membuf[768];
+static int meminfo(char *name) {
+    char *p;
+    int i, v;
+    p = membuf;
+    while (*p) {
+        i = 0;
+        while (name[i] && p[i] == name[i]) ++i;
+        if (!name[i] && p[i] == ' ') {
+            p = p + i + 1;
+            v = 0;
+            while (*p >= '0' && *p <= '9') { v = v * 10 + *p - '0'; ++p; }
+            return v;
+        }
+        while (*p && *p != '\n') ++p;
+        if (*p) ++p;
+    }
+    return 0;
+}
+
+// What the Load tab shows of swap, only when it is showing: reading the file makes
+// the kernel walk every RAM file. The rates are over the time since the last look;
+// a long time since (the tab was not showing) is no measure of now.
+static void swap_sample(struct tasks *t) {
+    int fd, n, got, now, in, out;
+    if ((fd = uopen("/proc/meminfo", O_RD)) < 0) return;
+    got = 0;
+    while (got < 767 && (n = uread(fd, membuf + got, 767 - got)) > 0) got = got + n;
+    uclose(fd);
+    membuf[got] = 0;
+    t->largest = meminfo("largest");
+    t->swap = meminfo("swap");
+    t->swapfree = meminfo("swapfree");
+    t->held = meminfo("held");
+    in = meminfo("swapins");
+    out = meminfo("swapouts");
+    now = __time();
+    if (t->swms && now - t->swms > 0 && now - t->swms < 5000) {
+        t->pgin = (in - t->swin) * 1000 / (now - t->swms);
+        t->pgout = (out - t->swout) * 1000 / (now - t->swms);
+    } else { t->pgin = 0; t->pgout = 0; }
+    t->swin = in;
+    t->swout = out;
+    t->swms = now;
 }
 
 static void sample(struct tasks *t) {
@@ -4668,6 +8208,7 @@ static void sample(struct tasks *t) {
         else { sys = 0; while (sys < HIST - 1) { t->mhist[sys] = t->mhist[sys + 1]; ++sys; } t->mhist[HIST - 1] = k; }
     }
     t->sampled = 1;
+    if (t->tab == 2) swap_sample(t);
     if (t->sel >= t->n) t->sel = t->n - 1;
 }
 
@@ -4894,6 +8435,40 @@ static void memory(struct tasks *t, int x, int y, int w, int h) {
     mbytes(buf, t->heap - t->heapused); d_text(x + w - 16 - ui_len(buf) * 6, y + 56, C_DARK, F_SANS, buf);
     d_text(x + 12, y + 72, C_DARK, F_SANS, "Total (MB)");
     mbytes(buf, t->heap); d_text(x + w - 16 - ui_len(buf) * 6, y + 72, C_DARK, F_SANS, buf);
+    // free memory in pieces shows here: less than Free is all that can be had at once
+    d_text(x + 12, y + 88, C_DARK, F_SANS, "Largest free (MB)");
+    mbytes(buf, t->largest * 1024); d_text(x + w - 16 - ui_len(buf) * 6, y + 88, C_DARK, F_SANS, buf);
+}
+
+// A figure in a group's row, at its right
+static void figure(int x, int y, int w, char *label, int v) {
+    d_text(x + 12, y, C_DARK, F_SANS, label);
+    ui_num_commas(buf, v);
+    d_text(x + w - 16 - ui_len(buf) * 6, y, C_DARK, F_SANS, buf);
+}
+
+// Swap: a bar of what is on it, and how fast pages are going: a machine with more
+// programs than memory says so here. A host with no swap (no MMU) says how to get
+// it, in lines that fit the box's 25 or so characters.
+static void swapbox(struct tasks *t, int x, int y, int w, int h) {
+    int used, fill;
+    ui_group(x, y, w, h, "Swap");
+    if (t->swap <= 0) {
+        d_text(x + 12, y + 20, C_DARK, F_SANS, "Enable MMU in");
+        d_text(x + 12, y + 36, C_DARK, F_SANS, "Configuration for swap.");
+        d_text(x + 12, y + 56, C_DARK, F_SANS, "Slight performance");
+        d_text(x + 12, y + 72, C_DARK, F_SANS, "penalty in games.");
+        return;
+    }
+    used = t->swap - t->swapfree;
+    d_rect(x + 12, y + 20, w - 24, 12, C_DARK);
+    fill = (int)(((long long)(w - 26) * used) / t->swap);
+    d_rect(x + 13, y + 21, fill, 10, C_GREEN);
+    d_text(x + 12, y + 40, C_DARK, F_SANS, "On swap (MB)");
+    mbytes(buf, used * 1024); d_text(x + w - 16 - ui_len(buf) * 6, y + 40, C_DARK, F_SANS, buf);
+    figure(x, y + 56, w, "Pages in /s", t->pgin);
+    figure(x, y + 72, w, "Pages out /s", t->pgout);
+    figure(x, y + 88, w, "Tasks held", t->held);
 }
 
 static void draw_perf(struct tasks *t, int ox, int oy, int cw, int ch) {
@@ -4918,19 +8493,19 @@ static void draw_perf(struct tasks *t, int ox, int oy, int cw, int ch) {
         ui_group(ox + gw + 34, oy + PAGE_Y + 8, cw - gw - 42, 130, "CPU Usage History");
         graph(t->hist, t->nhist, ox + gw + 42, oy + PAGE_Y + 24, cw - gw - 58, 106);
     }
-    ui_group(ox + 8, oy + PAGE_Y + 150, (cw - 24) / 2, 90, "Totals");
-    d_text(ox + 20, oy + PAGE_Y + 170, C_DARK, F_SANS, "Tasks");
-    ui_num(buf, t->n); d_text(ox + 150, oy + PAGE_Y + 170, C_DARK, F_SANS, buf);
-    d_text(ox + 20, oy + PAGE_Y + 188, C_DARK, F_SANS, "Open windows");
+    // Totals, Memory and Swap, side by side
+    gw = (cw - 32) / 3;
+    ui_group(ox + 8, oy + PAGE_Y + 150, gw, 106, "Totals");
+    figure(ox + 8, oy + PAGE_Y + 170, gw, "Tasks", t->n);
     secs = 0; w = win_first(); while (w) { if (w->used) ++secs; w = w->next; }
-    ui_num(buf, secs); d_text(ox + 150, oy + PAGE_Y + 188, C_DARK, F_SANS, buf);
-    d_text(ox + 20, oy + PAGE_Y + 206, C_DARK, F_SANS, "Up for (machine seconds)");
-    ui_num_commas(buf, (__time() - t->uptime0) / 1000); d_text(ox + 180, oy + PAGE_Y + 206, C_DARK, F_SANS, buf);
-    memory(t, ox + 16 + (cw - 24) / 2, oy + PAGE_Y + 150, (cw - 24) / 2, 90);
+    figure(ox + 8, oy + PAGE_Y + 188, gw, "Open windows", secs);
+    figure(ox + 8, oy + PAGE_Y + 206, gw, "Up for (seconds)", (__time() - t->uptime0) / 1000);
+    memory(t, ox + 16 + gw, oy + PAGE_Y + 150, gw, 106);
+    swapbox(t, ox + 24 + 2 * gw, oy + PAGE_Y + 150, gw, 106);
     // the page ends at ch: what is under the totals, if there is room
-    if (t->heap > 0 && ch - PAGE_Y > 320) {
-        ui_group(ox + 8, oy + PAGE_Y + 250, cw - 16, ch - PAGE_Y - 258, "Memory Usage History");
-        graph(t->mhist, t->nmhist, ox + 16, oy + PAGE_Y + 266, cw - 32, ch - PAGE_Y - 282);
+    if (t->heap > 0 && ch - PAGE_Y > 336) {
+        ui_group(ox + 8, oy + PAGE_Y + 266, cw - 16, ch - PAGE_Y - 274, "Memory Usage History");
+        graph(t->mhist, t->nmhist, ox + 16, oy + PAGE_Y + 282, cw - 32, ch - PAGE_Y - 298);
     }
 }
 
@@ -5074,35 +8649,92 @@ void tasks_answer(struct win *w, int action, int yes) {
 // window becomes a terminal again when the program says so, when Ctrl-C
 // stops it, or when the shell's prompt comes back.
 //
+// Or a program may take the keys and leave the text, as from a tty in
+// raw mode: after ESC _ T r ESC \ each key goes down its stdin as it is
+// typed, unechoed -- the arrows, PgUp, PgDn, Home, End and the function
+// keys as a VT100 sends them, Enter as CR -- until ESC _ T c ESC \, Ctrl-C
+// (which stays an interrupt) or the prompt coming back. top does this;
+// on the console the kernel does the same (console.c).
+//
+// Or the window is a program's own (term_run): no shell and no menu, the
+// program itself on the pipes, and the window only its canvas. It closes
+// when the program ends -- unless it is showing text the program wrote,
+// an error most likely, which stays to be read. Ctrl-C ends the program,
+// as closing the window does. Go > Games and Files start a game so when
+// its /etc/desktop.apps line says `window` (tools.c, run_command). The
+// program may give its window a menu bar (window.h: the M and I ops): the
+// window grows by the bar's height, and a pick goes down the pipe as 'c'.
+//
+// A program run in the background from a Terminal (`quake --window &`)
+// gets such a window too (term_adopt). The Terminal's canvas is its
+// foreground job's, and its pipes are shared by every job it runs: two
+// games drawing there would each read the other's frame acks and keys,
+// and the shell at its prompt would read them too. So the shell gives a
+// background job an input that has ended, as POSIX's does, and a program
+// that asks for a canvas with no input asks for a window of its own
+// instead (window.c, win_open: the O op, with its task id). The desktop
+// makes the window and its pipes and gives them to that task as its stdin
+// and stdout (SYS_FDGIVE). Its stderr stays the Terminal's.
+//
+// A canvas is GW by GH, whatever the window's size, unless the program
+// asks for it to follow the window (the z op, window.h's win_resizable):
+// then it is the window's whole inside, a window of the program's own may
+// be dragged to any size, and the program hears each new size ('s') once
+// the window has held still at it (follow).
+//
 // A canvas may show a framebuffer, the 'f' op: 8-bit pixels and a
 // palette in the program's own memory, which GUI_BLIT8 has the host read
 // and scale to the canvas. Once a frame with one has been drawn the
 // program hears 'f' back, and may draw the next; and it hears keys let
 // go ('K') as well as pressed, which a game needs.
+//
+// Its Edit menu is the desktop's clipboard, as a console window's is: the
+// mouse selects (a run of lines, or with Alt held a block), Copy takes
+// the selection and Copy All the scrollback and the screen, and Paste
+// types the clipboard in, a key a character. Ctrl+Shift+C and V, Ctrl+Ins
+// and Shift+Ins do the same; Ctrl+C copies when there is a selection, and
+// is ^C when there is none.
 
 #include "desktop.h"
 #include "textgrid.h"
+#include "wkgui.h"
 
 enum { IOBUF = 8192 };
 // graphics mode: the canvas (the grid's own area), and the two display
 // lists -- the one being built, and the one shown
 enum { GW = 640, GH = 400, GLIST = 6000 };
+// a program's own window's menu bar: menus, items in each, and their text
+enum { MENUS = 4, MITEMS = 40, MTEXT = 2048 };
 
 struct term {
     int win;                      // its window's number
     int pid, in_w, out_r, ended;
+    int bare;                     // the program's own window: no shell (term_run)
+    int adopted;                  // ... and the program a Terminal's job (term_adopt): not ours to wait for
     struct tgrid *g;              // the text
     char pending[128];            // a command to type at the first prompt
     int gfx, buttons;             // a canvas now; mouse buttons held on it
+    int raw;                      // keys go to the program as typed (ESC _ T r)
     int fpend;                    // a frame with a framebuffer presented, not yet drawn
+    int fit, gw, gh;              // the canvas follows the window (z); its size
+    int lock, mx, my;             // the mouse is to be locked to the canvas (L 1); the pointer in it
+    int nw, nh, nat;              // the size the window last had, and since when
     char title[48];               // the window's own title, while a program's shows
     int ncur, nshow;
     int gcur[GLIST];              // [len, op, numbers..., text]
     int gshow[GLIST];
+    // the menu bar a program gave its own window (prog_menu)
+    int nmenus, mlen, mcount[MENUS];
+    struct wk_menu menus[MENUS];
+    char *mitem[MENUS * (MITEMS + 1)];
+    char mtext[MTEXT];
 };
 
 static char tmp[128];
 static char iobuf[IOBUF];
+static char *edit_items[7] = { "Copy   Ctrl+Shift+C", "Paste   Ctrl+Shift+V", "-", "Select All", "Copy All", 0 };
+static struct wk_menu menus[1];
+enum { T_COPY = 0, T_PASTE = 1, T_ALL = 3, T_COPYALL = 4 };
 
 static struct term *T(struct win *w) { return (struct term *)w->st; }
 
@@ -5120,13 +8752,86 @@ static void event(struct term *t, int kind, int a, int b, int c) {
     send(t, tmp);
 }
 
+static void lk_drop(struct term *t);
+
 static void gfx_mode(struct term *t, int on) {
+    lk_drop(t);
+    t->lock = 0;
     if (on && !t->gfx) ui_ncpy(t->title, wk_get_title(t->win), 48);
     if (!on && t->gfx && t->title[0]) wk_title(t->win, t->title);
+    if (on && t->g) tg_unselect(t->g);
+    if (on != t->gfx) { t->fit = 0; t->gw = GW; t->gh = GH; }
     t->gfx = on;
     t->ncur = 0; t->nshow = 0; t->buttons = 0; t->fpend = 0;
     mark_dirty();
 }
+
+// A program's own window's menu bar (window.h): M starts menu m (m 0 the
+// whole bar again), I adds an item to menu m. They come in order; one
+// that does not fit is dropped. The first menu grows the window by the
+// bar's height, so the canvas keeps its size and its place in the client
+// area, where the mouse is measured from.
+static void prog_menu(struct term *t, int op, int m, char *s) {
+    struct win *w;
+    int k, had;
+    if (!s) s = "";
+    k = ui_len(s);
+    if (m < 0 || m >= MENUS) return;
+    had = t->nmenus;
+    if (op == 'M') {
+        if (m == 0) { t->nmenus = 0; t->mlen = 0; }
+        if (m != t->nmenus || t->mlen + k + 1 > MTEXT) return;
+        t->menus[m].title = t->mtext + t->mlen;
+        t->menus[m].items = t->mitem + m * (MITEMS + 1);
+        t->menus[m].items[0] = 0;
+        t->mcount[m] = 0;
+        t->nmenus = m + 1;
+    } else {
+        if (m >= t->nmenus || t->mcount[m] >= MITEMS || t->mlen + k + 1 > MTEXT) return;
+        t->menus[m].items[t->mcount[m]] = t->mtext + t->mlen;
+        t->mcount[m] = t->mcount[m] + 1;
+        t->menus[m].items[t->mcount[m]] = 0;
+    }
+    ui_cpy(t->mtext + t->mlen, s);
+    if (op == 'I' && s[0] == '*') t->mtext[t->mlen] = WK_CHECKED;
+    t->mlen = t->mlen + k + 1;
+    wk_menu(t->win, t->menus, t->nmenus);
+    if (!had && t->nmenus && (w = win_get(t->win))) wk_place(t->win, w->x, w->y, w->w, w->h + MENU_H);
+    mark_dirty();
+}
+
+// The canvas follows the window's size, or (on 0) is GW by GH again.
+static void fit(struct term *t, int on) {
+    struct win *w;
+    t->fit = on != 0;
+    t->nw = 0 - 1;
+    if (t->bare && (w = win_get(t->win))) w->resizable = t->fit;
+    if (!t->fit && (t->gw != GW || t->gh != GH)) {
+        t->gw = GW; t->gh = GH;
+        event(t, 's', GW, GH, 0);
+        mark_dirty();
+    }
+}
+
+// A canvas that follows its window takes the window's size once it has
+// held still at it for a moment: dragging an edge goes through many sizes,
+// and each is the program laying itself out again. The program hears it.
+static void follow(struct term *t, struct win *w) {
+    int nw, nh, now;
+    nw = wk_client_w(w) - 4 - (t->bare ? 0 : TG_SB_W);
+    nh = wk_client_h(w) - 4;
+    if (nw < 1) nw = 1;
+    if (nh < 1) nh = 1;
+    now = __time();
+    if (nw != t->nw || nh != t->nh) { t->nw = nw; t->nh = nh; t->nat = now; return; }
+    if ((nw != t->gw || nh != t->gh) && now - t->nat >= 100) {
+        t->gw = nw; t->gh = nh;
+        event(t, 's', nw, nh, 0);
+        mark_dirty();
+    }
+}
+
+static void term_adopt(int pid, char *title);
 
 // One command, ESC _ and ESC \ already stripped: G, the op, numbers
 // separated by commas, and for text a ';' and the string.
@@ -5135,6 +8840,8 @@ static void apc(char *ctx, char *abuf, int alen) {
     int i, n, v, neg, op, len, *g, k, nums[8];
     char *s;
     t = (struct term *)ctx;
+    // T: raw keys (r) or lines (c)
+    if (alen == 2 && abuf[0] == 'T') { if (abuf[1] == 'r' || abuf[1] == 'c') t->raw = abuf[1] == 'r'; return; }
     if (alen < 2 || abuf[0] != 'G') return;
     op = abuf[1];
     i = 2; n = 0;
@@ -5151,11 +8858,18 @@ static void apc(char *ctx, char *abuf, int alen) {
     if (op == 'o') {
         gfx_mode(t, 1);
         if (s && *s) { if (ui_len(s) > 44) s[44] = 0; wk_title(t->win, s); }
-        event(t, 's', GW, GH, 0);
+        event(t, 's', t->gw, t->gh, 0);
         return;
     }
     if (op == 'q') { gfx_mode(t, 0); return; }
+    // a program in the background wants a window of its own (window.c)
+    if (op == 'O') { if (n && nums[0] > 0) term_adopt(nums[0], s); return; }
     if (!t->gfx) return;
+    // a menu bar: a program's own window's only (a Terminal has its own)
+    if (op == 'M' || op == 'I') { if (t->bare) prog_menu(t, op, n ? nums[0] : 0, s); return; }
+    if (op == 'z') { fit(t, n ? nums[0] : 1); return; }
+    // the mouse locked to the canvas at a click, or not: the pointer says which
+    if (op == 'L') { t->lock = n ? nums[0] != 0 : 1; if (!t->lock) lk_drop(t); wk_repoint(); return; }
     if (op == 'p') {
         memcpy(t->gshow, t->gcur, t->ncur * sizeof(int));
         t->nshow = t->ncur;
@@ -5166,7 +8880,12 @@ static void apc(char *ctx, char *abuf, int alen) {
             if (t->gshow[k + 1] == 'f') t->fpend = 1;
             k = k + t->gshow[k];
         }
-        wk_invalidate(t->win, 0, 0, 0, 0);
+        // A framebuffer fills the canvas, so only the canvas changed, and
+        // its frame covers all of it (gfx_draw): nothing under it or
+        // around it is drawn again. Lines and text may reach outside it,
+        // and the whole window is drawn for those.
+        if (t->fpend) { wk_invalidate_covered(t->win, 2, 2, t->gw, t->gh); mark_frame(); }
+        else wk_invalidate(t->win, 0, 0, 0, 0);
         return;
     }
     // everything else is drawn later: into the list being built
@@ -5181,23 +8900,44 @@ static void apc(char *ctx, char *abuf, int alen) {
 }
 
 static void gfx_draw(struct term *t, int ox, int oy) {
-    int i, *g, n, op;
-    d_rect(ox, oy, GW, GH, 0);
+    int i, *g, n, op, fb, clip;
+    // The last framebuffer covers the whole canvas, and what came before
+    // it: drawn from there, with no black under it, and what follows it
+    // kept to the canvas (only the canvas is drawn again after a frame)
+    fb = 0 - 1;
     i = 0;
+    while (i < t->nshow && t->gshow[i] >= 2) {
+        if (t->gshow[i + 1] == 'f' && t->gshow[i] >= 7) fb = i;
+        i = i + t->gshow[i];
+    }
+    clip = 0;
+    if (fb < 0) { d_rect(ox, oy, t->gw, t->gh, 0); i = 0; }
+    else {
+        i = fb;
+        if (i + t->gshow[i] < t->nshow) { d_clip(ox, oy, t->gw, t->gh); clip = 1; }
+    }
     while (i < t->nshow) {
         g = t->gshow + i;
         op = g[1];
         n = g[0] - 2;
-        if (op == 'c' && n >= 1) d_rect(ox, oy, GW, GH, g[2]);
+        if (op == 'c' && n >= 1) d_rect(ox, oy, t->gw, t->gh, g[2]);
         else if (op == 'r' && n >= 5) d_rect(ox + g[2], oy + g[3], g[4], g[5], g[6]);
         else if (op == 'R' && n >= 5) d_recto(ox + g[2], oy + g[3], g[4], g[5], g[6]);
         else if (op == 'l' && n >= 5) d_line(ox + g[2], oy + g[3], ox + g[4], oy + g[5], g[6]);
         else if (op == 'd' && n >= 4) d_disc(ox + g[2], oy + g[3], g[4], g[5]);
         else if (op == 't' && n >= 6) d_textn(ox + g[2], oy + g[3], g[4], g[5], F_SANS, 0, (char *)(g + 7), g[6]);
-        else if (op == 'f' && n >= 5) d_blit8(ox, oy, g[3], g[4], (char *)g[2], g[5], (int *)g[6], GW, GH);
+        else if (op == 'f' && n >= 5) {
+            // the program's memory, which the display reads at the
+            // desktop's word: lent to the desktop first (under the MMU
+            // each task's is its own); a frame it will not lend is not drawn
+            if (umapfrom(g[2], g[5] * g[4]) == 0 && umapfrom(g[6], 1024) == 0)
+                d_blit8(ox, oy, g[3], g[4], (char *)g[2], g[5], (int *)g[6], t->gw, t->gh);
+            else d_rect(ox, oy, t->gw, t->gh, 0);
+        }
         if (g[0] < 2) break;
         i = i + g[0];
     }
+    if (clip) d_clip_end();
 }
 
 // ---- the shell --------------------------------------------------------------------
@@ -5205,25 +8945,34 @@ static void gfx_draw(struct term *t, int ox, int oy) {
 // Our ends of the pipes are close-on-spawn, so no shell -- this one or a
 // later window's -- inherits them: that is what lets a shell see end of
 // file, and keeps each window's pipes its own.
+//
+// spawn gives the shell this task's 0, 1 and 2, so they point at the
+// pipes for the spawn and are put back after it. That takes seven
+// descriptors at once, and every step is checked: when the table is
+// full, a desktop that went on would keep a Terminal's pipe as its
+// stdout, and its own messages, and Power Off's, would go into that
+// window and never reach the console. Instead what was opened is closed,
+// 0, 1 and 2 are as they were, and term_open says no shell started.
 static char *sh_argv[3] = { "c4ix-sh.c4r", "-p", 0 };   // -p: the prompt on the input line
-static int start(struct term *t) {
+static int start(struct term *t, char *path, int argc, char **argv) {
     int pin[2], pout[2], s0, s1, s2;
+    t->pid = 0 - 1;
     if (upipe(pin) < 0) return 0;
     if (upipe(pout) < 0) { uclose(pin[0]); uclose(pin[1]); return 0; }
-    ucloexec(pin[1], 1);
-    ucloexec(pout[0], 1);
     s0 = udup(STDIN); s1 = udup(STDOUT); s2 = udup(STDERR);
-    ucloexec(s0, 1); ucloexec(s1, 1); ucloexec(s2, 1);
-    udup2(pin[0], STDIN);
-    udup2(pout[1], STDOUT);
-    udup2(pout[1], STDERR);
-    t->pid = spawn("c4ix-sh.c4r", 2, sh_argv);
-    udup2(s0, STDIN); udup2(s1, STDOUT); udup2(s2, STDERR);
-    uclose(s0); uclose(s1); uclose(s2);
+    if (s0 >= 0 && s1 >= 0 && s2 >= 0) {
+        ucloexec(pin[1], 1); ucloexec(pout[0], 1);
+        ucloexec(s0, 1); ucloexec(s1, 1); ucloexec(s2, 1);
+        if (udup2(pin[0], STDIN) >= 0 && udup2(pout[1], STDOUT) >= 0 && udup2(pout[1], STDERR) >= 0)
+            t->pid = spawn(path, argc, argv);
+        // s0, s1 and s2 are open, so these cannot fail
+        udup2(s0, STDIN); udup2(s1, STDOUT); udup2(s2, STDERR);
+    }
+    uclose(s0); uclose(s1); uclose(s2);   // one that is -1 closes nothing
     uclose(pin[0]); uclose(pout[1]);
+    if (t->pid < 0) { uclose(pin[1]); uclose(pout[0]); return 0; }
     t->in_w = pin[1];
     t->out_r = pout[0];
-    if (t->pid < 0) { uclose(t->in_w); uclose(t->out_r); return 0; }
     return 1;
 }
 
@@ -5233,16 +8982,18 @@ int term_open(char *cmd) {
     int i, k;
     struct win *w;
     struct term *t;
-    i = win_open(K_TERM, "Terminal", TG_W + 2 * BORDER + TG_SB_W, TG_H + 2 * BORDER + TITLE_H + 1, sizeof(struct term));
+    i = win_open(K_TERM, "Terminal", TG_W + 2 * BORDER + TG_SB_W, TG_H + 2 * BORDER + TITLE_H + 1 + MENU_H, sizeof(struct term));
     if (i < 0) return 0 - 1;
     w = win_get(i);
     w->resizable = 0;
+    menus[0].title = "Edit"; menus[0].items = edit_items;
+    wk_menu(i, menus, 1);
     t = T(w);
     t->win = i;
     if (!(t->g = tg_new(i))) { t->ended = 1; win_close(i); return 0 - 1; }   // no memory left for it
     t->g->apc = apc; t->g->ctx = (char *)t;
     if (cmd) ui_ncpy(t->pending, cmd, 128);
-    if (!start(t)) { tg_say(t->g, "desktop: could not start a shell\n"); t->ended = 1; t->pid = 0 - 1; return i; }
+    if (!start(t, "c4ix-sh.c4r", 2, sh_argv)) { tg_say(t->g, "desktop: could not start a shell\n"); t->ended = 1; t->pid = 0 - 1; return i; }
     // "Terminal - task N": the id ps shows for this window's shell
     ui_cpy(tmp, "Terminal - task ");
     k = ui_len(tmp);
@@ -5251,17 +9002,101 @@ int term_open(char *cmd) {
     return i;
 }
 
+// A program in a window of its own, with no shell: the command's words are
+// its arguments, the first found as the shell finds it (desk_which). The
+// window is the canvas's size, with no menu and no scroll bar, and has the
+// program's name for a title until the program gives one.
+enum { RUN_ARGS = 16 };
+int term_run(char *cmd) {
+    int i, n;
+    struct win *w;
+    struct term *t;
+    char path[WK_PATH], line[128], *argv[RUN_ARGS + 1], *s;
+    if (!desk_which(cmd, path)) return 0 - 1;
+    ui_ncpy(line, cmd, 128);
+    n = 0; s = line;
+    while (*s && n < RUN_ARGS) {
+        while (*s == ' ') { *s = 0; ++s; }
+        if (!*s) break;
+        argv[n] = s; ++n;
+        while (*s && *s != ' ') ++s;
+    }
+    if (n == 0) return 0 - 1;
+    argv[n] = 0;
+    s = argv[0];
+    while (*s) ++s;
+    while (s > argv[0] && s[-1] != '/') --s;
+    i = win_open(K_TERM, s, TG_W + 2 * BORDER, TG_H + 2 * BORDER + TITLE_H + 1, sizeof(struct term));
+    if (i < 0) return 0 - 1;
+    w = win_get(i);
+    w->resizable = 0;
+    t = T(w);
+    t->win = i;
+    t->bare = 1;
+    if (!(t->g = tg_new(i))) { t->ended = 1; win_close(i); return 0 - 1; }   // no memory left for it
+    t->g->apc = apc; t->g->ctx = (char *)t;
+    if (!start(t, path, n, argv)) {
+        tg_say(t->g, "desktop: could not start "); tg_say(t->g, path); tg_say(t->g, "\n");
+        t->ended = 1; t->pid = 0 - 1;
+    }
+    return i;
+}
+
+// A program a Terminal ran in the background asks for a window of its
+// own (the O op: its task id, and its title): one as term_run's, whose
+// pipes are given to that task as its stdin and stdout (SYS_FDGIVE, which
+// gives only to a task the desktop's own tasks started). Its stdout goes
+// first: once its stdin is live (win_open waits for that) it is drawing
+// here. It is the shell's job, not the desktop's child, so the window
+// knows it has ended by the pipe, and closing the window ends it.
+static void term_adopt(int pid, char *title) {
+    int i, ok, pin[2], pout[2];
+    struct win *w;
+    struct term *t;
+    char name[48];
+    ui_ncpy(name, title && *title ? title : "Program", 45);
+    i = win_open(K_TERM, name, TG_W + 2 * BORDER, TG_H + 2 * BORDER + TITLE_H + 1, sizeof(struct term));
+    if (i < 0) return;
+    w = win_get(i);
+    w->resizable = 0;
+    t = T(w);
+    t->win = i;
+    t->bare = 1;
+    t->adopted = 1;
+    t->pid = pid;
+    t->ended = 1;                 // until it has its pipes
+    if (!(t->g = tg_new(i))) { win_close(i); return; }
+    t->g->apc = apc; t->g->ctx = (char *)t;
+    ok = 0;
+    if (upipe(pin) == 0) {
+        if (upipe(pout) == 0) {
+            ucloexec(pin[1], 1); ucloexec(pout[0], 1);
+            ok = ufdgive(pid, pout[1], STDOUT) >= 0 && ufdgive(pid, pin[0], STDIN) >= 0;
+            uclose(pout[1]);
+            if (ok) t->out_r = pout[0];
+            else uclose(pout[0]);
+        }
+        uclose(pin[0]);
+        if (ok) t->in_w = pin[1];
+        else uclose(pin[1]);
+    }
+    // no pipes, or not a task of ours: its win_open gives up waiting
+    if (!ok) { win_close(i); return; }
+    t->ended = 0;
+}
+
 // The window is going: stop the job running in it, then the shell.
 void term_close(struct win *w) {
     struct term *t;
     t = T(w);
+    lk_drop(t);
     if (t->g) { tg_free(t->g); t->g = 0; }
     if (t->ended) return;
     uintr(t->pid);
     ukill(t->pid, SIGTERM);
     uclose(t->in_w);
     uclose(t->out_r);
-    uwait(t->pid);
+    if (!t->adopted) uwait(t->pid);
     t->ended = 1;
 }
 
@@ -5271,6 +9106,7 @@ void term_tick(struct win *w) {
     int n, k, got, prompt;
     t = T(w);
     if (t->ended) return;
+    if (t->gfx && t->fit) follow(t, w);
     n = uavail(t->out_r);
     got = 0;
     // Take everything the program has written before drawing: a full-screen
@@ -5282,9 +9118,13 @@ void term_tick(struct win *w) {
         got = got + n;
         tg_feed(t->g, iobuf, n);
         // the shell's prompt ends "$ " (c4ix-sh -p) and is the last thing it writes
-        prompt = n >= 2 && iobuf[n - 2] == '$' && iobuf[n - 1] == ' ';
-        // the shell's prompt is back: whatever made this a canvas has ended
-        if (t->gfx && prompt) gfx_mode(t, 0);
+        prompt = !t->bare && n >= 2 && iobuf[n - 2] == '$' && iobuf[n - 1] == ' ';
+        // The shell's prompt is back: whatever made this a canvas, or took
+        // the keys, has ended. What was sent to it and not read -- a frame
+        // ack, a key let go -- goes with it, as on a Ctrl-C: the shell
+        // would read it next.
+        if (t->gfx && prompt) { gfx_mode(t, 0); udiscard(t->in_w); }
+        if (prompt) t->raw = 0;
         // ... and time to type a waiting command
         if (t->pending[0] && prompt) {
             k = ui_len(t->pending);
@@ -5300,9 +9140,12 @@ void term_tick(struct win *w) {
         // every writer is gone: the shell exited
         uclose(t->in_w);
         uclose(t->out_r);
-        uwait(t->pid);
+        if (!t->adopted) uwait(t->pid);
         t->ended = 1;
-        tg_say(t->g, "\n[the shell has exited; close this window]\n");
+        // a program's own window goes with it, unless it shows what the program wrote
+        if (t->bare && (t->gfx || (!t->g->cx && !t->g->cy && !t->g->sbn))) { win_close(t->win); return; }
+        if (t->bare) tg_say(t->g, "\n[the program has ended; close this window]\n");
+        else tg_say(t->g, "\n[the shell has exited; close this window]\n");
     }
 }
 
@@ -5323,12 +9166,109 @@ void term_drawn(struct win *w) {
     if (t->gfx && !t->ended) event(t, 'f', 0, 0, 0);
 }
 
+// The clipboard typed in, as keys: a line at a time down the pipe, as
+// typing it would send them; to a canvas, each as a key.
+static void paste(struct win *w, struct term *t) {
+    char *s;
+    int n, k, c;
+    s = wk_clip_get(&n);
+    k = 0;
+    while (k < n && !t->ended) {
+        c = s[k] & 255;
+        if (c == 9) c = ' ';
+        if (t->gfx) { if (c == 10) event(t, 'k', KEY_ENTER, 13, 0); else if (c >= 32 && c < 127) event(t, 'k', 0, c, 0); }
+        else if (t->raw) { tmp[0] = c == 10 ? 13 : c; if (c == 10 || (c >= 32 && c < 127)) write(t->in_w, tmp, 1); }
+        else if (c == 10) { if ((c = tg_key(t->g, KEY_ENTER, 0, 0)) > 0) write(t->in_w, t->g->line, c); }
+        else if (c >= 32 && c < 127) tg_key(t->g, 0, c, 0);
+        ++k;
+    }
+    wk_invalidate(w->id, 0, 0, 0, 0);
+}
+
+void term_command(struct win *w, int menu, int item) {
+    struct term *t;
+    t = T(w);
+    // a program's own window: its menus are the program's
+    if (t->bare) { if (!t->ended && t->gfx) event(t, 'c', menu, item, 0); return; }
+    if (!t->g) return;
+    if (item == T_COPY) { if (tg_copy(t->g, 0)) tg_unselect(t->g); }
+    else if (item == T_COPYALL) tg_copy(t->g, 1);
+    else if (item == T_ALL) tg_select_all(t->g);
+    else if (item == T_PASTE && !t->ended) { tg_unselect(t->g); paste(w, t); }
+}
+
+// Raw keys (t->raw): what a VT100 sends for a key that is not a character,
+// after its ESC, or 0
+static char *raw_tail(int code) {
+    if (code == KEY_UP) return "[A";
+    if (code == KEY_DOWN) return "[B";
+    if (code == KEY_RIGHT) return "[C";
+    if (code == KEY_LEFT) return "[D";
+    if (code == KEY_HOME) return "[H";
+    if (code == KEY_END) return "[F";
+    if (code == KEY_PGUP) return "[5~";
+    if (code == KEY_PGDN) return "[6~";
+    if (code == KEY_INS) return "[2~";
+    if (code == KEY_DEL) return "[3~";
+    if (code == KEY_F2 - 1) return "OP";
+    if (code == KEY_F2) return "OQ";
+    if (code == KEY_F2 + 1) return "OR";
+    if (code == KEY_F4) return "OS";
+    if (code == KEY_F5) return "[15~";
+    if (code == KEY_F5 + 1) return "[17~";
+    if (code == KEY_F5 + 2) return "[18~";
+    if (code == KEY_F5 + 3) return "[19~";
+    if (code == KEY_F5 + 4) return "[20~";
+    if (code == KEY_F5 + 5) return "[21~";
+    if (code == KEY_F5 + 6) return "[23~";
+    if (code == KEY_F5 + 7) return "[24~";
+    return 0;
+}
+
+// ... and the key itself down the program's stdin: a character as it is,
+// Enter as CR and Backspace as DEL, Ctrl with a letter as its control
+// code, Alt with ESC in front
+static void raw_key(struct term *t, int code, int ch, int mods) {
+    char b[8];
+    char *s;
+    int n, c;
+    n = 0;
+    if (!ch && (s = raw_tail(code))) {
+        b[0] = 27; n = 1;
+        while (*s && n < 7) { b[n] = *s; ++n; ++s; }
+        write(t->in_w, b, n);
+        return;
+    }
+    c = ch;
+    if (!ch && (code == KEY_ENTER || code == KEY_BACK || code == KEY_TAB || code == KEY_ESC)) c = code;
+    if (c == 10) c = 13;
+    if (c == 8) c = 127;
+    if ((mods & M_CTRL) && code >= 'A' && code <= 'Z') c = code - 64;
+    if (c <= 0 || c > 255) return;
+    if (mods & M_ALT) { b[n] = 27; ++n; }
+    b[n] = c; ++n;
+    write(t->in_w, b, n);
+}
+
+// the letter key, with Ctrl and Shift held
+static int ctrl_shift(int code, int ch, int mods, int c) {
+    return (mods & M_CTRL) && (mods & M_SHIFT) && (code == c || ch == c || ch == c + 32);
+}
+
 // A key typed here.
 void term_key(struct win *w, int code, int ch, int mods) {
     struct term *t;
     int n;
     t = T(w);
+    if (t->g && (ctrl_shift(code, ch, mods, 'C') || ((mods & M_CTRL) && code == KEY_INS) ||
+                 (t->g->sel && (mods & M_CTRL) && (ch == 'c' || ch == 'C' || code == 'C')))) { term_command(w, 0, T_COPY); return; }
+    if (t->g && (ctrl_shift(code, ch, mods, 'V') || ((mods & M_SHIFT) && code == KEY_INS))) { term_command(w, 0, T_PASTE); return; }
     if (t->ended) return;
+    // the modifiers alone are a canvas's business; anything else typed drops a selection
+    if (code == 16 || code == 17 || code == 18) { if (t->gfx) event(t, 'k', code, ch, mods); return; }
+    tg_unselect(t->g);
+    // a program's own window: Ctrl-C ends the program, and with it the window
+    if (t->bare && (mods & M_CTRL) && (ch == 'c' || ch == 'C' || code == 'C')) { ukill(t->pid, SIGINT); return; }
     if ((mods & M_CTRL) && (ch == 'c' || ch == 'C' || code == 'C')) {
         // What the program wrote before the interrupt shows first, as a
         // tty's output queue would have it: drawn after the ^C, the last
@@ -5336,6 +9276,7 @@ void term_key(struct win *w, int code, int ch, int mods) {
         term_tick(w);
         if (t->ended) return;
         if (t->gfx) gfx_mode(t, 0);
+        t->raw = 0;
         tg_interrupt(t->g);
         // Lines typed at the job and not read by it go with it, as a tty
         // flushes its input on an interrupt: left in the pipe, the shell
@@ -5345,6 +9286,8 @@ void term_key(struct win *w, int code, int ch, int mods) {
         if (uintr(t->pid) <= 0) write(t->in_w, "\n", 1);
         return;
     }
+    // raw keys: all of them the program's, Ctrl-L too; the screen, not the scrollback
+    if (t->raw && !t->gfx) { if (t->g->view) { t->g->view = 0; wk_redraw_all(); } raw_key(t, code, ch, mods); return; }
     if ((mods & M_CTRL) && (ch == 'l' || ch == 'L' || code == 'L')) { tg_clear_screen(t->g); return; }
     if (t->gfx) { event(t, 'k', code, ch, mods); return; }
     if ((n = tg_key(t->g, code, ch, mods)) > 0) write(t->in_w, t->g->line, n);
@@ -5352,23 +9295,123 @@ void term_key(struct win *w, int code, int ch, int mods) {
 
 void term_mouse(struct win *w, int ev, int x, int y, int cw, int ch) {
     struct term *t;
+    int b;
     t = T(w);
+    if (!t->g) return;
+    if (!t->gfx) {
+        // the grid selects, its scroll bar scrolls
+        if (ev == E_WHEEL || ui_scroll_active() || (ev != E_UP && x >= TG_W)) { tg_mouse(t->g, ev, x, y); return; }
+        tg_select(t->g, ev, x - 2, y - 2, (wk.mods & M_ALT) != 0);
+        return;
+    }
     if (t->ended) return;
-    if (!t->gfx) { tg_mouse(t->g, ev, x, y); return; }
     x = x - 2; y = y - 2;                          // inside the sunken edge
     if (x < 0) x = 0; if (y < 0) y = 0;
-    if (x >= GW) x = GW - 1; if (y >= GH) y = GH - 1;
-    if (ev == E_DOWN) { t->buttons = 1; event(t, 'd', x, y, 0); }
-    else if (ev == E_UP) { if (t->buttons) event(t, 'u', x, y, 0); t->buttons = 0; }
+    if (x >= t->gw) x = t->gw - 1; if (y >= t->gh) y = t->gh - 1;
+    t->mx = x; t->my = y;
+    // each button as it is (0 the left, 1 the middle, 2 the right), and a
+    // move with those held, a bit each
+    b = wm_button & 7;
+    if (ev == E_DOWN) { t->buttons = t->buttons | (1 << b); event(t, 'd', x, y, b); }
+    else if (ev == E_UP) { if (t->buttons & (1 << b)) event(t, 'u', x, y, b); t->buttons = t->buttons & ~(1 << b); }
     else if (ev == E_MOVE) event(t, 'm', x, y, t->buttons);
+}
+
+// Over a canvas that asked for the mouse locked (L 1), the pointer says
+// "click to capture" (GUI_PTR_LOCK): the page locks the mouse to the
+// display at the next click (libjs/display.js). Elsewhere a text beam.
+int term_pointer(struct win *w, int x, int y, int cw, int ch) {
+    struct term *t;
+    t = T(w);
+    if (t->gfx && t->lock && !t->ended && x >= 2 && y >= 2 && x < t->gw + 2 && y < t->gh + 2) return PTR_LOCK;
+    return PTR_TEXT;
+}
+
+// ---- the mouse locked to a canvas ---------------------------------------------------
+//
+// Locked, the page sends the mouse's motion as GUI_EV_REL (the desktop's
+// event mask asks for it, shell.c), and the canvas whose window had the
+// focus when it began has it, as `r dx,dy,buttons` (window.h); its buttons
+// go there too, as d and u at the pointer's place, kept here by adding up
+// the motion. A plain move again says the page let it go (Esc, which the
+// browser keeps for itself); the window losing the focus, the canvas
+// going, its program ending or L 0 let it go from this side, all buttons
+// let go first. Then a click locks it again. grin's game windows do the
+// same (src/grin/fwin.c).
+static int lk_win;                 // the window the mouse is locked to, or 0
+
+static struct term *lk_term() {
+    struct win *w;
+    if (!lk_win || !(w = win_get(lk_win)) || w->kind != K_TERM) return 0;
+    return T(w);
+}
+
+// let the lock go, if it is T's: its buttons up, the display told
+static void lk_drop(struct term *t) {
+    int b;
+    if (!lk_win || !t || t->win != lk_win) return;
+    b = 0;
+    while (b < 3) {
+        if ((t->buttons & (1 << b)) && !t->ended && t->gfx) event(t, 'u', t->mx, t->my, b);
+        ++b;
+    }
+    t->buttons = 0;
+    lk_win = 0;
+    desk_unlock();
+}
+
+int term_lock_event(int *ev) {
+    struct term *t;
+    struct win *w;
+    int f, b;
+    if (ev[0] == GUI_EV_REL) {
+        if (!lk_win) {
+            // the page has just locked it: the focused canvas's, if it asked
+            f = wk_focus();
+            if (f && (w = win_get(f)) && w->kind == K_TERM && T(w)->gfx && T(w)->lock && !T(w)->ended && !wk_modal() && !wk_menu_open())
+                lk_win = f;
+            else { desk_unlock(); return 1; }       // nobody's: let it go
+        }
+        if (!(t = lk_term())) { lk_win = 0; desk_unlock(); return 1; }
+        t->mx = t->mx + ev[1]; t->my = t->my + ev[2];
+        if (t->mx < 0) t->mx = 0; if (t->my < 0) t->my = 0;
+        if (t->mx >= t->gw) t->mx = t->gw - 1; if (t->my >= t->gh) t->my = t->gh - 1;
+        if (ev[1] || ev[2]) event(t, 'r', ev[1], ev[2], t->buttons);
+        return 1;
+    }
+    if (!lk_win) return 0;
+    if (!(t = lk_term())) { lk_win = 0; desk_unlock(); return 0; }
+    // a plain move: the page let it go (Esc); the kit has the mouse again
+    if (ev[0] == GUI_EV_MOVE) { t->buttons = 0; lk_win = 0; wk_repoint(); return 0; }
+    b = ev[3] & 7;
+    if (ev[0] == GUI_EV_DOWN) { t->buttons = t->buttons | (1 << b); event(t, 'd', t->mx, t->my, b); return 1; }
+    if (ev[0] == GUI_EV_UP) {
+        if (t->buttons & (1 << b)) event(t, 'u', t->mx, t->my, b);
+        t->buttons = t->buttons & ~(1 << b);
+        return 1;
+    }
+    if (ev[0] == GUI_EV_WHEEL) return 1;
+    // the page lost the keyboard, and with it the lock
+    if (ev[0] == GUI_EV_FOCUS && !ev[1]) lk_drop(t);
+    return 0;
+}
+
+// each pass: the lock let go once its canvas is no longer the one to have it
+void term_lock_tick() {
+    struct term *t;
+    if (!lk_win) return;
+    if (!(t = lk_term())) { lk_win = 0; desk_unlock(); return; }
+    if (t->ended || !t->gfx || !t->lock || wk_focus() != lk_win || wk_modal() || wk_menu_open()) lk_drop(t);
 }
 
 void term_draw(struct win *w, int ox, int oy, int cw, int ch, int focused) {
     struct term *t;
     t = T(w);
+    // only the canvas being drawn again (a frame): it covers all of that
+    if (t->gfx && d_damage_within(ox + 2, oy + 2, t->gw, t->gh)) { gfx_draw(t, ox + 2, oy + 2); return; }
     d_rect(ox, oy, cw, ch, C_DARK);
+    if (t->gfx) { d_bevel(ox, oy, t->gw + 4, t->gh + 4, B_SUNKEN); gfx_draw(t, ox + 2, oy + 2); return; }
     d_bevel(ox, oy, TG_W, TG_H, B_SUNKEN);
-    if (t->gfx) { gfx_draw(t, ox + 2, oy + 2); return; }
     if (t->g) tg_draw(t->g, ox + 2, oy + 2, focused && !t->ended);
 }
 // tools.c -- the desktop's window kinds as window kit classes.
@@ -5401,10 +9444,11 @@ struct tool {
 };
 
 static struct tool tools[N_KINDS] = {
-    [K_TERM]     = { .draw = term_draw, .mouse = term_mouse, .key = term_key, .keyup = term_keyup,
-                     .tick = term_tick, .drawn = term_drawn, .close = term_close, .pointer_shape = PTR_TEXT },
+    [K_TERM]     = { .draw = term_draw, .mouse = term_mouse, .key = term_key, .keyup = term_keyup, .command = term_command,
+                     .tick = term_tick, .drawn = term_drawn, .close = term_close, .pointer = term_pointer,
+                     .pointer_shape = PTR_TEXT },
     [K_FILES]    = { .draw = files_draw, .mouse = files_mouse, .key = files_key,
-                     .command = files_command, .answer = files_answer },
+                     .command = files_command, .answer = files_answer, .pointer = files_pointer },
     [K_TASKS]    = { .draw = tasks_draw, .mouse = tasks_mouse, .key = tasks_key,
                      .answer = tasks_answer, .second = tasks_tick },
     [K_EDIT]     = { .draw = edit_draw, .mouse = edit_mouse, .key = edit_key, .command = edit_command,
@@ -5414,6 +9458,7 @@ static struct tool tools[N_KINDS] = {
 };
 static struct wk_class classes[N_KINDS];
 static int ready;
+int wm_button;                                // the button of the last press or release (desktop.h)
 
 static struct tool *tool(struct win *w) { return &tools[w->kind]; }
 
@@ -5428,6 +9473,7 @@ static void a_mouse(int i, int ev, int x, int y, int b) {
     int cw, ch;
     if (!(w = win_get(i))) return;
     wk_size(i, &cw, &ch);
+    if (ev == E_DOWN || ev == E_UP || ev == E_DBL) wm_button = b;
     tool(w)->mouse(w, ev, x, ev == E_WHEEL ? b : y, cw, ch);   // the wheel's steps came as y
 }
 static void a_key(int i, int down, int code, int ch, int mods) {
@@ -5520,7 +9566,85 @@ void inputbox(struct win *owner, char *title, char *prompt, char *initial, int a
     wk_inputbox(owner ? owner->id : 0, action, title, prompt, dtext, 121);   // 120 characters
 }
 
-void run_command(char *cmd) { term_open(cmd); }
+// ---- starting a program -------------------------------------------------------------
+//
+// A command runs in a new Terminal, typed at its shell's first prompt; or,
+// for a game whose /etc/desktop.apps line says `window` (shell.c), in a
+// window that is only its canvas, with no shell (term.c, term_run). Those
+// games are known by their programs' names, which are unique on the disk
+// (/usr/games/bin, vfs-games.py): a command names one by that name alone,
+// or by a path under /usr/games, as Files does. The rest -- a program
+// elsewhere, anything the desktop.apps lines do not mark -- gets a
+// Terminal, where such a game still opens its window, the Terminal itself.
+
+enum { N_WINDOWED = 96, WNAME = 32 };
+static char windowed[N_WINDOWED * WNAME];
+static int n_windowed;
+
+// The name a command's program goes by: its first word's last part, less
+// any .c4r. 0 if there is none, or it is too long to be a game's.
+static int prog_name(char *cmd, char *out) {
+    char *s, *base;
+    int n;
+    while (*cmd == ' ') ++cmd;
+    base = cmd; s = cmd;
+    while (*s && *s != ' ') { if (*s == '/') base = s + 1; ++s; }
+    n = s - base;
+    if (n > 4 && base[n - 4] == '.' && base[n - 3] == 'c' && base[n - 2] == '4' && base[n - 1] == 'r') n = n - 4;
+    if (n <= 0 || n >= WNAME) return 0;
+    memcpy(out, base, n);
+    out[n] = 0;
+    return 1;
+}
+
+void desk_window_app(char *cmd) {
+    if (n_windowed < N_WINDOWED && prog_name(cmd, windowed + n_windowed * WNAME)) ++n_windowed;
+}
+
+static int is_windowed(char *cmd) {
+    char name[WNAME], *s;
+    int i;
+    while (*cmd == ' ') ++cmd;
+    s = cmd;
+    while (*s && *s != ' ' && *s != '/') ++s;
+    // a path: one of the games' only under /usr/games
+    if (*s == '/' && memcmp(cmd, "/usr/games/", 11) != 0) return 0;
+    if (!prog_name(cmd, name)) return 0;
+    i = 0;
+    while (i < n_windowed) { if (ui_eq(windowed + i * WNAME, name)) return 1; ++i; }
+    return 0;
+}
+
+// The program a command's first word names, as the shell finds it (sh.c):
+// a path as written, or with .c4r; a bare name in /bin, /usr/bin or
+// /usr/games/bin, as is or with .c4r. 1 with its path in path (WK_PATH).
+static char *which_dirs[4] = { "/bin/", "/usr/bin/", "/usr/games/bin/", 0 };
+int desk_which(char *cmd, char *path) {
+    char name[WK_NAME];
+    int k, d, slash, st[8];
+    while (*cmd == ' ') ++cmd;
+    k = 0; slash = 0;
+    while (cmd[k] && cmd[k] != ' ') { if (cmd[k] == '/') slash = 1; ++k; }
+    if (k == 0 || k >= WK_NAME - 4) return 0;
+    memcpy(name, cmd, k);
+    name[k] = 0;
+    d = 0;
+    while (slash ? d < 1 : which_dirs[d] != 0) {
+        path[0] = 0;
+        if (!slash) ui_cpy(path, which_dirs[d]);
+        ui_cat(path, name);
+        if (ustat(path, st) == 0 && st[0] != 1) return 1;
+        ui_cat(path, ".c4r");
+        if (ustat(path, st) == 0 && st[0] != 1) return 1;
+        ++d;
+    }
+    return 0;
+}
+
+void run_command(char *cmd) {
+    if (is_windowed(cmd) && term_run(cmd) >= 0) return;
+    term_open(cmd);
+}
 int note_open(char *path) { return notepad_open(path); }
 
 void launch(int kind) {
@@ -5648,6 +9772,8 @@ int wall_shown() { return wall_ok && theme_wall(); }
 // machine has an FPU -- with the value shown as the shortest decimal
 // that reads back to it, and its bits under it. 0.1 + 0.2 is
 // 0.30000000000000004 in Double and 0.3 in Single; Max * 2 is inf.
+//
+// Ctrl+C copies the display and Ctrl+V types the clipboard in.
 //
 // The decimal conversions are libc's fp.c (src/c4ix/libc), linked into
 // the shell: exact both ways. (fp.c sets errno, which the shell owns.)
@@ -6093,12 +10219,36 @@ static void calc_mouse(int w, int ev, int x, int y, int b) {
     }
 }
 
+static void calc_key(int w, int down, int code, int ch, int mods);
+
+// Ctrl+C copies what the display shows; Ctrl+V types the clipboard in,
+// a key a character, as Windows' Calculator took a paste (C4IX's desktop
+// and grin alike: the kit's clipboard)
+static void calc_clip(int w, int paste) {
+    struct calc *c;
+    char *t;
+    int n, k;
+    c = C(w);
+    if (!paste) {
+        k = 0;
+        while (c->disp[k] == ' ') ++k;
+        wk_clip_set(c->disp + k, ui_len(c->disp + k));
+        return;
+    }
+    t = wk_clip_get(&n);
+    k = 0;
+    while (k < n && k < 200) { if (t[k] > 32 && t[k] < 127) calc_key(w, 1, 0, t[k], 0); ++k; }
+}
+
 static void calc_key(int w, int down, int code, int ch, int mods) {
     struct calc *c;
     char k[2];
     if (!down) return;
     c = C(w);
     k[1] = 0;
+    if (ui_key_copy(code, ch, mods)) { calc_clip(w, 0); return; }
+    if (ui_key_paste(code, ch, mods)) { calc_clip(w, 1); return; }
+    if (mods & M_CTRL) return;
     if (c->mode != M_INT) {
         if (ch == '.' || ch == ',') { press(c, "."); return; }
         if (ch == 'e' || ch == 'E') { press(c, "Exp"); return; }
@@ -6404,30 +10554,84 @@ void wk_inputbox(int owner, int dialog, char *title, char *prompt, char *buf, in
 //
 // The folder's contents, folders first, then a name. A double click on a
 // folder (or "..") goes into it; on a file, or OK with a name, answers
-// with the folder and the name joined.
+// with the folder and the name joined. A name with a * in it is a pattern
+// instead: the files it matches are listed.
+//
+// The types a box offers are its pattern: "*", or Windows' filter string,
+// a label and its patterns in turn, "C Source (*.c;*.h)|*.c;*.h|All
+// Files (*)|*". The first is shown to start with. This file draws the box
+// in Windows 3.1's look, which shows the first type's files; look95.c
+// draws Windows 95's, with a list to choose the type from.
 
-enum { FB_MAX = 256, FB_ROWS = 12, FB_ROW = 16 };
+char *wk_fb_name(struct fdlg *f, int k) { return f->names + f->order[k] * WK_NAME; }
+static char *fname(struct fdlg *f, int k) { return wk_fb_name(f, k); }
 
-struct fdlg {
-    char *buf;                    // as struct dlg's
-    int max;
-    char out[WK_PATH];
-    int caret;
-    int save;
-    int n, top, sel;
-    char dir[WK_PATH];
-    char pattern[WK_NAME];
-    int isdir[FB_MAX];
-    int order[FB_MAX];
-    char names[FB_MAX * WK_NAME];
-};
+// the k'th field of the filter, '|' between them, into out: 0 if none
+static int fb_field(char *s, int k, char *out, int n) {
+    int i;
+    while (k > 0 && *s) { if (*s == '|') --k; ++s; }
+    if (k > 0) return 0;
+    i = 0;
+    while (s[i] && s[i] != '|' && i < n - 1) { out[i] = s[i]; ++i; }
+    out[i] = 0;
+    return 1;
+}
+static int fb_bar(char *s) { while (*s) { if (*s == '|') return 1; ++s; } return 0; }
 
-static char *fname(struct fdlg *f, int k) { return f->names + f->order[k] * WK_NAME; }
+int wk_fb_types(struct fdlg *f) {
+    int n;
+    char t[4];
+    if (!fb_bar(f->filter)) return 1;
+    n = 0;
+    while (fb_field(f->filter, 2 * n + 1, t, 4)) ++n;
+    return n > 0 ? n : 1;
+}
 
+void wk_fb_label(struct fdlg *f, int i, char *out, int n) {
+    if (fb_bar(f->filter)) { fb_field(f->filter, 2 * i, out, n); return; }
+    ui_ncpy(out, ui_eq(f->filter, "*") || !f->filter[0] ? "All Files (*)" : f->filter, n);
+}
+
+void wk_fb_type(struct fdlg *f, int i) {
+    if (i < 0 || i >= wk_fb_types(f)) i = 0;
+    f->ftype = i;
+    if (!fb_bar(f->filter) || !fb_field(f->filter, 2 * i + 1, f->pattern, WK_NAME)) ui_ncpy(f->pattern, f->filter, WK_NAME);
+    wk_fb_list(f);
+}
+
+// name's end is end, whatever the letters' case
+static int fb_ends(char *name, char *end, int n) {
+    int k, a, b;
+    k = ui_len(name);
+    if (n > k) return 0;
+    name = name + k - n;
+    k = 0;
+    while (k < n) {
+        a = name[k]; b = end[k];
+        if (a >= 'A' && a <= 'Z') a = a + 32;
+        if (b >= 'A' && b <= 'Z') b = b + 32;
+        if (a != b) return 0;
+        ++k;
+    }
+    return 1;
+}
+
+// a folder always; a file if one of the patterns takes it ("*", "*.c", or a name)
 static int fb_wanted(struct fdlg *f, char *name, int dir) {
-    if (dir || !f->pattern[0] || ui_eq(f->pattern, "*")) return 1;
-    if (f->pattern[0] == '*') return ui_ends(name, f->pattern + 1);
-    return ui_eq(name, f->pattern);
+    char *p;
+    int n;
+    if (dir || !f->pattern[0]) return 1;
+    p = f->pattern;
+    while (*p) {
+        n = 0;
+        while (p[n] && p[n] != ';') ++n;
+        if (n == 1 && p[0] == '*') return 1;
+        if (n > 1 && p[0] == '*' && fb_ends(name, p + 1, n - 1)) return 1;
+        if (n > 0 && p[0] != '*' && n == ui_len(name) && fb_ends(name, p, n)) return 1;
+        p = p + n;
+        if (*p == ';') ++p;
+    }
+    return 0;
 }
 
 static int fb_before(struct fdlg *f, int a, int b) {
@@ -6438,11 +10642,11 @@ static int fb_before(struct fdlg *f, int a, int b) {
     return (*p & 255) < (*q & 255);
 }
 
-static void fb_list(struct fdlg *f) {
+void wk_fb_list(struct fdlg *f) {
     int i, k, j, r;
     char name[WK_NAME];
     f->n = 0; f->top = 0; f->sel = 0 - 1;
-    if (f->dir[0] && !ui_eq(f->dir, "/")) {
+    if (f->dir[0] && !ui_eq(f->dir, "/") && !f->up) {
         ui_cpy(f->names, ".."); f->isdir[0] = 1; f->order[0] = 0; f->n = 1;
     }
     i = 0;
@@ -6462,7 +10666,7 @@ static void fb_list(struct fdlg *f) {
     }
 }
 
-static void fb_enter(struct fdlg *f, char *name) {
+void wk_fb_enter(struct fdlg *f, char *name) {
     int k;
     if (ui_eq(name, "..")) {
         k = ui_len(f->dir);
@@ -6472,23 +10676,32 @@ static void fb_enter(struct fdlg *f, char *name) {
         if (k < 1) k = 1;
         f->dir[k] = 0;
     } else if (!ui_join(f->dir, f->dir, name, WK_PATH)) return;
-    fb_list(f);
+    wk_fb_list(f);
     wk_redraw_all();
 }
+static void fb_enter(struct fdlg *f, char *name) { wk_fb_enter(f, name); }
 
 // OK, or a double click on a file: the folder and the name joined
-static void fb_ok(struct win *d, struct fdlg *f) {
+void wk_fb_ok(struct win *d, struct fdlg *f) {
     int k;
     char name[WK_NAME];
     k = 0;
     while (k < f->n) { if (f->isdir[f->order[k]] && ui_eq(fname(f, k), f->out)) { fb_enter(f, f->out); f->out[0] = 0; f->caret = 0; return; } ++k; }
+    // nothing typed: the folder picked, if one is
+    if (!f->out[0] && f->sel >= 0 && f->sel < f->n && f->isdir[f->order[f->sel]]) { ui_ncpy(name, fname(f, f->sel), WK_NAME); fb_enter(f, name); return; }
     if (!f->out[0]) return;
+    // a pattern: the files it takes
+    k = 0;
+    while (f->out[k] && f->out[k] != '*') ++k;
+    if (f->out[k] == '*' && f->out[0] != '/') { ui_ncpy(f->pattern, f->out, WK_NAME); f->out[0] = 0; f->caret = 0; wk_fb_list(f); wk_redraw_all(); return; }
     if (f->out[0] != '/') {                     // a name: in the folder shown
         ui_ncpy(name, f->out, WK_NAME);
         if (!ui_join(f->out, f->dir, name, WK_PATH)) { ui_ncpy(f->out, name, WK_NAME); return; }
     }
     wk_dialog_answer(d, 1);
 }
+
+static void fb_ok(struct win *d, struct fdlg *f) { wk_fb_ok(d, f); }
 
 static void file_draw(int w, int cw, int ch, int focused) {
     struct fdlg *f;
@@ -6566,10 +10779,13 @@ void wk_filebox(int owner, int dialog, int save, char *pattern, char *buf, int m
     struct fdlg *f;
     char *s;
     int k;
-    if (!(d = dialog_open(&wk_file_class, sizeof(struct fdlg), owner, dialog, save ? "Save As" : "Open", 420, 330))) return;
+    if (wk.style == S_WIN31) d = dialog_open(&wk_file_class, sizeof(struct fdlg), owner, dialog, save ? "Save As" : "Open", 420, 330);
+    else d = dialog_open(&wk_file95_class, sizeof(struct fdlg), owner, dialog, save ? "Save As" : "Open", 470, 330);
+    if (!d) return;
     f = (struct fdlg *)d->st;
     f->buf = buf; f->max = max; f->save = save;
-    ui_ncpy(f->pattern, pattern ? pattern : "*", WK_NAME);
+    f->up = wk.style != S_WIN31;
+    ui_ncpy(f->filter, pattern ? pattern : "*", WK_PATH);
     // buf: a folder to start in, or a path whose folder it is and whose name is offered
     f->dir[0] = '/'; f->dir[1] = 0;
     if (buf && buf[0] == '/') {
@@ -6578,7 +10794,7 @@ void wk_filebox(int owner, int dialog, int save, char *pattern, char *buf, int m
         if (s[0] && !ui_ends(f->dir, "/")) { ui_ncpy(f->out, s, WK_NAME); k = s - f->dir; f->dir[k > 1 ? k - 1 : 1] = 0; }
     } else if (buf && buf[0]) ui_ncpy(f->out, buf, WK_NAME);
     f->caret = ui_len(f->out);
-    fb_list(f);
+    wk_fb_type(f, 0);
 }
 // draw.c -- the window kit's drawing layer, over the display (gui.h).
 // docs/grin-plan.md 3.5.
@@ -6628,6 +10844,34 @@ void wk_scheme_use(int i, int desk) {
     wk.face = t[1]; wk.light = t[2]; wk.shadow = t[3];
     wk.title = t[4]; wk.title2 = t[5]; wk.ititle = t[6]; wk.ititle2 = t[7]; wk.sel = t[4];
     wk_full = 1;
+}
+
+// ---- fonts -------------------------------------------------------------------------
+//
+// The interface's three faces, each with its bold, the editors' three
+// fixed-width ones, and three sizes. A grid is a font size and a cell,
+// the cell no narrower than the face's characters (0.6 of its size in
+// Courier New, a little less in the others).
+static char *face_names[WK_FACES] = { "Tahoma", "Verdana", "Georgia" };
+static int faces[WK_FACES * 2] = { F_SANS, F_BOLD, F_VERDANA, F_VERDANA_B, F_SERIF, F_SERIF_B };
+static char *mono_names[WK_FACES] = { "Consolas", "Courier New", "Lucida Console" };
+static int monos[WK_FACES] = { F_MONO, F_COURIER, F_LUCIDA };
+static char *size_names[WK_SIZES] = { "Small", "Normal", "Large" };
+static int grids[WK_SIZES * 3] = { 10, 6, 13, 12, 7, 15, 14, 8, 17 };
+
+char *wk_face_name(int i) { return i >= 0 && i < WK_FACES ? face_names[i] : ""; }
+char *wk_mono_name(int i) { return i >= 0 && i < WK_FACES ? mono_names[i] : ""; }
+int wk_mono_font(int i) { return i >= 0 && i < WK_FACES ? monos[i] : F_MONO; }
+char *wk_size_name(int i) { return i >= 0 && i < WK_SIZES ? size_names[i] : ""; }
+void wk_font_use(int face, int size) {
+    if (face < 0 || face >= WK_FACES) face = 0;
+    if (size < 0 || size >= WK_SIZES) size = 1;
+    wk.fsans = faces[face * 2]; wk.fbold = faces[face * 2 + 1]; wk.fsize = size - 1;
+    wk_full = 1;
+}
+void wk_grid(int size, int *font_size, int *cw, int *ch) {
+    if (size < 0 || size >= WK_SIZES) size = 1;
+    *font_size = grids[size * 3]; *cw = grids[size * 3 + 1]; *ch = grids[size * 3 + 2];
 }
 
 int ui_mix(int a, int b, int t, int n) {
@@ -6715,14 +10959,25 @@ void d_rect(int x, int y, int w, int h, int rgb) { if (w > 0 && h > 0) gui_rect(
 void d_recto(int x, int y, int w, int h, int rgb) { gui_recto(x + ox, y + oy, w, h, rgb); }
 void d_line(int x0, int y0, int x1, int y1, int rgb) { gui_line(x0 + ox, y0 + oy, x1 + ox, y1 + oy, rgb); }
 void d_disc(int x, int y, int r, int rgb) { gui_disc(x + ox, y + oy, r, rgb); }
-void d_text(int x, int y, int rgb, int font, char *s) { gui_text2(x + ox, y + oy, rgb, 11, font, 0, s, 0 - 1); }
+// F_SANS and F_BOLD in the interface's face and size, when one was chosen
+// (wk_font_use; grin never does); every other font as it is
+void d_text(int x, int y, int rgb, int font, char *s) { d_textn(x, y, rgb, 11, font, 0, s, 0 - 1); }
 void d_textn(int x, int y, int rgb, int size, int font, int advance, char *s, int n) {
+    if (font == F_SANS && wk.fsans) { font = wk.fsans; size = size + wk.fsize; }
+    else if (font == F_BOLD && wk.fbold) { font = wk.fbold; size = size + wk.fsize; }
     gui_text2(x + ox, y + oy, rgb, size, font, advance, s, n);
 }
 void d_imgdef(int id, int w, int h, int *px) { gui_imgdef(id, w, h, px); }
 void d_image(int id, int x, int y) { gui_image(id, x + ox, y + oy); }
 void d_blit8(int x, int y, int w, int h, char *src, int pitch, int *pal, int dw, int dh) {
     gui_blit8(x + ox, y + oy, w, h, src, pitch, pal, dw, dh);
+}
+
+// While only the damage is drawn: 1 if all of it is inside this part of
+// the client area, so what a draw paints around that part is not seen
+int d_damage_within(int x, int y, int w, int h) {
+    x = x + ox; y = y + oy;
+    return wk_part && wk_dmg_x0 >= x && wk_dmg_y0 >= y && wk_dmg_x1 <= x + w && wk_dmg_y1 <= y + h;
 }
 
 // The bevels: two pixels, light top-left, dark bottom-right (or the other
@@ -7052,7 +11307,8 @@ void wk_icons_draw() {
 // Classic is Windows 95's: a raised frame, a title bar shading from one
 // colour to another, the window's icon and title on the left, and raised
 // minimise, maximise and close buttons on the right. Flat keeps the
-// layout and draws it with outlines and solid colours.
+// layout and draws it with outlines and solid colours. Both draw the
+// kit's file box as Windows 95's Open and Save As (below).
 
 #include "wkwin.h"
 #include "wkgui.h"
@@ -7162,6 +11418,240 @@ static int hit95(struct win *w, int x, int y) {
 
 struct wk_look look_flat = { .frame = frame95, .menubar = menubar95, .hit = hit95, .grip = grip95 };
 struct wk_look look_classic = { .frame = frame95, .menubar = menubar95, .hit = hit95, .grip = grip95 };
+
+// ---- the file box, as Windows 95 drew it ---------------------------------------------
+//
+// dialog.c's file box (struct fdlg, wk_fb_*) laid out as Windows 95's
+// Open and Save As: "Look in" with the folder shown, a list down from it
+// of the folders above it to go back to, and a button up one; the
+// folder's contents, folders first, each with its icon; the name, and
+// "Files of type" with the types the box offers; Open or Save, and Cancel.
+// A click picks an entry, a double click opens it; Up and Down walk the
+// list, Backspace on an empty name goes up a folder.
+
+enum { FB_LX = 10, FB_LY = 40, FB_FX = 100, FB_DROP_ROW = 16 };
+
+static int fb_lw(int cw) { return cw - 2 * FB_LX; }
+static int fb_lh(int ch) { return ch - FB_LY - 76; }
+static int fb_rows(int ch) { return (fb_lh(ch) - 4) / FB_ROW; }
+static int fb_cw(int cw) { return cw - FB_FX - 96; }        // the name field's and the type list's width
+static int fb_look_w(int cw) { return cw - 78 - 40; }
+
+// the folders above the one shown, and it: how many, and the k'th's path and depth
+static int fb_depth(struct fdlg *f) {
+    int k, n;
+    n = 1; k = 1;
+    while (f->dir[k]) { if (f->dir[k] == '/' || !f->dir[k + 1]) ++n; ++k; }
+    return f->dir[1] ? n : 1;
+}
+static void fb_ancestor(struct fdlg *f, int k, char *out) {
+    int i, seen;
+    if (k == 0) { out[0] = '/'; out[1] = 0; return; }
+    if (k >= fb_depth(f) - 1) { ui_ncpy(out, f->dir, WK_PATH); return; }
+    i = 1; seen = 0;
+    while (f->dir[i]) {
+        if (f->dir[i] == '/') { ++seen; if (seen == k) break; }
+        ++i;
+    }
+    ui_ncpy(out, f->dir, i + 1 < WK_PATH ? i + 1 : WK_PATH);
+}
+
+static char fbtmp[WK_PATH];
+
+static void fb_folder_icon(int x, int y) {
+    d_rect(x + 1, y + 3, 6, 2, 0xc8a000);
+    d_rect(x + 1, y + 5, 14, 9, 0xffd84a);
+    d_recto(x + 1, y + 5, 13, 8, 0xc8a000);
+}
+static void fb_file_icon(int x, int y) {
+    d_rect(x + 3, y + 1, 10, 14, C_WHITE);
+    d_recto(x + 3, y + 1, 9, 13, C_SHADOW);
+    d_rect(x + 5, y + 5, 6, 1, C_SHADOW); d_rect(x + 5, y + 8, 6, 1, C_SHADOW); d_rect(x + 5, y + 11, 4, 1, C_SHADOW);
+}
+
+// a drop-down list's box: what is chosen, and the arrow that opens the list
+static void fb_combo(int x, int y, int w, char *text, int folder) {
+    int bx;
+    d_rect(x, y, w, 22, C_WHITE);
+    d_bevel(x, y, w, 22, B_SUNKEN);
+    if (folder) fb_folder_icon(x + 4, y + 3);
+    d_clip(x + 2, y + 2, w - 22, 18);
+    d_text(x + (folder ? 24 : 6), y + 5, C_DARK, F_SANS, text);
+    d_clip_end();
+    bx = x + w - 19;
+    d_rect(bx, y + 2, 17, 18, C_FACE);
+    d_bevel(bx, y + 2, 17, 18, B_RAISED);
+    d_line(bx + 4, y + 9, bx + 12, y + 9, C_DARK); d_line(bx + 5, y + 10, bx + 11, y + 10, C_DARK);
+    d_line(bx + 6, y + 11, bx + 10, y + 11, C_DARK); d_line(bx + 7, y + 12, bx + 9, y + 12, C_DARK);
+    d_rect(bx + 8, y + 13, 1, 1, C_DARK);
+}
+
+// the name a folder shows: its last part (a / after it or not), C4IX (/) for the top
+static char fbname[WK_NAME];
+static char *fb_folder_name(char *path) {
+    int k, e;
+    e = ui_len(path);
+    while (e > 1 && path[e - 1] == '/') --e;
+    if (e <= 1) return "C4IX (/)";
+    k = e;
+    while (k > 0 && path[k - 1] != '/') --k;
+    ui_ncpy(fbname, path + k, e - k + 1 < WK_NAME ? e - k + 1 : WK_NAME);
+    return fbname;
+}
+
+static void file95_draw(int w, int cw, int ch, int focused) {
+    struct fdlg *f;
+    int k, y, lw, lh, rows, x, n, ty, dy;
+    f = (struct fdlg *)wk_state(w);
+    d_rect(0, 0, cw, ch, C_FACE);
+    // Look in: the folder, and Up
+    d_text(FB_LX, 14, C_DARK, F_SANS, f->save ? "Save in:" : "Look in:");
+    fb_combo(78, 10, fb_look_w(cw), fb_folder_name(f->dir), 1);
+    ui_button(cw - 34, 10, 24, 22, "", 0, 0);
+    x = cw - 34;
+    fb_folder_icon(x + 3, 13);
+    d_line(x + 16, 14, x + 16, 22, C_DARK); d_line(x + 13, 17, x + 16, 14, C_DARK); d_line(x + 19, 17, x + 16, 14, C_DARK);
+    d_line(x + 16, 22, x + 20, 22, C_DARK);
+    // the folder's contents
+    lw = fb_lw(cw); lh = fb_lh(ch); rows = fb_rows(ch);
+    d_rect(FB_LX, FB_LY, lw, lh, C_WHITE);
+    d_bevel(FB_LX, FB_LY, lw, lh, B_SUNKEN);
+    d_clip(FB_LX + 2, FB_LY + 2, lw - 20, lh - 4);
+    k = f->top; y = FB_LY + 2;
+    while (k < f->n && k < f->top + rows) {
+        if (f->isdir[f->order[k]]) fb_folder_icon(FB_LX + 4, y);
+        else fb_file_icon(FB_LX + 4, y);
+        n = ui_len(wk_fb_name(f, k));
+        if (k == f->sel) d_rect(FB_LX + 22, y, n * 6 + 6, FB_ROW, C_SEL);
+        d_text(FB_LX + 25, y + 2, k == f->sel ? C_WHITE : C_DARK, F_SANS, wk_fb_name(f, k));
+        y = y + FB_ROW;
+        ++k;
+    }
+    d_clip_end();
+    ui_scrollbar(FB_LX + lw - 18, FB_LY + 2, lh - 4, f->n, rows, f->top);
+    // the name, the type, and the buttons
+    y = ch - 66;
+    d_text(FB_LX, y + 5, C_DARK, F_SANS, "File name:");
+    ui_field(FB_FX, y, fb_cw(cw), f->out, f->caret, !f->drop);
+    ui_button(cw - 88, y, 78, 24, f->save ? "Save" : "Open", 0, 1);
+    ty = ch - 34;
+    d_text(FB_LX, ty + 5, C_DARK, F_SANS, f->save ? "Save as type:" : "Files of type:");
+    wk_fb_label(f, f->ftype, fbtmp, WK_PATH);
+    fb_combo(FB_FX, ty, fb_cw(cw), fbtmp, 0);
+    ui_button(cw - 88, ty, 78, 24, "Cancel", 0, 0);
+    // a list dropped down, over the rest
+    if (f->drop == 1) {
+        n = fb_depth(f);
+        lw = fb_look_w(cw);
+        d_rect(78, 32, lw, n * FB_DROP_ROW + 4, C_WHITE);
+        d_recto(78, 32, lw - 1, n * FB_DROP_ROW + 3, C_DARK);
+        k = 0;
+        while (k < n) {
+            dy = 34 + k * FB_DROP_ROW;
+            fb_ancestor(f, k, fbtmp);
+            if (k == n - 1) d_rect(80 + k * 10 + 20, dy, ui_len(fb_folder_name(fbtmp)) * 6 + 6, FB_DROP_ROW, C_SEL);
+            fb_folder_icon(82 + k * 10, dy);
+            d_text(80 + k * 10 + 23, dy + 2, k == n - 1 ? C_WHITE : C_DARK, F_SANS, fb_folder_name(fbtmp));
+            ++k;
+        }
+    } else if (f->drop == 2) {
+        n = wk_fb_types(f);
+        lw = fb_cw(cw);
+        dy = ty - n * FB_DROP_ROW - 4;               // up from the box: there is no room under it
+        d_rect(FB_FX, dy, lw, n * FB_DROP_ROW + 4, C_WHITE);
+        d_recto(FB_FX, dy, lw - 1, n * FB_DROP_ROW + 3, C_DARK);
+        k = 0;
+        while (k < n) {
+            if (k == f->ftype) d_rect(FB_FX + 2, dy + 2 + k * FB_DROP_ROW, lw - 4, FB_DROP_ROW, C_SEL);
+            wk_fb_label(f, k, fbtmp, WK_PATH);
+            d_text(FB_FX + 6, dy + 4 + k * FB_DROP_ROW, k == f->ftype ? C_WHITE : C_DARK, F_SANS, fbtmp);
+            ++k;
+        }
+    }
+}
+
+// the entry picked: a file's name goes into the name
+static void fb_pick(struct fdlg *f, int k, int rows) {
+    if (k < 0 || k >= f->n) return;
+    f->sel = k;
+    if (k < f->top) f->top = k;
+    if (k >= f->top + rows) f->top = k - rows + 1;
+    if (!f->isdir[f->order[k]]) { ui_ncpy(f->out, wk_fb_name(f, k), WK_NAME); f->caret = ui_len(f->out); }
+}
+
+static void file95_mouse(int w, int ev, int x, int y, int b) {
+    struct fdlg *f;
+    struct win *d;
+    int cw, ch, k, t, lw, rows, n, dy;
+    if (!(d = win_get(w))) return;
+    f = (struct fdlg *)d->st;
+    wk_size(w, &cw, &ch);
+    lw = fb_lw(cw); rows = fb_rows(ch);
+    if (ev == E_WHEEL) {
+        f->top = f->top + b * 3;
+        if (f->top > f->n - rows) f->top = f->n - rows;
+        if (f->top < 0) f->top = 0;
+        return;
+    }
+    if (ev == E_MOVE) { t = ui_scroll_drag(FB_LX + lw - 18, FB_LY + 2, y); if (t >= 0) f->top = t; return; }
+    if (ev != E_DOWN && ev != E_DBL) return;
+    // a list dropped down takes the click, and closes
+    if (f->drop) {
+        if (ev != E_DOWN) return;
+        if (f->drop == 1) {
+            n = fb_depth(f);
+            if (ui_hit(x, y, 78, 34, fb_look_w(cw), n * FB_DROP_ROW)) {
+                k = (y - 34) / FB_DROP_ROW;
+                fb_ancestor(f, k, fbtmp);
+                ui_ncpy(f->dir, fbtmp, WK_PATH);
+                wk_fb_list(f);
+            }
+        } else {
+            n = wk_fb_types(f);
+            dy = ch - 34 - n * FB_DROP_ROW - 4;
+            if (ui_hit(x, y, FB_FX, dy + 2, fb_cw(cw), n * FB_DROP_ROW)) wk_fb_type(f, (y - dy - 2) / FB_DROP_ROW);
+        }
+        f->drop = 0;
+        wk_redraw_all();
+        return;
+    }
+    if (ev == E_DOWN && ui_hit(x, y, cw - 88, ch - 66, 78, 24)) { wk_fb_ok(d, f); return; }
+    if (ev == E_DOWN && ui_hit(x, y, cw - 88, ch - 34, 78, 24)) { wk_dialog_answer(d, 0); return; }
+    if (ev == E_DOWN && ui_hit(x, y, cw - 34, 10, 24, 22)) { if (f->dir[1]) wk_fb_enter(f, ".."); return; }
+    if (ev == E_DOWN && ui_hit(x, y, 78, 10, fb_look_w(cw), 22)) { f->drop = 1; wk_redraw_all(); return; }
+    if (ev == E_DOWN && ui_hit(x, y, FB_FX, ch - 34, fb_cw(cw), 22)) { f->drop = 2; wk_redraw_all(); return; }
+    t = ui_scroll_click(x, y, FB_LX + lw - 18, FB_LY + 2, fb_lh(ch) - 4, f->n, rows, f->top);
+    if (t >= 0) { f->top = t; return; }
+    if (ui_hit(x, y, FB_LX + 2, FB_LY + 2, lw - 20, fb_lh(ch) - 4)) {
+        k = f->top + (y - FB_LY - 2) / FB_ROW;
+        if (k >= f->n) { f->sel = 0 - 1; return; }
+        fb_pick(f, k, rows);
+        if (ev == E_DBL) {
+            if (f->isdir[f->order[k]]) { ui_ncpy(fbtmp, wk_fb_name(f, k), WK_PATH); wk_fb_enter(f, fbtmp); return; }
+            wk_fb_ok(d, f);
+        }
+        return;
+    }
+    if (ui_hit(x, y, FB_FX, ch - 66, fb_cw(cw), 22)) f->caret = ui_field_hit(x, FB_FX, fb_cw(cw), f->out, f->caret);
+}
+
+static void file95_key(int w, int down, int code, int ch, int mods) {
+    struct fdlg *f;
+    struct win *d;
+    int cw, chh;
+    if (!down || !(d = win_get(w))) return;
+    f = (struct fdlg *)d->st;
+    wk_size(w, &cw, &chh);
+    if (code == KEY_ESC) { if (f->drop) { f->drop = 0; return; } wk_dialog_answer(d, 0); return; }
+    f->drop = 0;
+    if (code == KEY_ENTER) { wk_fb_ok(d, f); return; }
+    if (code == KEY_BACK && !f->out[0]) { if (f->dir[1]) wk_fb_enter(f, ".."); return; }
+    if (code == KEY_DOWN) { fb_pick(f, f->sel < 0 ? 0 : f->sel + 1, fb_rows(chh)); return; }
+    if (code == KEY_UP) { fb_pick(f, f->sel > 0 ? f->sel - 1 : 0, fb_rows(chh)); return; }
+    ui_field_key(f->out, WK_NAME - 1, &f->caret, code, ch, mods);
+}
+
+struct wk_class wk_file95_class = { .kind = ICON_FILEBOX, .draw = file95_draw, .mouse = file95_mouse, .key = file95_key };
 // notepad.c -- Notepad: a plain text editor, as a window kit class.
 // docs/grin-plan.md 4; it was the C4IX desktop's Text Editor (apps.c).
 //
@@ -7170,35 +11660,79 @@ struct wk_look look_classic = { .frame = frame95, .menubar = menubar95, .hit = h
 // rather than cut short (the desktop review's B6). Lines are found by
 // scanning for newlines, and drawn in a fixed-width face so the caret can
 // be placed exactly. Files open from, and save to, the host's (wk_fopen).
+//
+// A selection runs from an anchor to the caret: Shift with the moving
+// keys, or the mouse dragged, makes one, and typing replaces it. Edit's
+// Cut, Copy and Paste (and Ctrl+X, C and V, or Shift+Del, Ctrl+Ins and
+// Shift+Ins) go through the kit's clipboard, which every window shares.
+//
+// Find (Edit > Find..., Ctrl+F): the kit's find bar under the text (ui.c),
+// which looks from the selection for the next match (Enter, F3, Next) or
+// the one before (Shift+Enter, Shift+F3, Previous), round past the end or
+// the top with a note that it went round, and selects it. Match case or
+// not; a selection on one line is what it looks for to start with.
+//
+// Format: Word Wrap, on until it is turned off, folds a long line onto the
+// rows below; off, the text scrolls across under a bar. And the face and
+// size the text is drawn in, the kit's fixed-width ones. The choices are
+// every Notepad window's, and kept in notepad_cfg when the host names one.
 
 #include "winkit.h"
 
-enum { NCW = 7, NCH = 15, NFONT = 12, CHUNK = 4096 };
+enum { CHUNK = 4096 };
 enum { D_OPEN = 1, D_SAVEAS = 2 };                // its dialogs
 enum { N_NEW = 0, N_OPEN = 1, N_SAVE = 2, N_SAVEAS = 3, N_EXIT = 5 };   // File's items
+enum { E_CUT = 0, E_COPY = 1, E_PASTE = 2, E_DELETE = 3, E_ALL = 5,     // Edit's
+       E_FIND = 7, E_FNEXT = 8, E_FPREV = 9 };
+enum { FM_WRAP = 0, FM_FACE = 2, FM_SIZE = 6, FM_N = 9 };                // Format's: then the faces, the sizes
 
 char *notepad_name = "Notepad";
 char *notepad_about = "Notepad: edits plain text.";
 char *notepad_home = "/";                         // where Open starts
 char *notepad_untitled = "untitled.txt";          // where Save As offers to put a new one
 int notepad_filebox = 0;                          // Open and Save As: the kit's file box, not a typed path
+char *notepad_filter = "*";                       // ... and the types it offers (wk_filebox)
+char *notepad_cfg = 0;                            // where Format's choices are kept, or 0
 
 struct note {
     char path[WK_PATH];
     char ask[WK_PATH];                            // a dialog's path, in and out
-    int len, cap, caret, top, modified;
+    int len, cap, caret, top, modified;           // top: the first row shown
     int want_col;                                 // the column up/down tries to keep
+    int anchor;                                   // the selection's other end (anchor == caret: none)
+    int dragging;                                 // the mouse is making a selection
     char *text;                                   // cap bytes, len of them text and a 0
+    int left;                                     // without Word Wrap: the first column shown
+    int lcaret;                                   // the caret when it last drew (the view follows it when it moves)
+    int rows, cols, maxw;                         // as it last drew: rows and columns shown, the longest line
+    int lwrap;                                    // ... and whether it folded
+    struct ui_find fb;                            // the find bar
 };
+
+// Format's choices: Word Wrap, the face and the size; the text grid they make
+static int wrap = 1;
+static int nface;
+static int nsize = 1;
+static int cfg_read;
+static int nfont = F_MONO;
+static int nfs = 12;
+static int ncw = 7;
+static int nch = 15;
 
 static char buf[WK_PATH + 64];
 static char about_item[64];
 static char about_title[64];
 static char *file_items[7] = { "New", "Open...", "Save", "Save As...", "-", "Exit", 0 };
+static char *edit_items[11] = { "Cut", "Copy", "Paste", "Delete", "-", "Select All", "-",
+                                "Find...   Ctrl+F", "Find Next   F3", "Find Previous", 0 };
+static char *format_items[FM_N + 1];
+static char fmt_buf[FM_N * 20];
 static char *help_items[2];
-static struct wk_menu menus[2];
+static struct wk_menu menus[4];
+static char cfgb[72];
 
 static struct note *N(int w) { return (struct note *)wk_state(w); }
+static void find_act(int w, int a);
 
 static void retitle(int w) {
     struct note *n;
@@ -7225,7 +11759,7 @@ static int room(struct note *n, int more) {
 }
 
 static void empty(struct note *n) {
-    n->len = 0; n->caret = 0; n->top = 0; n->modified = 0;
+    n->len = 0; n->caret = 0; n->anchor = 0; n->top = 0; n->modified = 0; n->left = 0;
     if (n->text) n->text[0] = 0;
 }
 
@@ -7266,13 +11800,84 @@ static void open_file(int w, char *path, int fresh) {
     else if (!r) say(w, "Cannot open that file.");
 }
 
+// ---- Format's choices ------------------------------------------------------------
+
+static void use_font() {
+    nfont = wk_mono_font(nface);
+    wk_grid(nsize, &nfs, &ncw, &nch);
+}
+
+// notepad_cfg: "wrap W font F size S", each a digit
+static void cfg_load() {
+    int fd, r, i;
+    cfg_read = 1;
+    if (notepad_cfg && (fd = wk_fopen(notepad_cfg, 0)) >= 0) {
+        r = wk_fread(fd, cfgb, 60);
+        wk_fclose(fd);
+        if (r < 0) r = 0;
+        cfgb[r] = 0;
+        i = 0;
+        while (i < r) {
+            if (cfgb[i] == 'w' && cfgb[i + 1] == 'r' && cfgb[i + 4] == ' ') wrap = cfgb[i + 5] != '0';
+            if (cfgb[i] == 'f' && cfgb[i + 1] == 'o' && cfgb[i + 4] == ' ' && cfgb[i + 5] >= '0' && cfgb[i + 5] < '0' + WK_FACES) nface = cfgb[i + 5] - '0';
+            if (cfgb[i] == 's' && cfgb[i + 1] == 'i' && cfgb[i + 4] == ' ' && cfgb[i + 5] >= '0' && cfgb[i + 5] < '0' + WK_SIZES) nsize = cfgb[i + 5] - '0';
+            ++i;
+        }
+    }
+    use_font();
+}
+
+static void cfg_save() {
+    int fd;
+    if (!notepad_cfg || (fd = wk_fopen(notepad_cfg, 1)) < 0) return;
+    ui_cpy(cfgb, "wrap 0 font 0 size 0\n");
+    cfgb[5] = '0' + wrap; cfgb[12] = '0' + nface; cfgb[19] = '0' + nsize;
+    wk_fwrite(fd, cfgb, ui_len(cfgb));
+    wk_fclose(fd);
+}
+
+// Format's items, a check beside each choice in use
+static void fmt_item(int k, char *name, int on) {
+    char *p;
+    p = fmt_buf + k * 20;
+    p[0] = WK_CHECKED;
+    ui_ncpy(on ? p + 1 : p, name, 19);
+    format_items[k] = p;
+}
+static void format_menu() {
+    int k;
+    fmt_item(FM_WRAP, "Word Wrap", wrap);
+    format_items[FM_FACE - 1] = "-";
+    k = 0;
+    while (k < WK_FACES) { fmt_item(FM_FACE + k, wk_mono_name(k), k == nface); ++k; }
+    format_items[FM_SIZE - 1] = "-";
+    k = 0;
+    while (k < WK_SIZES) { fmt_item(FM_SIZE + k, wk_size_name(k), k == nsize); ++k; }
+    format_items[FM_N] = 0;
+}
+
+// a choice made: in every Notepad window at once, and kept
+static void format_pick(int item) {
+    if (item == FM_WRAP) wrap = !wrap;
+    else if (item >= FM_FACE && item < FM_FACE + WK_FACES) nface = item - FM_FACE;
+    else if (item >= FM_SIZE && item < FM_SIZE + WK_SIZES) nsize = item - FM_SIZE;
+    else return;
+    use_font();
+    format_menu();
+    cfg_save();
+    wk_redraw_all();
+}
+
 static void note_open_hook(int w, char *path) {
     struct note *n;
     n = N(w);
     help_items[0] = about_item; help_items[1] = 0;
+    format_menu();
     menus[0].title = "File"; menus[0].items = file_items;
-    menus[1].title = "Help"; menus[1].items = help_items;
-    wk_menu(w, menus, 2);
+    menus[1].title = "Edit"; menus[1].items = edit_items;
+    menus[2].title = "Format"; menus[2].items = format_items;
+    menus[3].title = "Help"; menus[3].items = help_items;
+    wk_menu(w, menus, 4);
     if (!room(n, 1)) { wk_close(w); return; }
     empty(n);
     if (path) open_file(w, path, 1);
@@ -7286,6 +11891,7 @@ static void note_destroy(int w) {
 }
 
 int notepad_open(char *path) {
+    if (!cfg_read) cfg_load();
     ui_cpy(about_item, "About ");
     ui_ncat(about_item, notepad_name, 64);
     ui_cpy(about_title, about_item);
@@ -7295,30 +11901,88 @@ int notepad_open(char *path) {
     return wk_open(&notepad_class, buf, 560, 400, 0, path);
 }
 
-// line and column of a buffer position
-static int line_of(struct note *n, int pos, int *col) {
-    int i, line, start;
-    line = 0; start = 0;
-    i = 0;
-    while (i < pos) { if (n->text[i] == 10) { ++line; start = i + 1; } ++i; }
-    *col = pos - start;
-    return line;
+// ---- rows: the lines as they are drawn --------------------------------------------
+//
+// Without Word Wrap a row is a line. With it, a line wider than the
+// window folds onto the rows below: after the last space that fits (a
+// space just past the edge is the fold itself, and not drawn), or where
+// the row is full if it has none. A row is known by where it starts; the
+// next starts where it ends, or past the newline or space it ended at. A
+// position is on the row it is at or after whose next is past it: the end
+// of a line is on its last row, a fold's position on the row after.
+
+static int wcols;      // a row's columns while folding (the window's, as it last drew); 0 not folding
+
+static void lay(struct note *n) { wcols = wrap ? n->cols : 0; }
+
+// where the row from S ends, and where the next starts (past the text: len + 1)
+static int row_end(struct note *n, int s, int *next) {
+    int e, k;
+    e = s;
+    while (e < n->len && n->text[e] != 10 && (!wcols || e < s + wcols)) ++e;
+    if (e >= n->len || n->text[e] == 10 || n->text[e] == ' ') { *next = e + 1; return e; }
+    k = e;
+    while (k > s && n->text[k - 1] != ' ') --k;
+    if (k > s) e = k;
+    *next = e;
+    return e;
 }
 
-// the buffer position of a line, and of a column in it (clamped to the line)
-static int pos_of(struct note *n, int line, int col) {
-    int i, l;
-    i = 0; l = 0;
-    while (i < n->len && l < line) { if (n->text[i] == 10) ++l; ++i; }
-    while (col > 0 && i < n->len && n->text[i] != 10) { ++i; --col; }
-    return i;
+// the row a buffer position is on, and its column there
+static int row_of(struct note *n, int pos, int *col) {
+    int s, next, row;
+    s = 0; row = 0;
+    while (1) {
+        row_end(n, s, &next);
+        if (pos < next || next > n->len) { *col = pos - s; return row; }
+        s = next; ++row;
+    }
+    return row;
 }
 
-static int lines(struct note *n) {
-    int i, l;
-    l = 1; i = 0;
-    while (i < n->len) { if (n->text[i] == 10) ++l; ++i; }
-    return l;
+// where row R starts (the last row's start, past the last)
+static int row_start(struct note *n, int r) {
+    int s, next;
+    s = 0;
+    while (r > 0) {
+        row_end(n, s, &next);
+        if (next > n->len) return s;
+        s = next; --r;
+    }
+    return s;
+}
+
+// the buffer position at a column of row R, the nearest the row has
+static int row_pos(struct note *n, int r, int col) {
+    int s, e, next;
+    s = row_start(n, r);
+    e = row_end(n, s, &next);
+    if (col < 0) col = 0;
+    if (s + col > e) col = e - s;
+    if (s + col >= next) col = next - 1 - s;     // folded where it was full: its last character
+    return s + col;
+}
+
+static int row_count(struct note *n) {
+    int s, next, r;
+    s = 0; r = 1;
+    while (1) {
+        row_end(n, s, &next);
+        if (next > n->len) return r;
+        s = next; ++r;
+    }
+    return r;
+}
+
+// the longest line, which the bar across scrolls over
+static int widest(struct note *n) {
+    int i, start, w;
+    w = 0; start = 0; i = 0;
+    while (i <= n->len) {
+        if (i == n->len || n->text[i] == 10) { if (i - start > w) w = i - start; start = i + 1; }
+        ++i;
+    }
+    return w;
 }
 
 static void insert(struct note *n, int c) {
@@ -7341,110 +12005,300 @@ static void erase(struct note *n, int at) {
     n->modified = 1;
 }
 
+// ---- the selection, and the clipboard ------------------------------------------
+
+static int sel0(struct note *n) { return n->anchor < n->caret ? n->anchor : n->caret; }
+static int sel1(struct note *n) { return n->anchor < n->caret ? n->caret : n->anchor; }
+static int has_sel(struct note *n) { return n->anchor != n->caret && n->anchor >= 0 && n->anchor <= n->len; }
+
+// the selection taken out of the text: 1 if there was one
+static int cut_sel(struct note *n) {
+    int a, b, i;
+    if (!has_sel(n)) { n->anchor = n->caret; return 0; }
+    a = sel0(n); b = sel1(n);
+    i = a;
+    while (i + (b - a) <= n->len) { n->text[i] = n->text[i + (b - a)]; ++i; }
+    n->len = n->len - (b - a);
+    n->caret = a; n->anchor = a;
+    n->modified = 1;
+    return 1;
+}
+
+static void copy_sel(struct note *n) { if (has_sel(n)) wk_clip_set(n->text + sel0(n), sel1(n) - sel0(n)); }
+
+// the clipboard's text at the caret, in place of the selection (its
+// carriage returns dropped: a line ends in a newline here)
+static void paste(struct note *n) {
+    char *c;
+    int cn, k, m, i;
+    c = wk_clip_get(&cn);
+    if (cn <= 0) return;
+    if (!room(n, cn)) return;
+    cut_sel(n);
+    m = 0;
+    k = 0;
+    while (k < cn) { if (c[k] != 13 && c[k]) ++m; ++k; }
+    i = n->len;
+    while (i >= n->caret) { n->text[i + m] = n->text[i]; --i; }
+    k = 0;
+    while (k < cn) { if (c[k] != 13 && c[k]) { n->text[n->caret] = c[k]; ++n->caret; } ++k; }
+    n->len = n->len + m;
+    n->anchor = n->caret;
+    n->modified = 1;
+}
+
 static void note_draw(int w, int cw, int ch, int focused) {
     struct note *n;
-    int rows, cols, i, line, y, start, cl, cc, total;
+    int rows, cols, i, row, y, start, end, next, cr, cc, a, b, k, hb, left;
     n = N(w);
+    hb = !wrap;                                    // the bar across
+    if (n->fb.on) {
+        ui_find_draw(&n->fb, 0, ch - UI_FIND_H, cw, focused);
+        ch = ch - UI_FIND_H;                       // the text above the find bar
+    }
     d_rect(0, 0, cw, ch, C_WHITE);
     d_bevel(0, 0, cw, ch, B_SUNKEN);
-    rows = (ch - 6) / NCH;
-    cols = (cw - 26) / NCW;
-    cl = line_of(n, n->caret, &cc);
-    if (cl < n->top) n->top = cl;
-    if (cl >= n->top + rows) n->top = cl - rows + 1;
-    // walk to the first line shown, then draw line by line
-    i = pos_of(n, n->top, 0);
-    line = n->top;
+    rows = (ch - 6 - (hb ? 16 : 0)) / nch;
+    cols = (cw - 26) / ncw;
+    if (rows < 1) rows = 1;
+    if (cols < 1) cols = 1;
+    n->rows = rows; n->cols = cols;
+    lay(n);
+    cr = row_of(n, n->caret, &cc);
+    if (cr < n->top) n->top = cr;
+    if (cr >= n->top + rows) n->top = cr - rows + 1;
+    n->maxw = hb ? widest(n) : 0;
+    if (hb) {
+        // across, the view follows the caret only when it has moved (or
+        // Word Wrap has just gone off), so the bar can be scrolled away from it
+        if (n->caret != n->lcaret || n->lwrap) {
+            if (cc < n->left) n->left = cc;
+            if (cc >= n->left + cols) n->left = cc - cols + 1;
+        }
+        if (n->left > n->maxw + 1 - cols) n->left = n->maxw + 1 - cols;
+        if (n->left < 0) n->left = 0;
+    } else n->left = 0;
+    n->lcaret = n->caret;
+    n->lwrap = wrap;
+    left = n->left;
+    // walk to the first row shown, then draw row by row
+    i = row_start(n, n->top);
+    row = n->top;
     y = 4;
-    while (line < n->top + rows && i <= n->len) {
+    while (row < n->top + rows && i <= n->len) {
         start = i;
-        while (i < n->len && n->text[i] != 10) ++i;
-        if (i > start) d_textn(4, y, C_DARK, NFONT, F_MONO, NCW, n->text + start, i - start > cols ? cols : i - start);
-        if (focused && line == cl && cc <= cols) d_rect(4 + cc * NCW, y, 1, NCH - 1, C_DARK);
-        y = y + NCH;
-        ++line;
-        if (i >= n->len) break;
-        ++i;
+        end = row_end(n, start, &next);
+        k = end - start - left;
+        if (k > cols) k = cols;
+        if (k > 0) d_textn(4, y, C_DARK, nfs, nfont, ncw, n->text + start + left, k);
+        // the selection's part of the row, white on the selection's colour
+        if (has_sel(n) && sel0(n) < next && sel1(n) > start) {
+            a = sel0(n) > start ? sel0(n) - start : 0;
+            b = sel1(n) < next ? sel1(n) - start : next - start;   // past the end: its newline or fold, a cell wide
+            a = a - left; b = b - left;
+            if (a < 0) a = 0;
+            if (b > cols) b = cols;
+            if (b > a) {
+                d_rect(4 + a * ncw, y, (b - a) * ncw, nch - 1, C_SEL);
+                k = (b < end - start - left ? b : end - start - left) - a;
+                if (k > 0) d_textn(4 + a * ncw, y, C_WHITE, nfs, nfont, ncw, n->text + start + left + a, k);
+            }
+        }
+        if (focused && !n->fb.keys && row == cr && cc >= left && cc - left <= cols) d_rect(4 + (cc - left) * ncw, y, 1, nch - 1, C_DARK);
+        y = y + nch;
+        ++row;
+        i = next;
     }
-    total = lines(n);
-    ui_scrollbar(cw - 18, 2, ch - 4, total, rows, n->top);
+    ui_scrollbar(cw - 18, 2, ch - 4 - (hb ? 16 : 0), row_count(n), rows, n->top);
+    if (hb) {
+        ui_hscrollbar(2, ch - 18, cw - 20, n->maxw + 1, cols, left);
+        d_rect(cw - 18, ch - 18, 16, 16, C_FACE);
+    }
+}
+
+// the buffer position under a point of the text, the nearest on its row
+static int pos_at(struct note *n, int x, int y) {
+    int col, row;
+    col = (x - 4 + ncw / 2) / ncw;
+    if (col < 0) col = 0;
+    row = (y - 4) / nch;
+    if (row < 0) row = 0;
+    return row_pos(n, n->top + row, n->left + col);
 }
 
 static void note_mouse(int w, int ev, int x, int y, int b) {
     struct note *n;
-    int rows, t, col, cw, ch;
+    int rows, t, cw, ch, hb;
     n = N(w);
     wk_size(w, &cw, &ch);
-    rows = (ch - 6) / NCH;
+    lay(n);
+    hb = !wrap;
+    rows = n->rows > 0 ? n->rows : 1;
+    if (n->fb.on) {
+        ch = ch - UI_FIND_H;                       // the text's, above the find bar
+        if (ev != E_WHEEL && ev != E_MOVE && ev != E_UP && (t = ui_find_mouse(&n->fb, ev, x, y, 0, ch, cw)) >= 0) {
+            find_act(w, t);
+            return;
+        }
+        if (ev == E_DOWN) n->fb.keys = 0;          // a click in the text: the keys are its again
+    }
     if (ev == E_WHEEL) {
         n->top = n->top + b * 3;
-        if (n->top > lines(n) - rows) n->top = lines(n) - rows;
+        if (n->top > row_count(n) - rows) n->top = row_count(n) - rows;
         if (n->top < 0) n->top = 0;
         // keep the caret on screen, as editors do when they scroll
-        n->caret = pos_of(n, n->top + (rows / 2), 0);
+        n->caret = row_pos(n, n->top + (rows / 2), 0);
+        n->anchor = n->caret;
         return;
     }
+    if (ev == E_UP) { n->dragging = 0; return; }
     if (ev == E_MOVE) {
         t = ui_scroll_drag(cw - 18, 2, y);
-        if (t >= 0) { n->top = t; n->caret = pos_of(n, t, 0); }
+        if (t >= 0) { n->top = t; n->caret = row_pos(n, t, 0); n->anchor = n->caret; return; }
+        t = ui_scroll_drag(2, ch - 18, x);
+        if (t >= 0) { n->left = t; wk_invalidate(w, 0, 0, 0, 0); return; }
+        // a selection being dragged out
+        if (n->dragging && (t = pos_at(n, x, y)) != n->caret) {
+            n->caret = t;
+            row_of(n, n->caret, &n->want_col);
+            wk_invalidate(w, 0, 0, 0, 0);
+        }
         return;
     }
     if (ev != E_DOWN) return;
-    t = ui_scroll_click(x, y, cw - 18, 2, ch - 4, lines(n), rows, n->top);
-    if (t >= 0) { n->top = t; n->caret = pos_of(n, t, 0); return; }
-    col = (x - 4 + NCW / 2) / NCW;
-    if (col < 0) col = 0;
-    n->caret = pos_of(n, n->top + (y - 4) / NCH, col);
-    line_of(n, n->caret, &n->want_col);
+    t = ui_scroll_click(x, y, cw - 18, 2, ch - 4 - (hb ? 16 : 0), row_count(n), rows, n->top);
+    if (t >= 0) { n->top = t; n->caret = row_pos(n, t, 0); n->anchor = n->caret; return; }
+    if (hb && (t = ui_hscroll_click(x, y, 2, ch - 18, cw - 20, n->maxw + 1, n->cols, n->left)) >= 0) { n->left = t; return; }
+    n->caret = pos_at(n, x, y);
+    if (!(wk.mods & M_SHIFT)) n->anchor = n->caret;      // Shift+click: the selection to here
+    n->dragging = 1;
+    row_of(n, n->caret, &n->want_col);
 }
 
 static void note_command(int w, int id);
 
+// ---- Find --------------------------------------------------------------------------
+
+// The next match (DIR 1) after the selection's start -- from it, when
+// HERE, as the text to find is typed -- or the one before it (-1), round
+// past the end or the top; selected, or the bar says there is none.
+static void find(int w, int dir, int here) {
+    struct note *n;
+    int m, s0, p, k;
+    n = N(w);
+    m = ui_len(n->fb.text);
+    if (!m) { ui_find_open(&n->fb, 0, 0); return; }   // nothing to look for yet: ask
+    s0 = has_sel(n) ? sel0(n) : n->caret;
+    if (dir > 0) p = here || !has_sel(n) ? s0 : s0 + 1;
+    else p = s0 - 1;
+    n->fb.note[0] = 0; n->fb.bad = 0;
+    k = 0;
+    while (k <= n->len + 1) {
+        if (dir > 0 && p + m > n->len) { p = 0; ui_find_say(&n->fb, "Wrapped to the top", 0); }
+        if (dir < 0 && p < 0) { p = n->len - m; ui_find_say(&n->fb, "Wrapped to the bottom", 0); }
+        if (p >= 0 && ui_find_at(&n->fb, n->text + p, n->len - p)) {
+            n->anchor = p; n->caret = p + m;
+            row_of(n, n->caret, &n->want_col);
+            return;
+        }
+        p = p + dir;
+        ++k;
+    }
+    ui_find_say(&n->fb, "Not found", 1);
+}
+
+// what the find bar asked for
+static void find_act(int w, int a) {
+    if (a == UF_NEXT) find(w, 1, 0);
+    else if (a == UF_PREV) find(w, 0 - 1, 0);
+    else if (a == UF_TYPED) find(w, 1, 1);
+    wk_invalidate(w, 0, 0, 0, 0);
+}
+
+// Find: the bar, with the selection to look for if it is one short line
+static void find_open(int w) {
+    struct note *n;
+    n = N(w);
+    ui_find_open(&n->fb, has_sel(n) ? n->text + sel0(n) : 0, has_sel(n) ? sel1(n) - sel0(n) : 0);
+    wk_invalidate(w, 0, 0, 0, 0);
+}
+
 static void note_key(int w, int down, int code, int ch, int mods) {
     struct note *n;
-    int line, col, was;
+    int row, col, was, moved;
     if (!down) return;
     n = N(w);
     was = n->modified;
+    if ((mods & M_CTRL) && (ch == 'f' || ch == 'F' || code == 'F')) { find_open(w); return; }
+    if (code == KEY_F3) { if (!n->fb.text[0]) find_open(w); else find(w, (mods & M_SHIFT) ? 0 - 1 : 1, 0); return; }
+    if (n->fb.on && n->fb.keys) { find_act(w, ui_find_key(&n->fb, code, ch, mods)); return; }
+    if (code == KEY_ESC && n->fb.on) { n->fb.on = 0; return; }
+    if (ui_key_copy(code, ch, mods)) { note_command(w, WK_CMD(1, E_COPY)); return; }
+    if (ui_key_cut(code, ch, mods)) { note_command(w, WK_CMD(1, E_CUT)); return; }
+    if (ui_key_paste(code, ch, mods)) { note_command(w, WK_CMD(1, E_PASTE)); return; }
     if (mods & M_CTRL) {
         if (ch == 's' || ch == 'S' || code == 'S') note_command(w, WK_CMD(0, N_SAVE));
         else if (ch == 'o' || ch == 'O' || code == 'O') note_command(w, WK_CMD(0, N_OPEN));
         else if (ch == 'n' || ch == 'N' || code == 'N') note_command(w, WK_CMD(0, N_NEW));
+        else if (ch == 'a' || ch == 'A' || code == 'A') note_command(w, WK_CMD(1, E_ALL));
         return;
     }
-    line = line_of(n, n->caret, &col);
-    if (code == KEY_LEFT) { if (n->caret > 0) --n->caret; line_of(n, n->caret, &n->want_col); }
-    else if (code == KEY_RIGHT) { if (n->caret < n->len) ++n->caret; line_of(n, n->caret, &n->want_col); }
-    else if (code == KEY_UP) { if (line > 0) n->caret = pos_of(n, line - 1, n->want_col); }
-    else if (code == KEY_DOWN) n->caret = pos_of(n, line + 1, n->want_col);
-    else if (code == KEY_HOME) { n->caret = pos_of(n, line, 0); n->want_col = 0; }
-    else if (code == KEY_END) { n->caret = pos_of(n, line, 100000); line_of(n, n->caret, &n->want_col); }
-    else if (code == KEY_PGUP) n->caret = pos_of(n, line > 20 ? line - 20 : 0, n->want_col);
-    else if (code == KEY_PGDN) n->caret = pos_of(n, line + 20, n->want_col);
-    else if (code == KEY_BACK) { if (n->caret > 0) { --n->caret; erase(n, n->caret); } line_of(n, n->caret, &n->want_col); }
-    else if (code == KEY_DEL) erase(n, n->caret);
-    else if (code == KEY_ENTER) { insert(n, 10); n->want_col = 0; }
-    else if (code == KEY_TAB) { insert(n, ' '); insert(n, ' '); insert(n, ' '); insert(n, ' '); line_of(n, n->caret, &n->want_col); }
-    else if (ch >= 32 && ch < 127) { insert(n, ch); line_of(n, n->caret, &n->want_col); }
+    lay(n);
+    row = row_of(n, n->caret, &col);
+    // the moving keys, by rows: with Shift they take the selection along
+    moved = 1;
+    if (code == KEY_LEFT) { if (n->caret > 0) --n->caret; row_of(n, n->caret, &n->want_col); }
+    else if (code == KEY_RIGHT) { if (n->caret < n->len) ++n->caret; row_of(n, n->caret, &n->want_col); }
+    else if (code == KEY_UP) { if (row > 0) n->caret = row_pos(n, row - 1, n->want_col); }
+    else if (code == KEY_DOWN) n->caret = row_pos(n, row + 1, n->want_col);
+    else if (code == KEY_HOME) { n->caret = row_pos(n, row, 0); n->want_col = 0; }
+    else if (code == KEY_END) { n->caret = row_pos(n, row, 100000); row_of(n, n->caret, &n->want_col); }
+    else if (code == KEY_PGUP) n->caret = row_pos(n, row > 20 ? row - 20 : 0, n->want_col);
+    else if (code == KEY_PGDN) n->caret = row_pos(n, row + 20, n->want_col);
+    else moved = 0;
+    if (moved) { if (!(mods & M_SHIFT)) n->anchor = n->caret; return; }
+    // the editing keys: a selection is what they delete, or what typing replaces
+    if (code == KEY_BACK) { if (!cut_sel(n) && n->caret > 0) { --n->caret; erase(n, n->caret); } row_of(n, n->caret, &n->want_col); }
+    else if (code == KEY_DEL) { if (!cut_sel(n)) erase(n, n->caret); }
+    else if (code == KEY_ENTER) { cut_sel(n); insert(n, 10); n->want_col = 0; }
+    else if (code == KEY_TAB) { cut_sel(n); insert(n, ' '); insert(n, ' '); insert(n, ' '); insert(n, ' '); row_of(n, n->caret, &n->want_col); }
+    else if (ch >= 32 && ch < 127) { cut_sel(n); insert(n, ch); row_of(n, n->caret, &n->want_col); }
+    n->anchor = n->caret;
     if (n->modified != was) retitle(w);
 }
 
 static void save_as(int w, struct note *n) {
     ui_ncpy(n->ask, n->path[0] ? n->path : notepad_untitled, WK_PATH);
-    if (notepad_filebox) wk_filebox(w, D_SAVEAS, 1, "*", n->ask, WK_PATH);
+    if (notepad_filebox) wk_filebox(w, D_SAVEAS, 1, notepad_filter, n->ask, WK_PATH);
     else wk_inputbox(w, D_SAVEAS, "Save As", "Save as:", n->ask, WK_PATH);
 }
 
 static void note_command(int w, int id) {
     struct note *n;
-    int item;
+    int item, was;
     n = N(w);
+    lay(n);
     item = id % WK_CMD_STEP;
-    if (id / WK_CMD_STEP == 1) { wk_msgbox(w, 0, about_title, notepad_about, WK_OK); return; }
+    if (id / WK_CMD_STEP == 3) { wk_msgbox(w, 0, about_title, notepad_about, WK_OK); return; }
+    if (id / WK_CMD_STEP == 2) { format_pick(item); return; }
+    if (id / WK_CMD_STEP == 1) {
+        was = n->modified;
+        if (item == E_COPY || item == E_CUT) copy_sel(n);
+        if (item == E_CUT || item == E_DELETE) cut_sel(n);
+        else if (item == E_PASTE) paste(n);
+        else if (item == E_ALL) { n->anchor = 0; n->caret = n->len; }
+        else if (item == E_FIND) find_open(w);
+        else if (item == E_FNEXT) find(w, 1, 0);
+        else if (item == E_FPREV) find(w, 0 - 1, 0);
+        row_of(n, n->caret, &n->want_col);
+        if (n->modified != was) retitle(w);
+        wk_invalidate(w, 0, 0, 0, 0);
+        return;
+    }
     if (item == N_NEW) { empty(n); n->path[0] = 0; retitle(w); }
     else if (item == N_OPEN) {
         ui_ncpy(n->ask, n->path[0] ? n->path : notepad_home, WK_PATH);
-        if (notepad_filebox) wk_filebox(w, D_OPEN, 0, "*", n->ask, WK_PATH);
+        if (notepad_filebox) wk_filebox(w, D_OPEN, 0, notepad_filter, n->ask, WK_PATH);
         else wk_inputbox(w, D_OPEN, "Open", "File to open:", n->ask, WK_PATH);
     } else if (item == N_SAVE) {
         if (!n->path[0]) save_as(w, n);
@@ -7470,7 +12324,8 @@ static void note_answer(int w, int dialog, int yes) {
 static int note_pointer(int w, int x, int y) {
     int cw, ch;
     wk_size(w, &cw, &ch);
-    return x < cw - 18 ? PTR_TEXT : PTR_ARROW;
+    if (N(w)->fb.on) { if (y >= ch - UI_FIND_H) return PTR_ARROW; ch = ch - UI_FIND_H; }
+    return x < cw - 18 && (wrap || y < ch - 18) ? PTR_TEXT : PTR_ARROW;
 }
 
 struct wk_class notepad_class = {
@@ -7704,8 +12559,9 @@ static void bez_frame() {
 // ---- Marquee ----
 static int mq_x, mq_y, mq_hue;
 static char *mq_text;
+char *saver_marquee = "C4IX -- built upon Robert Swierczek's C4";   // Marquee's line: the shell's to change
 static void mq_place() { mq_x = wk.sw; mq_y = rnd_range(40, wk.sh - 100); }
-static void mq_start() { mq_text = "C4IX -- built upon Robert Swierczek's C4"; mq_place(); mq_hue = rnd_range(0, 1535); }
+static void mq_start() { mq_text = saver_marquee; mq_place(); mq_hue = rnd_range(0, 1535); }
 static void mq_frame() {
     d_rect(0, 0, wk.sw, wk.sh, 0);
     d_textn(mq_x, mq_y, hue_rgb(mq_hue, 255), 48, F_BOLD, 0, mq_text, 0 - 1);
@@ -7876,6 +12732,7 @@ static void newline(struct tgrid *t) {
         memcpy(t->sb + t->sbhead * COLS, t->cell, COLS * sizeof(int));
         t->sbhead = (t->sbhead + 1) % SB_ROWS;
         if (t->sbn < SB_ROWS) ++t->sbn;
+        ++t->nscr;
         // looking back: stay on the same rows while new ones arrive
         if (t->view && t->view < t->sbn) ++t->view;
         if (t->llen) --t->erow;
@@ -7968,9 +12825,12 @@ static void csi(struct tgrid *t, int fin) {
     if (t->cy >= ROWS) t->cy = ROWS - 1;
 }
 
+// The window is drawn again only when the grid changed. The ESC _ commands
+// are the window's code's (t->apc), which says itself what they changed: a
+// game's frames come that way, each only a part of the window (term.c's 'p').
 void tg_feed(struct tgrid *t, char *buf, int n) {
-    int i, c;
-    i = 0;
+    int i, c, grid;
+    i = 0; grid = 0;
     while (i < n) {
         c = buf[i] & 255;
         ++i;
@@ -8000,8 +12860,10 @@ void tg_feed(struct tgrid *t, char *buf, int n) {
             if (c == ';') { if (!t->np) t->np = 1; if (t->np < 8) { t->param[t->np] = 0; ++t->np; } continue; }
             t->esc = 0;
             if (c >= 64 && c <= 126) csi(t, c);
+            grid = 1;
             continue;
         }
+        if (c != 27) grid = 1;
         if (c == 27) t->esc = 1;
         else if (c == 10) newline(t);              // a tty turns \n into \r\n
         else if (c == 13) { t->cx = 0; t->wrap = 0; }
@@ -8009,7 +12871,7 @@ void tg_feed(struct tgrid *t, char *buf, int n) {
         else if (c == 9) { t->cx = (t->cx + 8) & ~7; if (t->cx >= COLS) t->cx = COLS - 1; }
         else if (c >= 32) putc_(t, c);
     }
-    wk_invalidate(t->win, 0, 0, 0, 0);
+    if (grid) wk_invalidate(t->win, 0, 0, 0, 0);
 }
 
 void tg_echo(struct tgrid *t, int c) { tmp[0] = c; tg_feed(t, tmp, 1); }
@@ -8194,6 +13056,103 @@ void tg_mouse(struct tgrid *t, int ev, int x, int y) {
     }
 }
 
+// ---- the selection --------------------------------------------------------------------
+//
+// Lines are numbered from the grid's first: line nscr is the grid's top
+// row now, and those before it are the scrollback's, as far back as it
+// keeps. A selection is two places, where it began and where it was
+// dragged to, in whichever order; a run takes every column between them,
+// a block only the columns between theirs.
+
+// the cells of line l, or 0 for one the scrollback no longer holds
+static int *row_of(struct tgrid *t, int l) {
+    int d;
+    d = t->nscr - l;
+    if (d > 0) {
+        if (d > t->sbn) return 0;
+        return t->sb + ((t->sbhead - d + SB_ROWS) % SB_ROWS) * COLS;
+    }
+    if (0 - d >= ROWS) return 0;
+    return t->cell + (0 - d) * COLS;
+}
+
+// the columns of line l the selection takes, a to b: 0 if none
+static int sel_cols(struct tgrid *t, int l, int *a, int *b) {
+    int l0, c0, l1, c1, k;
+    if (!t->sel) return 0;
+    l0 = t->sl0; c0 = t->sc0; l1 = t->sl1; c1 = t->sc1;
+    if (l1 < l0 || (l1 == l0 && c1 < c0)) { k = l0; l0 = l1; l1 = k; k = c0; c0 = c1; c1 = k; }
+    if (l < l0 || l > l1) return 0;
+    if (t->sel == 2) { *a = c0 < c1 ? c0 : c1; *b = c0 < c1 ? c1 : c0; return 1; }
+    *a = l == l0 ? c0 : 0;
+    *b = l == l1 ? c1 : COLS - 1;
+    return 1;
+}
+
+void tg_select(struct tgrid *t, int ev, int x, int y, int block) {
+    int l, c, r;
+    c = x / CW; r = y / CH;
+    if (x < 0 || c < 0) c = 0;
+    if (c >= COLS) c = COLS - 1;
+    if (y < 0 || r < 0) r = 0;
+    if (r >= ROWS) r = ROWS - 1;
+    l = t->nscr - t->view + r;
+    if (ev == E_DOWN) {
+        if (t->sel) wk_invalidate(t->win, 0, 0, 0, 0);
+        t->sel = 0;
+        t->selecting = block ? 2 : 1;
+        t->sl0 = l; t->sc0 = c; t->sl1 = l; t->sc1 = c;
+    } else if (ev == E_MOVE && t->selecting) {
+        if (l == t->sl1 && c == t->sc1) return;
+        t->sl1 = l; t->sc1 = c;
+        t->sel = l != t->sl0 || c != t->sc0 ? t->selecting : 0;
+        wk_invalidate(t->win, 0, 0, 0, 0);
+    } else if (ev == E_UP) t->selecting = 0;
+}
+
+void tg_select_all(struct tgrid *t) {
+    t->sel = 1; t->selecting = 0;
+    t->sl0 = t->nscr - t->sbn; t->sc0 = 0;
+    t->sl1 = t->nscr + ROWS - 1; t->sc1 = COLS - 1;
+    wk_invalidate(t->win, 0, 0, 0, 0);
+}
+
+void tg_unselect(struct tgrid *t) {
+    if (t->sel) wk_invalidate(t->win, 0, 0, 0, 0);
+    t->sel = 0; t->selecting = 0;
+}
+
+// Each line's text, its trailing spaces gone, a newline between lines;
+// everything (all) ends at its last line with something on it.
+int tg_copy(struct tgrid *t, int all) {
+    int l, la, lb, a, b, n, end, start, v, *row;
+    char *s;
+    if (all) { la = t->nscr - t->sbn; lb = t->nscr + ROWS - 1; }
+    else {
+        if (!t->sel) return 0;
+        la = t->sl0 < t->sl1 ? t->sl0 : t->sl1;
+        lb = t->sl0 < t->sl1 ? t->sl1 : t->sl0;
+    }
+    if (!(s = wk_alloc((lb - la + 1) * (COLS + 1) + 1))) return 0;
+    n = 0; end = 0;
+    l = la;
+    while (l <= lb) {
+        a = 0; b = COLS - 1;
+        if ((row = row_of(t, l)) && (all || sel_cols(t, l, &a, &b))) {
+            start = n;
+            while (a <= b) { v = row[a] & 255; s[n] = v >= 32 && v < 127 ? v : ' '; ++n; ++a; }
+            while (n > start && s[n - 1] == ' ') --n;
+            if (!all) end = n;
+            else if (n > start) end = n + 1;
+            if (l < lb || all) { s[n] = 10; ++n; }
+        }
+        ++l;
+    }
+    wk_clip_set(s, end);
+    wk_free(s);
+    return 1;
+}
+
 // ---- drawing ----------------------------------------------------------------------
 
 // Work out row r's runs: its rectangles of background, and its stretches
@@ -8297,6 +13256,17 @@ void tg_draw(struct tgrid *t, int ox, int oy, int focused) {
         }
         ++r;
     }
+    // the selection, as a console shows it: black on the text's grey
+    r = 0;
+    while (t->sel && r < ROWS) {
+        if (sel_cols(t, t->nscr - v + r, &k, &n) && (run = row_of(t, t->nscr - v + r))) {
+            d_rect(ox + k * CW, oy + r * CH, (n - k + 1) * CW, CH, tg_pal[7]);
+            g = 0;
+            while (k + g <= n) { tmp[g] = run[k + g] & 255; if (tmp[g] < 32 || tmp[g] > 126) tmp[g] = ' '; ++g; }
+            d_textn(ox + k * CW, oy + r * CH + 1, C_DARK, TG_FONT, F_MONO, CW, tmp, g);
+        }
+        ++r;
+    }
     if (focused && t->cursor && !t->view)
         d_rect(ox + t->cx * CW, oy + t->cy * CH + CH - 3, CW, 2, tg_pal[7]);
 }
@@ -8359,10 +13329,11 @@ int ui_ends(char *s, char *suffix) {
 char *ui_num(char *buf, int v) {
     char t[24];
     int n, neg, k;
+    // digits from the remainders, kept positive: INT_MIN has no positive
+    // twin to negate into
     neg = v < 0;
-    if (neg) v = 0 - v;
     n = 0;
-    while (1) { t[n] = '0' + v % 10; ++n; v = v / 10; if (!v) break; }
+    while (1) { k = v % 10; if (k < 0) k = 0 - k; t[n] = '0' + k; ++n; v = v / 10; if (!v) break; }
     k = 0;
     if (neg) { buf[k] = '-'; ++k; }
     while (n) { --n; buf[k] = t[n]; ++k; }
@@ -8439,7 +13410,13 @@ void ui_scrollbar(int x, int y, int h, int total, int visible, int top) {
 // desktop ends it when the button comes up. The thumb keeps its place
 // under the pointer: a pixel of travel is (total - visible) / (track -
 // thumb) lines.
-static int sd_on, sd_x, sd_y, sd_y0, sd_top0, sd_range, sd_span;
+//
+// A press on an arrow or on the track either side of the thumb is said
+// to repeat (ui_scroll_repeat): the desktop presses it again while the
+// button is held (wmcore.c), so a held arrow keeps scrolling, as a held
+// track pages until the thumb reaches the pointer.
+static int sd_on, sd_x, sd_y, sd_y0, sd_top0, sd_range, sd_span, sr_on;
+static int sp_on, sp_x0, sp_pos0;     // a splitter's drag (below)
 
 int ui_scroll_drag(int x, int y, int py) {
     int top;
@@ -8450,8 +13427,9 @@ int ui_scroll_drag(int x, int y, int py) {
     if (top < 0) top = 0;
     return top;
 }
-int ui_scroll_active() { return sd_on; }
-void ui_scroll_end() { sd_on = 0; }
+int ui_scroll_active() { return sd_on || sp_on; }
+int ui_scroll_repeat() { return sr_on; }
+void ui_scroll_end() { sd_on = 0; sr_on = 0; sp_on = 0; }
 
 // A bar across, for what is wider than its pane: the same parts turned
 // on their side. LEFT is the first column shown of TOTAL, VISIBLE at once.
@@ -8484,16 +13462,16 @@ int ui_hscroll_click(int px, int py, int x, int y, int w, int total, int visible
     if (!ui_hit(px, py, x, y, w, 16)) return 0 - 1;
     max = total - visible;
     if (max < 0) max = 0;
-    if (px < x + 16) left = left - 1;
-    else if (px >= x + w - 16) left = left + 1;
+    if (px < x + 16) { left = left - 1; sr_on = 1; }
+    else if (px >= x + w - 16) { left = left + 1; sr_on = 1; }
     else {
         track = w - 32;
         if (total <= visible) return left;
         tw = (track * visible) / total;
         if (tw < 10) tw = 10;
         tx = x + 16 + ((track - tw) * left) / (total - visible);
-        if (px < tx) left = left - visible;
-        else if (px >= tx + tw) left = left + visible;
+        if (px < tx) { left = left - visible; sr_on = 1; }
+        else if (px >= tx + tw) { left = left + visible; sr_on = 1; }
         else { sd_on = 1; sd_x = x; sd_y = y; sd_y0 = px; sd_top0 = left; sd_range = total - visible; sd_span = track - tw; }
     }
     if (left > max) left = max;
@@ -8507,16 +13485,16 @@ int ui_scroll_click(int px, int py, int x, int y, int h, int total, int visible,
     if (!ui_hit(px, py, x, y, 16, h)) return 0 - 1;
     max = total - visible;
     if (max < 0) max = 0;
-    if (py < y + 16) top = top - 1;
-    else if (py >= y + h - 16) top = top + 1;
+    if (py < y + 16) { top = top - 1; sr_on = 1; }
+    else if (py >= y + h - 16) { top = top + 1; sr_on = 1; }
     else {
         track = h - 32;
         if (total <= visible) return top;
         th = (track * visible) / total;
         if (th < 10) th = 10;
         ty = y + 16 + ((track - th) * top) / (total - visible);
-        if (py < ty) top = top - visible;
-        else if (py >= ty + th) top = top + visible;
+        if (py < ty) { top = top - visible; sr_on = 1; }
+        else if (py >= ty + th) { top = top + visible; sr_on = 1; }
         else { sd_on = 1; sd_x = x; sd_y = y; sd_y0 = py; sd_top0 = top; sd_range = total - visible; sd_span = track - th; }
     }
     if (top > max) top = max;
@@ -8552,9 +13530,40 @@ int ui_field_hit(int px, int x, int w, char *text, int caret) {
 }
 
 // Editing keys for a field's text; returns 1 if the text changed.
+static int ctrl_letter(int code, int ch, int mods, int c) {
+    return (mods & M_CTRL) && !(mods & M_ALT) && (ch == c || ch == c + 32 || code == c);
+}
+int ui_key_copy(int code, int ch, int mods) { return ctrl_letter(code, ch, mods, 'C') || ((mods & M_CTRL) && code == KEY_INS); }
+int ui_key_cut(int code, int ch, int mods) { return ctrl_letter(code, ch, mods, 'X') || ((mods & M_SHIFT) && code == KEY_DEL); }
+int ui_key_paste(int code, int ch, int mods) { return ctrl_letter(code, ch, mods, 'V') || ((mods & M_SHIFT) && code == KEY_INS); }
+
+// A field has no selection: copy and cut take the whole of it, and a
+// paste puts the clipboard's first line in at the caret, as much as fits.
 int ui_field_key(char *text, int max, int *caret, int code, int ch, int mods) {
-    int n, i;
+    int n, i, k, cn;
+    char *c;
     n = ui_len(text);
+    if (ui_key_copy(code, ch, mods) || ui_key_cut(code, ch, mods)) {
+        wk_clip_set(text, n);
+        if (!ui_key_cut(code, ch, mods) || !n) return 0;
+        text[0] = 0; *caret = 0;
+        return 1;
+    }
+    if (ui_key_paste(code, ch, mods)) {
+        c = wk_clip_get(&cn);
+        k = 0;
+        while (k < cn && c[k] != 10 && c[k] != 13 && n < max) {
+            if (c[k] >= 32 && c[k] <= 126) {
+                i = n + 1;
+                while (i > *caret) { text[i] = text[i - 1]; --i; }
+                text[*caret] = c[k];
+                *caret = *caret + 1;
+                ++n;
+            }
+            ++k;
+        }
+        return k > 0;
+    }
     if (code == KEY_LEFT) { if (*caret > 0) *caret = *caret - 1; return 0; }
     if (code == KEY_RIGHT) { if (*caret < n) *caret = *caret + 1; return 0; }
     if (code == KEY_HOME) { *caret = 0; return 0; }
@@ -8648,6 +13657,145 @@ void ui_header(int x, int y, int *widths, char **labels, int n) {
         ++k;
     }
 }
+
+// A check box: a sunken white square, ticked when ON, its label beside it.
+void ui_check(int x, int y, char *label, int on) {
+    int k;
+    d_rect(x, y, 13, 13, C_WHITE);
+    if (ui_style == S_FLAT) d_recto(x, y, 13, 13, on ? C_TITLE : C_SHADOW);
+    else d_bevel(x, y, 13, 13, B_SUNKEN);
+    if (on) {
+        k = 0;
+        while (k < 7) { d_rect(x + 3 + k, y + (k < 2 ? 5 + k : 9 - k), 2, 2, ui_style == S_FLAT ? C_TITLE : C_DARK); ++k; }
+    }
+    d_text(x + 18, y, C_DARK, F_SANS, label);
+}
+
+// ---- a splitter ------------------------------------------------------------------
+//
+// The bar between two panes side by side, dragged across to size them.
+// ui_split_click starts a drag when the bar is pressed, from POS (what the
+// window sizes by it, the left pane's width); each move then asks
+// ui_split_drag what the pointer has made that, which the window keeps
+// within its limits. The drag ends when the button comes up, as a thumb's
+// does (ui_scroll_end), and follows the pointer out of the window
+// meanwhile (ui_scroll_active).
+
+void ui_splitter(int x, int y, int w, int h) {
+    int k;
+    d_rect(x, y, w, h, C_FACE);
+    d_rect(x, y, 1, h, C_LIGHT);
+    d_rect(x + w - 1, y, 1, h, C_SHADOW);
+    // a grip in the middle, three dots down
+    k = 0;
+    while (k < 3 && h > 30) { d_rect(x + w / 2 - 1, y + h / 2 - 7 + k * 6, 2, 2, C_SHADOW); ++k; }
+}
+int ui_split_click(int px, int py, int x, int y, int w, int h, int pos) {
+    if (!ui_hit(px, py, x, y, w, h)) return 0;
+    sp_on = 1; sp_x0 = px; sp_pos0 = pos;
+    return 1;
+}
+int ui_split_drag(int px) { return sp_on ? sp_pos0 + px - sp_x0 : 0 - 1; }
+int ui_split_active() { return sp_on; }
+
+// ---- a find bar --------------------------------------------------------------------
+//
+// Under an editor's text: what to find, Next and Previous, Match case, a
+// note of what the last look found, and a box to close it. The editor
+// keeps one (struct ui_find) and does the looking; the bar takes the
+// keys while it has them (f->keys) and the clicks on it, and says what
+// they asked for: UF_NEXT, UF_PREV, UF_TYPED (the text changed, to look
+// again from where the match is), UF_CLOSE. Enter is Next, Shift+Enter
+// Previous, F3 and Shift+F3 the same, Esc closes, Alt+C turns Match case
+// over.
+
+// where its parts are, for a bar W wide at (x, y)
+static int fb_fx, fb_fw, fb_nx, fb_px, fb_cx, fb_tx, fb_xx;
+static void fb_layout(int x, int w) {
+    fb_fw = w < 620 ? w - 470 : 150;          // narrower, so the note keeps some room
+    if (fb_fw < 80) fb_fw = 80;
+    fb_fx = x + 40;
+    fb_nx = fb_fx + fb_fw + 6;                 // Next
+    fb_px = fb_nx + 50;                        // Previous
+    fb_cx = fb_px + 70;                        // Match case
+    fb_tx = fb_cx + 92;                        // the note
+    fb_xx = x + w - 22;                        // the close box
+}
+
+void ui_find_open(struct ui_find *f, char *seed, int n) {
+    int k;
+    f->on = 1; f->keys = 1;
+    if (seed && n > 0 && n < UI_FIND_MAX) {
+        k = 0;
+        while (k < n && seed[k] != 10 && seed[k] != 13) ++k;
+        if (k == n) { memcpy(f->text, seed, n); f->text[n] = 0; }
+    }
+    f->caret = ui_len(f->text);
+    f->note[0] = 0; f->bad = 0;
+}
+
+void ui_find_say(struct ui_find *f, char *note, int bad) {
+    ui_ncpy(f->note, note, 64);
+    f->bad = bad;
+}
+
+void ui_find_draw(struct ui_find *f, int x, int y, int w, int focused) {
+    fb_layout(x, w);
+    d_rect(x, y, w, UI_FIND_H, C_FACE);
+    d_rect(x, y, w, 1, C_SHADOW);
+    d_rect(x, y + 1, w, 1, C_LIGHT);
+    d_text(x + 6, y + 8, C_DARK, F_SANS, "Find:");
+    ui_field(fb_fx, y + 4, fb_fw, f->text, f->caret, focused && f->keys);
+    ui_button(fb_nx, y + 4, 46, 22, "Next", 0, 0);
+    ui_button(fb_px, y + 4, 66, 22, "Previous", 0, 0);
+    ui_check(fb_cx, y + 9, "Match case", f->mcase);
+    if (f->note[0] && fb_tx < fb_xx - 12) {
+        d_clip(fb_tx, y + 2, fb_xx - 4 - fb_tx, UI_FIND_H - 2);
+        d_text(fb_tx, y + 8, f->bad ? 0xc00000 : C_DARK, F_SANS, f->note);
+        d_clip_end();
+    }
+    ui_button(fb_xx, y + 5, 18, 18, "x", 0, 0);
+}
+
+int ui_find_mouse(struct ui_find *f, int ev, int px, int py, int x, int y, int w) {
+    if (!f->on || !ui_hit(px, py, x, y, w, UI_FIND_H)) return 0 - 1;
+    if (ev != E_DOWN) return UF_NONE;
+    fb_layout(x, w);
+    f->keys = 1;
+    if (ui_hit(px, py, fb_fx, y + 4, fb_fw, 22)) { f->caret = ui_field_hit(px, fb_fx, fb_fw, f->text, f->caret); return UF_NONE; }
+    if (ui_hit(px, py, fb_nx, y + 4, 46, 22)) return UF_NEXT;
+    if (ui_hit(px, py, fb_px, y + 4, 66, 22)) return UF_PREV;
+    if (ui_hit(px, py, fb_cx, y + 6, 88, 18)) { f->mcase = !f->mcase; return UF_NONE; }
+    if (ui_hit(px, py, fb_xx, y + 5, 18, 18)) { f->on = 0; f->keys = 0; return UF_CLOSE; }
+    return UF_NONE;
+}
+
+int ui_find_key(struct ui_find *f, int code, int ch, int mods) {
+    if (code == KEY_ESC) { f->on = 0; f->keys = 0; return UF_CLOSE; }
+    if (code == KEY_ENTER || code == KEY_F3) return (mods & M_SHIFT) ? UF_PREV : UF_NEXT;
+    if ((mods & M_ALT) && (ch == 'c' || ch == 'C' || code == 'C')) { f->mcase = !f->mcase; return UF_NONE; }
+    if (ui_field_key(f->text, UI_FIND_MAX - 1, &f->caret, code, ch, mods)) { f->note[0] = 0; f->bad = 0; return UF_TYPED; }
+    return UF_NONE;
+}
+
+// Does what F looks for start at S, which has N characters to look at?
+int ui_find_at(struct ui_find *f, char *s, int n) {
+    int m, k, a, b;
+    m = ui_len(f->text);
+    if (!m || m > n) return 0;
+    k = 0;
+    while (k < m) {
+        a = s[k] & 255; b = f->text[k] & 255;
+        if (a != b) {
+            if (f->mcase) return 0;
+            if (a >= 'A' && a <= 'Z') a = a + 32;
+            if (b >= 'A' && b <= 'Z') b = b + 32;
+            if (a != b) return 0;
+        }
+        ++k;
+    }
+    return 1;
+}
 // wmcore.c -- the window kit's window manager. docs/grin-plan.md 3.5.
 //
 // The windows: a list in the order they opened, and through the same
@@ -8667,8 +13815,15 @@ static int next_id;
 static int drag, drag_dx, drag_dy;        // a window's number while its title bar is dragged
 static int sizing, size_edges, size_w0, size_h0, size_x0, size_y0, size_wx, size_wy;
 static int down_win, down_t, down_x, down_y;   // for double clicks
+// a press on a scroll bar's arrow or track (ui_scroll_repeat), pressed
+// again while the button is held: after REP_WAIT, every REP_MS
+enum { REP_WAIT = 400, REP_MS = 50 };
+static int rep_win, rep_x, rep_y, rep_b, rep_next;
 static int menu_win, menu_idx, menu_hot;  // an open drop-down: its window, menu (-1 the
-                                          // system menu), hot item
+                                          // system menu, M_POPUP a pop-up's), hot item
+static char **pop_items;                  // a pop-up menu's items (wk_popup), and where it is
+static int pop_x, pop_y;
+enum { M_POPUP = 0 - 2 };
 static int ptr_shape;
 static char *clip_text;
 static int clip_n;
@@ -8818,6 +13973,27 @@ void wk_menu(int i, struct wk_menu *m, int n) {
     w->menus = m; w->nmenus = n;
 }
 
+static int drop_h(char **items);
+static int drop_w(char **items);
+
+// A pop-up menu at (x, y) in window I's client area, kept on the screen:
+// drawn and chosen from as a drop-down is, the item chosen reaching the
+// window's command hook as WK_CMD(WK_POPUP, item).
+void wk_popup(int i, int x, int y, char **items) {
+    struct win *w;
+    int h;
+    if (!(w = win_get(i)) || !items || !items[0]) return;
+    pop_items = items;
+    pop_x = wk_client_x(w) + x; pop_y = wk_client_y(w) + y;
+    h = drop_h(items);
+    if (pop_x + drop_w(items) > wk.sw) pop_x = wk.sw - drop_w(items);
+    if (pop_y + h > wk.sh) pop_y = pop_y - h;
+    if (pop_y < 0) pop_y = 0;
+    if (pop_x < 0) pop_x = 0;
+    menu_win = i; menu_idx = M_POPUP; menu_hot = 0 - 1;
+    wk_full = 1;
+}
+
 void wk_place(int i, int x, int y, int ww, int hh) {
     struct win *w;
     if (!(w = win_get(i))) return;
@@ -8858,6 +14034,19 @@ void wk_invalidate(int i, int x, int y, int ww, int hh) {
     if (!(w = win_get(i)) || w->min) return;
     if (ww <= 0) wk_dirty_rect(w->x, w->y, w->w, w->h);
     else wk_dirty_rect(wk_client_x(w) + x, wk_client_y(w) + y, ww, hh);
+}
+
+// ... and a part of them that its draw paints whole: a program's frame,
+// which in a game is every frame. When that is all the damage at the
+// next redraw (redraw_part), the window's own draw and the windows above
+// it make the picture there: the desktop, the windows under it and its
+// own frame are covered, and are not drawn. One part, the latest: two
+// windows' frames make damage that is in neither, and all is drawn.
+static int cover_win, cover_x, cover_y, cover_w, cover_h;
+void wk_invalidate_covered(int i, int x, int y, int ww, int hh) {
+    if (ww <= 0 || hh <= 0) { wk_invalidate(i, 0, 0, 0, 0); return; }
+    cover_win = i; cover_x = x; cover_y = y; cover_w = ww; cover_h = hh;
+    wk_invalidate(i, x, y, ww, hh);
 }
 
 // A dialog's answer: to the window that asked, raised first, or to the
@@ -8926,6 +14115,11 @@ int wk_next_timer() {
         }
         w = w->next;
     }
+    if (rep_win) {
+        d = rep_next - now;
+        if (d < 0) d = 0;
+        if (best < 0 || d < best) best = d;
+    }
     return best;
 }
 
@@ -8961,6 +14155,7 @@ int wk_menu_x(struct win *w, int k) {
 static int count_items(char **items) { int n; n = 0; while (items[n]) ++n; return n; }
 
 static char **drop_items(struct win *w) {
+    if (menu_idx == M_POPUP) return pop_items;
     if (menu_idx < 0) return w->dialog ? sys_dlg_items : sys_items;
     return w->menus[menu_idx].items;
 }
@@ -8970,17 +14165,60 @@ static int drop_h(char **items) {
     k = 0; while (items[k]) { if (items[k][0] == '-') mh = mh + 8; else mh = mh + 20; ++k; }
     return mh;
 }
+// A column's width: DROP_W, or the widest item's (text widths are guesses,
+// six pixels a letter, as elsewhere), the check mark's room and a margin
+static int drop_w(char **items) {
+    int k, n, w;
+    w = DROP_W;
+    k = 0;
+    while (items[k]) {
+        n = ui_len(items[k]);
+        if (items[k][0] == WK_CHECKED) --n;
+        if (n * 6 + 34 > w) w = n * 6 + 34;
+        ++k;
+    }
+    return w > wk.sw ? wk.sw : w;
+}
+// A drop-down taller than the screen below its top breaks into columns, as
+// 3.1's long menus did: item k's column and its top, from the drop-down's
+// top y; *cols, the columns, and *tall, the tallest one's height
+static int drop_lay(char **items, int y, int k, int *iy, int *cols, int *tall) {
+    int i, c, cy, h, limit, at;
+    limit = wk.sh - y - 3;
+    if (limit < 40) limit = 40;
+    c = 0; cy = 3; *tall = 6; at = 0;
+    i = 0;
+    while (items[i]) {
+        h = items[i][0] == '-' ? 8 : 20;
+        if (cy + h > limit && cy > 3) { c = c + 1; cy = 3; }
+        if (i == k) { at = c; *iy = y + cy; }
+        cy = cy + h;
+        if (cy + 3 > *tall) *tall = cy + 3;
+        ++i;
+    }
+    *cols = c + 1;
+    return at;
+}
 // A minimised window's control menu opens over its icon.
+static int drop_y(struct win *w);
 static int drop_x(struct win *w) {
-    int x, y;
+    int x, y, k, cw;
+    if (menu_idx == M_POPUP) return pop_x;
     if (menu_idx < 0 && w->min && wk_icons_on) {
         wk_icon_xy(w, &x, &y);
         return x + DROP_W > wk.sw ? wk.sw - DROP_W : x;
     }
-    return menu_idx < 0 ? w->x + BORDER : wk_menu_x(w, menu_idx);
+    if (menu_idx < 0) return w->x + BORDER;
+    // a menu bar's: kept on the screen, its columns and all
+    x = wk_menu_x(w, menu_idx);
+    drop_lay(drop_items(w), drop_y(w), 0 - 1, &y, &k, &cw);
+    cw = drop_w(drop_items(w)) * k;
+    if (x + cw > wk.sw) x = wk.sw - cw;
+    return x < 0 ? 0 : x;
 }
 static int drop_y(struct win *w) {
     int x, y;
+    if (menu_idx == M_POPUP) return pop_y;
     if (menu_idx < 0 && w->min && wk_icons_on) {
         wk_icon_xy(w, &x, &y);
         y = y - drop_h(drop_items(w));
@@ -8989,25 +14227,35 @@ static int drop_y(struct win *w) {
     return menu_idx < 0 ? w->y + BORDER + TITLE_H + 1 : w->y + BORDER + TITLE_H + 1 + MENU_H;
 }
 
+// the check mark left of a WK_CHECKED item
+static void check_mark(int x, int y, int rgb) {
+    int k;
+    k = 0;
+    while (k < 7) { gui_rect(x + k, y + (k < 2 ? 3 + k : 7 - k), 2, 2, rgb); ++k; }
+}
+
 static void draw_dropdown() {
     struct win *w;
     char **items;
-    int n, x, y, k, iy, mh;
+    char *s;
+    int n, x, y, k, iy, mh, dw, cols, cx;
     if (!(w = win_get(menu_win))) return;
     items = drop_items(w);
     n = count_items(items);
     x = drop_x(w); y = drop_y(w);
-    mh = drop_h(items);
-    gui_rect(x, y, DROP_W, mh, C_FACE);
-    d_bevel(x, y, DROP_W, mh, B_RAISED);
-    iy = y + 3;
+    dw = drop_w(items);
+    drop_lay(items, y, 0 - 1, &iy, &cols, &mh);
+    gui_rect(x, y, dw * cols, mh, C_FACE);
+    d_bevel(x, y, dw * cols, mh, B_RAISED);
     k = 0;
     while (k < n) {
-        if (items[k][0] == '-') { gui_rect(x + 3, iy + 3, DROP_W - 6, 1, C_SHADOW); gui_rect(x + 3, iy + 4, DROP_W - 6, 1, C_LIGHT); iy = iy + 8; }
+        cx = x + drop_lay(items, y, k, &iy, &cols, &mh) * dw;
+        if (items[k][0] == '-') { gui_rect(cx + 3, iy + 3, dw - 6, 1, C_SHADOW); gui_rect(cx + 3, iy + 4, dw - 6, 1, C_LIGHT); }
         else {
-            if (k == menu_hot) gui_rect(x + 3, iy, DROP_W - 6, 20, C_SEL);
-            d_text(x + 20, iy + 4, k == menu_hot ? C_WHITE : C_DARK, F_SANS, items[k]);
-            iy = iy + 20;
+            if (k == menu_hot) gui_rect(cx + 3, iy, dw - 6, 20, C_SEL);
+            s = items[k];
+            if (s[0] == WK_CHECKED) { check_mark(cx + 7, iy + 5, k == menu_hot ? C_WHITE : C_DARK); ++s; }
+            d_text(cx + 20, iy + 4, k == menu_hot ? C_WHITE : C_DARK, F_SANS, s);
         }
         ++k;
     }
@@ -9017,17 +14265,16 @@ static void draw_dropdown() {
 static int dropdown_hit(int px, int py) {
     struct win *w;
     char **items;
-    int n, x, k, iy;
+    int n, x, y, k, iy, dw, cx, cols, mh;
     if (!(w = win_get(menu_win))) return 0 - 1;
     items = drop_items(w);
     n = count_items(items);
-    x = drop_x(w);
-    if (px < x || px >= x + DROP_W) return 0 - 1;
-    iy = drop_y(w) + 3;
+    x = drop_x(w); y = drop_y(w);
+    dw = drop_w(items);
     k = 0;
     while (k < n) {
-        if (items[k][0] == '-') iy = iy + 8;
-        else { if (py >= iy && py < iy + 20) return k; iy = iy + 20; }
+        cx = x + drop_lay(items, y, k, &iy, &cols, &mh) * dw;
+        if (items[k][0] != '-' && px >= cx && px < cx + dw && py >= iy && py < iy + 20) return k;
         ++k;
     }
     return 0 - 1;
@@ -9084,14 +14331,46 @@ static void draw_window(struct win *w, int focused) {
     if (l->grip) l->grip(w);
 }
 
-static void draw_windows() {
-    struct win *w, *f;
+// The windows that reach into the damage, back to front, from w up
+static void draw_windows_from(struct win *w) {
+    struct win *f;
     f = focus();
-    w = zbot;
     while (w) {
         if (!w->min && wk_in_damage(w->x, w->y, w->w, w->h)) draw_window(w, w == f);
         w = w->above;
     }
+}
+static void draw_windows() { draw_windows_from(zbot); }
+
+// The window whose covered part (wk_invalidate_covered) holds all the
+// damage, inside its client area as it is now; or 0
+static struct win *covering() {
+    struct win *w;
+    int x0, y0, x1, y1, cx, cy;
+    if (!cover_win || !(w = win_get(cover_win)) || w->min || !w->cls->draw) return 0;
+    cx = wk_client_x(w); cy = wk_client_y(w);
+    x0 = cx + cover_x; y0 = cy + cover_y;
+    x1 = x0 + cover_w; y1 = y0 + cover_h;
+    if (x0 < cx) x0 = cx;
+    if (y0 < cy) y0 = cy;
+    if (x1 > cx + wk_client_w(w)) x1 = cx + wk_client_w(w);
+    if (y1 > cy + wk_client_h(w)) y1 = cy + wk_client_h(w);
+    if (wk_dmg_x0 < x0 || wk_dmg_y0 < y0 || wk_dmg_x1 > x1 || wk_dmg_y1 > y1) return 0;
+    return w;
+}
+
+// Its client area alone (and the size grip over its corner)
+static void draw_client(struct win *w, int focused) {
+    struct wk_look *l;
+    int cx, cy, cw, ch;
+    l = wk_look();
+    cx = wk_client_x(w); cy = wk_client_y(w); cw = wk_client_w(w); ch = wk_client_h(w);
+    wk_client_clip(cx, cy, cw, ch);
+    wk_origin(cx, cy);
+    w->cls->draw(w->id, cw, ch, focused);
+    wk_origin(0, 0);
+    wk_noclip();
+    if (l->grip) l->grip(w);
 }
 
 static void redraw() {
@@ -9106,25 +14385,35 @@ static void redraw() {
     gui_show();
     wk_full = 0;
     wk_dmg = 0;
+    cover_win = 0;
 }
 
 // Only the damage: the desktop under it, the windows that reach into it,
 // back to front, and what the shell has over them. A menu open is drawn
 // over everything, so that is still the whole scene.
 static void redraw_part() {
+    struct win *c;
     if (menu_win || (shell && shell->popup && shell->popup())) { redraw(); return; }
     wk_part = 1;
     wk_origin(0, 0);
     wk_noclip();
-    if (shell && shell->desktop) shell->desktop(wk_dmg_x0, wk_dmg_y0, wk_dmg_x1 - wk_dmg_x0, wk_dmg_y1 - wk_dmg_y0);
-    else gui_rect(wk_dmg_x0, wk_dmg_y0, wk_dmg_x1 - wk_dmg_x0, wk_dmg_y1 - wk_dmg_y0, C_DESK);
-    wk_icons_draw();
-    draw_windows();
+    // a program's frame, and nothing else: that window's picture, and
+    // whatever is over it
+    if ((c = covering())) {
+        draw_client(c, c == focus());
+        draw_windows_from(c->above);
+    } else {
+        if (shell && shell->desktop) shell->desktop(wk_dmg_x0, wk_dmg_y0, wk_dmg_x1 - wk_dmg_x0, wk_dmg_y1 - wk_dmg_y0);
+        else gui_rect(wk_dmg_x0, wk_dmg_y0, wk_dmg_x1 - wk_dmg_x0, wk_dmg_y1 - wk_dmg_y0, C_DESK);
+        wk_icons_draw();
+        draw_windows();
+    }
     if (shell && shell->front) shell->front();
     gui_noclip();
     gui_show();
     wk_part = 0;
     wk_dmg = 0;
+    cover_win = 0;
 }
 
 int wk_dirty() { return wk_full || wk_dmg; }
@@ -9210,7 +14499,8 @@ static void mouse_down(int x, int y, int button) {
         menu_win = 0; wk_full = 1;
         if (!w) return;
         if (k >= 0) {
-            if (i < 0) sys_command(w, k);
+            if (i == M_POPUP) { if (w->cls->command) w->cls->command(w->id, WK_CMD(WK_POPUP, k)); }
+            else if (i < 0) sys_command(w, k);
             else if (w->cls->command) w->cls->command(w->id, WK_CMD(i, k));
             return;
         }
@@ -9273,7 +14563,12 @@ static void mouse_down(int x, int y, int button) {
                 return;
             }
             if (ht == HT_CLIENT) {
+                ui_scroll_end();
                 client_mouse(w, E_DOWN, x, y, button);
+                // another button (a right click, which may open a pop-up):
+                // never half of a double click
+                if (button) { down_win = 0; wk_full = 1; return; }
+                if (ui_scroll_repeat()) { rep_win = i; rep_x = x; rep_y = y; rep_b = button; rep_next = wk_now() + REP_WAIT; }
                 if (w->used && down_win == i && t - down_t < 500 && x - down_x < 5 && down_x - x < 5 && y - down_y < 5 && down_y - y < 5) {
                     client_mouse(w, E_DBL, x, y, button);
                     down_win = 0;
@@ -9369,7 +14664,7 @@ static void mouse_move(int x, int y, int b) {
 
 static void mouse_up(int x, int y, int b) {
     struct win *w;
-    drag = 0; sizing = 0;
+    drag = 0; sizing = 0; rep_win = 0;
     ui_scroll_end();
     pointer(x, y);
     if ((w = focus())) client_mouse(w, E_UP, x, y, b);
@@ -9433,4 +14728,15 @@ void wk_tick() {
     w = first;
     while (w) { if (w->used && w->cls->idle) w->cls->idle(w->id); w = w->next; }
     timers();
+    // a scroll bar's arrow or track held: pressed again, as long as it
+    // still says it repeats (the thumb may have come under the pointer)
+    if (rep_win && wk_now() - rep_next >= 0) {
+        if ((w = win_get(rep_win)) && w->used && !w->min) {
+            ui_scroll_end();
+            client_mouse(w, E_DOWN, rep_x, rep_y, rep_b);
+            if (!ui_scroll_repeat()) rep_win = 0;
+            rep_next = wk_now() + REP_MS;
+            wk_invalidate(w->id, 0, 0, 0, 0);
+        } else rep_win = 0;
+    }
 }

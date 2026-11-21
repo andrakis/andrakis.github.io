@@ -7,7 +7,47 @@
 // travels through the program's own stdout and stdin, as escape
 // sequences the Terminal understands, so there is nothing to
 // attach to and nothing to clean up: when the program ends, the window
-// is a terminal again.
+// is a terminal again. The desktop can also start a program in a window
+// that is only its canvas, with no shell (Go > Games, and Files, for the
+// games whose /etc/desktop.apps line says `window`): there the window
+// closes when the program ends. A program run in the background from a
+// Terminal (`quake --window &`) gets a window of its own as well, since
+// the Terminal's canvas, and its input, are its foreground job's: the
+// shell gives a background job no input, and win_open() then asks the
+// desktop for a window, whose pipes become the program's stdin and stdout.
+//
+// win_here() says whether there is a window to open: stdin and stdout
+// are pipes, as the desktop gives a program in either kind. On the
+// console there is none, and a game takes the display instead
+// (display.h); the Ace of Penguins and the Puzzles decide so.
+//
+// In a window of its own a program may have a menu bar: win_menu(n,
+// title) starts menu n (0 starts the bar again), win_item(n, label) adds
+// an item to it -- "-" a rule, a leading '*' a check mark -- and a pick
+// comes back from win_poll as WIN_MENU, ev[0] the menu and ev[1] the
+// item, rules counted. The window grows by the bar's height, and the
+// canvas and its coordinates stay as they were. A Terminal, which has a
+// menu of its own, ignores both: there the keys are the game's controls.
+//
+// A game steered by the mouse calls win_lock(1): over its canvas the
+// pointer then says "click to capture", and a click locks the mouse to the
+// display, as a game on the whole display has it (the page's Pointer
+// Lock). From then on the mouse's motion comes from win_poll as WIN_REL,
+// ev[0] and ev[1] how far it moved in the canvas's pixels, ev[2] the
+// buttons held (a bit each, 1 the left); its buttons as WIN_DOWN and
+// WIN_UP, at a place the desktop keeps by adding up the motion. Esc lets
+// the mouse go (the page sees to that), and so does the window losing the
+// focus, or the program ending or giving up its canvas; win_lock(0) stops
+// asking. A click locks it again.
+//
+// The canvas is WIN_W by WIN_H however big the window is, unless the
+// program calls win_resizable(): then the canvas is the whole of the
+// window's inside, a window of the program's own may be dragged to any
+// size, and a maximised one fills the screen. Each new size comes from
+// win_poll as WIN_SIZE, ev[0] and ev[1] the canvas's width and height,
+// once the window has held still at it for a moment; from then on the
+// mouse is in those pixels, and a framebuffer drawn that size is shown as
+// it is. (A smaller one is still scaled to fill the canvas.)
 //
 // Built by either compiler. The functions are in window.c, beside this
 // file, which this includes unless C4IX_SHARED is defined: then a program
@@ -30,10 +70,20 @@
 //     t x,y,rgb,size;text  text        p                 show the frame
 //     f addr,w,h,pitch,pal  an 8-bit framebuffer, scaled to the canvas
 //     q         be a terminal again
+//     O pid;title  a window of the program's own, for task pid: its
+//               pipes are given to it as fds 0 and 1 (SYS_FDGIVE); sent
+//               by a program whose stdin has ended, a background job's
+//     M n;title  menu n of the menu bar (0: the bar anew)
+//     z 1       the canvas follows the window's size (z 0: WIN_W by WIN_H)
+//     I n;label  an item of menu n ("-" a rule, "*label" checked)
+//     L 1       lock the mouse to this canvas at a click (L 0: do not)
 //   window -> program   ESC E <kind> <a>,<b>,<c> newline
-//     s w,h,0 the canvas size   d x,y,button  u x,y,button
+//     s w,h,0 the canvas size (after o, and each time it changes)
+//     d x,y,button  u x,y,button   (button: 0 left, 1 middle, 2 right)
 //     m x,y,buttons             k keycode,char,mods
+//     r dx,dy,buttons  the mouse moved while locked to the canvas (L 1)
 //     K keycode,char,mods (let go)  f 0,0,0 (a framebuffer frame was drawn)
+//     c menu,item,0 (an item of the menu bar picked)
 
 #ifndef __C4IX_WINDOW_H
 #define __C4IX_WINDOW_H 1
@@ -42,7 +92,7 @@ enum {
     WIN_W = 640, WIN_H = 400,
     // win_poll's answers
     WIN_NONE = 0, WIN_DOWN = 1, WIN_UP = 2, WIN_MOVE = 3, WIN_KEY = 4, WIN_SIZE = 5,
-    WIN_KEYUP = 6, WIN_FRAME = 7,
+    WIN_KEYUP = 6, WIN_FRAME = 7, WIN_MENU = 8, WIN_REL = 9,
     // key codes (browser keyCodes) and modifiers
     WIN_K_ESC = 27, WIN_K_ENTER = 13, WIN_K_LEFT = 37, WIN_K_UP = 38,
     WIN_K_RIGHT = 39, WIN_K_DOWN = 40, WIN_SHIFT = 1, WIN_CTRL = 2, WIN_ALT = 4,
@@ -58,6 +108,7 @@ void win_num(int v);
 void win_begin(int op);
 void win_end();
 void win_arg(int v, int more);
+int win_here();
 int win_open(char *title);
 void win_close();
 void win_clear(int rgb);
@@ -68,6 +119,10 @@ void win_disc(int x, int y, int r, int rgb);
 void win_text(int x, int y, int rgb, int size, char *s);
 void win_present();
 void win_fb(char *pixels, int w, int h, int pitch, int *pal);
+void win_menu(int n, char *title);
+void win_item(int n, char *label);
+void win_resizable();
+void win_lock(int on);
 void win_sleep(int ms);
 int win_poll(int *ev);
 

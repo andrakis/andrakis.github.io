@@ -145,6 +145,39 @@ const TAP_MAX = 16 << 20;        // held bytes past this are dropped (and counte
 // (C4KE, C4IX's vfsload, a c4cc program's open()). A drive nobody has
 // told looks from the root, as before there were directories.
 export const DISK_DIRS = 0x1e0;  // w: list address -> r: directories in the selected drive's list
+// Where the loader put the program (libjs's boot.js): its code, its data,
+// where the file's data ends and its BSS begins, and its end -- what a
+// Linux kernel's linker symbols say (_text, _sdata, __bss_start, _end).
+// C4IX's boot report prints them. 0 where nothing says. Announced by
+// C4I_C4MJS, never probed.
+export const IMG_CODE = 0x1f0;   // r
+export const IMG_DATA = 0x1f4;   // r
+export const IMG_BSS  = 0x1f8;   // r
+export const IMG_END  = 0x1fc;   // r
+// The boot stack (libjs's boot.js): the megabyte under the arguments at the
+// top of memory, where the machine starts the program. A kernel that has
+// left it for good -- C4IX, once its kernel task has a stack of its own --
+// writes 1 to STACK_GUARD, and from then on libjs halts the machine at any
+// read or write there, naming the pc and the address (libjs/c4m.js,
+// guardHit): whatever reaches it is a program run off the end of the heap.
+// 0 lifts the guard, for the way back at shutdown. Where nothing keeps a
+// boot stack, all three read 0 and the write does nothing. Announced by
+// C4I_C4MJS, never probed.
+export const STACK_BASE  = 0x1e4;  // r: the boot stack's lowest address
+export const STACK_TOP   = 0x1e8;  // r: one past its highest: the arguments start here
+export const STACK_GUARD = 0x1ec;  // r/w: 1 while the boot stack is guarded
+
+// Swap (libjs, docs/c4ix-mmu.md 11): pages a kernel puts out of memory,
+// kept by the host, a page to a numbered slot -- memory beyond the arena,
+// which lasts as long as the machine does. Behind registers of their own,
+// so that nothing a program does with the drives comes between a
+// kernel's swap and its stores. Announced by C4I_C4MJS, never probed.
+export const SWAP_ADDR = 0x11c;   // w: the page's address in memory, for the next SWAP_CMD
+export const SWAP_CMD  = 0x158;   // w: OP | SLOT << 4 -- 1 out, 2 in (and forget it), 3 forget, 4 forget
+                                  // every slot; r: the last one's 0, or -1; after 4, how many slots there are
+                                  // 5: the heap's large blocks from its top while SLOT is 1 (C4IX's frames)
+                                  // 6: r: the biggest block the heap could hand out now (C4IX's free)
+export const SWAP_PAGE = 4096;
 
 // c4_info() capability bits (c4m.c:206)
 export const C4I_WHOWROTE = 0x1000;   // the provenance port is fitted
@@ -201,7 +234,10 @@ export let OPNAMES =
   // (hw/microcode.uc); c4m itself runs only LDL, STL and POPA.
   'LDL ,LDG ,PSHL,PSHG,LEAP,IMMP,LIP ,ADDL,STL ,POPA,' +
   // F3 (89): IEEE arithmetic, src/c4bb/sim/fpu.js
-  'FPU ,';
+  'FPU ,' +
+  // 90-93: 16-bit loads and store, logical shift right (docs/c4-16bit.md),
+  // microcoded from the transfers the board already makes
+  'LH  ,LHU ,SH  ,LSR ,LCU ,';
 export const STOCK_OPNAMES = OPNAMES;
 export function setOpnames (names) { OPNAMES = names; }
 
@@ -243,6 +279,9 @@ export class Devices {
     this.onByte = opts.onByte || null;// UART TX sink: fn(byteValue)
     this.rxFifo = [];                 // keyboard bytes
     this.rxEof = false;               // Ctrl-D / end of input stream
+    this.rxStarved = false;           // the guest read the keyboard and found
+                                      // it empty: a paste's next line may go
+                                      // in (libjs/keys.js Paste)
     this.rawKbd = 0;                  // open raw keyboards; a host UI
                                       // suppresses local echo while > 0
     this.sleepMs = 0;                 // accumulated USLP time
@@ -252,6 +291,16 @@ export class Devices {
     this.status = 0;
     this.heapBase = 0;
     this.heapEnd = 0;
+    this.img = null;                  // { code, data, bss, end }: the program as loaded (IMG_*)
+    this.stackBase = 0;               // the boot stack, where the host keeps one
+    this.stackTop = 0;
+    this.stackGuard = 0;              // 1: guarded (STACK_GUARD)
+    this.onGuard = null;              // fn(): the guard changed (libjs/par.js)
+    // swap's pages, by slot (SWAP_*), up to swapSlots of them: 256 MB
+    this.swapPages = new Map();
+    this.swapSlots = opts.swapSlots ?? 65536;
+    this.swapAddr = 0;
+    this.swapResult = 0;
     this.uartActivity = 0;            // counters for the renderer
     this.diskActivity = 0;
     this.uartTxAddr = 0;              // UART block-write latch
@@ -267,6 +316,8 @@ export class Devices {
     this.drive = 0;                   // the selected drive
     this.onRescan = opts.onRescan || null;
     this.onEject = opts.onEject || null;
+    // a file written to "download:NAME", for the person (diskCreate)
+    this.onDownload = opts.onDownload || null;
     this.resetRequested = false;
     this.cyclesPerMs = opts.cyclesPerMs || CYCLES_PER_MS;
     // The real clock. hostNow is injectable so a test can pin it; by
@@ -325,9 +376,9 @@ export class Devices {
   tapDrain (n) {
     n = Math.max(0, Math.min(n | 0, this.tapLen));
     const a = this.tapAddr >>> 0;
-    if (a >= this.arena.size) return 0;
-    n = Math.min(n, this.arena.size - a);
-    for (let i = 0; i < n; i++) this.arena.write8(a + i, this.tapBuf[i]);
+    if (a < 0x1000 || (!this.arena.uwin || a < this.arena.uwin) && a >= this.arena.size) return 0;
+    if (!this.arena.uwin || a < this.arena.uwin) n = Math.min(n, this.arena.size - a);
+    this.arena.dmaWrite(a, this.tapBuf.subarray(0, n));
     this.tapBuf.copyWithin(0, n, this.tapLen);
     this.tapLen -= n;
     return n;
@@ -335,9 +386,50 @@ export class Devices {
   // fd 0 while it is fed: what is left of the feed, then end of input
   tapRead (addr, len) {
     const n = Math.max(0, Math.min(len | 0, this.tapIn.length - this.tapInPos));
-    for (let i = 0; i < n; i++) this.arena.write8(addr + i, this.tapIn[this.tapInPos + i]);
+    this.arena.dmaWrite(addr, this.tapIn.subarray(this.tapInPos, this.tapInPos + n));
     this.tapInPos += n;
     return n;
+  }
+
+  // Swap: one page between memory at SWAP_ADDR and its slot
+  swapOp (v) {
+    const op = v & 15, slot = v >>> 4, a = this.swapAddr, size = this.arena.size;
+    if (op === 4) { this.swapPages.clear(); return this.swapSlots; }
+    // 5: the heap's large blocks from its top while SLOT is 1 (heap.js
+    // setHigh): where C4IX takes its frames, away from its own blocks
+    if (op === 5) {
+      const h = this.machine && this.machine.heap;
+      if (!h || !h.setHigh) return -1;
+      h.setHigh(slot & 1);
+      return 0;
+    }
+    // 6: the biggest block the heap could hand out now (heap.js largest):
+    // one allocation bigger fails, however much is free in pieces
+    if (op === 6) {
+      const h = this.machine && this.machine.heap;
+      return h && h.largest ? h.largest() | 0 : -1;
+    }
+    if (slot >= this.swapSlots) return -1;
+    if (op === 3) { this.swapPages.delete(slot); return 0; }
+    if (a < 0x1000 || a + SWAP_PAGE > size) return -1;
+    if (op === 1) { this.swapPages.set(slot, this.arena.u8.slice(a, a + SWAP_PAGE)); return 0; }
+    if (op === 2) {
+      // a slot never written is a page never touched: zeros (C4IX hands
+      // out memory before it is used, docs/c4ix-mmu.md 11)
+      const p = this.swapPages.get(slot);
+      if (!p) { this.arena.u8.fill(0, a, a + SWAP_PAGE); return 0; }
+      this.arena.u8.set(p, a);
+      this.swapPages.delete(slot);
+      return 0;
+    }
+    return -1;
+  }
+  // A byte of a page put out, for a kernel that reaches it (c4m.js kld8)
+  swapRd8 (slot, off) { const p = this.swapPages.get(slot); return p ? p[off & 4095] : 0; }
+  swapWr8 (slot, off, v) {
+    let p = this.swapPages.get(slot);
+    if (!p) { if (slot >= this.swapSlots) return; this.swapPages.set(slot, p = new Uint8Array(SWAP_PAGE)); }
+    p[off & 4095] = v;
   }
 
   // What `files` meant before there was more than one drive. Kept as a
@@ -360,7 +452,7 @@ export class Devices {
   }
 
   diskOpen(nameAddr) {
-    const name = this.arena.cstring(nameAddr >>> 0, 256);
+    const name = this.arena.dmaCstring(nameAddr >>> 0, 256);
     if (name === '/dev/stdin' || name === '/dev/tty') {
       const fd = this.nextFd++;
       const raw = name === '/dev/tty';
@@ -378,9 +470,29 @@ export class Devices {
       this.fds.set(fd, { data: procUptime(Math.max(0, this.simMs())), pos: 0 });
       return fd;
     }
+    let data = this.diskFind(name);
+    // "NAME@OFF+LEN": LEN bytes of NAME from OFF, as a file of their own,
+    // where there is no file of the whole name. C4IX reads its unpacked
+    // root archive this way, a file at a time out of the tar it keeps on
+    // drive 1 (docs/c4ix-design.md, "The root archive, read where it is
+    // kept"). Past the end it is shorter, or empty.
+    const span = data ? null : /^(.*)@(\d+)\+(\d+)$/.exec(name);
+    if (span && (data = this.diskFind(span[1]))) {
+      const at = Math.min(+span[2], data.length);
+      data = data.subarray(at, Math.min(at + +span[3], data.length));
+    }
+    if (!data) return -1;
+    const fd = this.nextFd++;
+    this.fds.set(fd, { data, pos: 0 });
+    return fd;
+  }
+
+  // The bytes of the file NAME names ("1:name" or a name on the selected
+  // drive), or undefined
+  diskFind(name) {
     const { drv, rest } = this.resolveDrive(name);
     const media = this.drives[drv];
-    if (!media) return -1;
+    if (!media) return undefined;
     const files = media.files;
     const clean = rest.startsWith('./') ? rest.slice(2) : rest;
     let data;
@@ -402,10 +514,7 @@ export class Devices {
       const base = rest.slice(rest.lastIndexOf('/') + 1);
       data = files.get(base);
     }
-    if (!data) return -1;
-    const fd = this.nextFd++;
-    this.fds.set(fd, { data, pos: 0 });
-    return fd;
+    return data;
   }
 
   // Canonical-mode line buffering, unconditionally: a real terminal's
@@ -418,7 +527,7 @@ export class Devices {
   // Backspace, breaking line editing; waiting for \n here is what
   // keeps not-yet-committed characters available to erase.
   kbdRead(addr, len, nonblock, raw) {
-    if (this.rxFifo.length === 0) return this.rxEof ? 0 : (nonblock ? -1 : -2);
+    if (this.rxFifo.length === 0) { this.rxStarved = true; return this.rxEof ? 0 : (nonblock ? -1 : -2); }
     // A raw fd is the one caller that has opted out of line buffering,
     // so it takes whatever has arrived. Everyone else still waits for
     // the newline that commits the line.
@@ -428,8 +537,10 @@ export class Devices {
     }
     let n = 0;
     while (n < len && this.rxFifo.length) {
+      const at = this.arena.dma(addr + n, 1, true);   // before the byte leaves the queue
+      if (at < 0) break;
       const b = this.rxFifo.shift();
-      this.arena.write8(addr + n, b);
+      this.arena.write8(at, b);
       n++;
       // One line per read, for every canonical reader -- blocking or
       // not. Stopping only on the blocking path (as this did) let a
@@ -454,16 +565,31 @@ export class Devices {
       return this.tapIn ? this.tapRead(this.diskAddr, len) : this.kbdRead(this.diskAddr, len, false);
     if (!f) return -1;
     if (f.kbd) return this.kbdRead(this.diskAddr, len, f.nonblock, f.raw);
+    // what reached memory, not what was asked: a buffer that ends is a
+    // short read, and the rest is still there for the next
     const n = Math.min(len, f.data.length - f.pos);
-    for (let i = 0; i < n; i++) this.arena.write8(this.diskAddr + i, f.data[f.pos + i]);
-    f.pos += n;
-    return n;
+    const got = n > 0 ? this.arena.dmaWrite(this.diskAddr, f.data.subarray(f.pos, f.pos + n)) : 0;
+    f.pos += got;
+    return got;
   }
 
   // Create or truncate a file on a drive. A drive with no sink is a
   // pressed disc: it can be read forever and never written.
   diskCreate (nameAddr) {
-    const name = this.arena.cstring(nameAddr >>> 0, 256);
+    const name = this.arena.dmaCstring(nameAddr >>> 0, 256);
+    // "download:NAME": a file handed to the person (C4IX's download,
+    // src/c4ix/user/persist.c), written as any file is and given at its
+    // close to onDownload(NAME, bytes) -- the web page saves it where the
+    // browser keeps downloads -- and kept on no drive. -1 where the host
+    // has no one to give it to.
+    if (name.startsWith('download:')) {
+      const as = name.slice(9);
+      if (!this.onDownload || !as) return -1;
+      const media = { files: new Map(), writable: true, sink: (n, b) => { media.files.delete(n); this.onDownload(n, b); } };
+      const fd = this.nextFd++;
+      this.fds.set(fd, { w: { media, name: as, chunks: [], len: 0 } });
+      return fd;
+    }
     const { drv, rest } = this.resolveDrive(name);
     const media = this.drives[drv];
     if (!media || !media.writable || !media.sink) return -1;
@@ -487,10 +613,10 @@ export class Devices {
     const f = this.fds.get(this.diskFd);
     if (!f || !f.w) return -1;
     const n = Math.max(0, len | 0);
-    const buf = this.arena.u8.slice(this.diskAddr >>> 0, (this.diskAddr >>> 0) + n);
+    const buf = this.arena.dmaRead(this.diskAddr, n);
     f.w.chunks.push(buf);
-    f.w.len += n;
-    return n;
+    f.w.len += buf.length;
+    return buf.length;
   }
 
   // Take a file off a writable drive: out of what the machine sees at
@@ -498,12 +624,14 @@ export class Devices {
   // has one (the page's store, the CLI's directory). A drive with a sink
   // and no remove forgets the file for this session only.
   diskUnlink (nameAddr) {
-    const name = this.arena.cstring(nameAddr >>> 0, 256);
+    const name = this.arena.dmaCstring(nameAddr >>> 0, 256);
     const { drv, rest } = this.resolveDrive(name);
     const media = this.drives[drv];
     if (!media || !media.writable || !media.sink) return -1;
     const clean = this.wPath(media, rest);
     if (!media.files.has(clean)) return -1;
+    // a file the drive will not give up (C4DOS's uploads on B:, uploads.js HomeFiles)
+    if (media.files.locked && media.files.locked(clean)) return -1;
     media.files.delete(clean);
     if (media.remove) { try { media.remove(clean); } catch { return -1; } }
     return 0;
@@ -525,15 +653,12 @@ export class Devices {
   uartWrite (len) {
     const n = Math.max(0, len | 0);
     if (!n) return 0;
-    const addr = this.uartTxAddr >>> 0;
-    if (addr >= this.arena.size) return 0;
-    const end = Math.min(addr + n, this.arena.size);
-    const u8 = this.arena.u8;
-    for (let a = addr; a < end; a++) {
+    const bytes = this.arena.dmaRead(this.uartTxAddr, n);
+    for (let i = 0; i < bytes.length; i++) {
       this.uartActivity++;
-      this.conByte(u8[a]);
+      this.conByte(bytes[i]);
     }
-    return end - addr;
+    return bytes.length;
   }
 
   // Close is where a written file becomes real, in one piece: a half
@@ -567,8 +692,8 @@ export class Devices {
 
   read32(addr) {
     switch (addr) {
-      case UART_RX:    return this.rxFifo.length ? this.rxFifo.shift() : -1;
-      case UART_RXAVL: return this.rxFifo.length;
+      case UART_RX:    if (this.rxFifo.length) return this.rxFifo.shift(); this.rxStarved = true; return -1;
+      case UART_RXAVL: if (!this.rxFifo.length) this.rxStarved = true; return this.rxFifo.length;
       case UART_TXADDR: return this.uartTxAddr | 0;
       case UART_TXLEN: return this.uartTxResult | 0;
       case TIME_MS:    return this.simMs();
@@ -576,7 +701,15 @@ export class Devices {
       case CYCLE_HI:   return this.machine ? (this.machine.cycle / 0x100000000) | 0 : 0;
       case OPNAME:     return this.opnameResult | 0;
       case HEAP_BASE:  return this.heapBase | 0;
+      case IMG_CODE:   return this.img ? this.img.code | 0 : 0;
+      case IMG_DATA:   return this.img ? this.img.data | 0 : 0;
+      case IMG_BSS:    return this.img ? this.img.bss | 0 : 0;
+      case IMG_END:    return this.img ? this.img.end | 0 : 0;
       case HEAP_END:   return this.heapEnd | 0;
+      case STACK_BASE: return this.stackBase | 0;
+      case STACK_TOP:  return this.stackTop | 0;
+      case STACK_GUARD: return this.stackGuard | 0;
+      case SWAP_CMD:   return this.swapResult | 0;
       case HEAP_USED:  return this.machine && this.machine.heap ? this.machine.heap.used | 0 : 0;
       case HEAP_GEN:     return this.genHeap() ? this.machine.heap.gen | 0 : 0;
       case HEAP_RELEASE: return this.genHeap() ? this.machine.heap.released | 0 : 0;
@@ -654,7 +787,7 @@ export class Devices {
       case OPNAME: {
         // Written a pointer to a NUL/space-terminated name; look it up
         // the way c4m's __opcode does: case-insensitive 4-char match.
-        this.opnameResult = this.opcodeByName(this.arena.cstring(val >>> 0, 16));
+        this.opnameResult = this.opcodeByName(this.arena.dmaCstring(val >>> 0, 16));
         return;
       }
       case DISK_FLAGS: this.diskFlags = val | 0; return;
@@ -708,7 +841,7 @@ export class Devices {
       case DISK_UNLINK: this.diskResult = this.diskUnlink(val); return;
       case DISK_DIRS: {
         const m = this.drives[this.drive];
-        if (m) m.dirs = this.arena.cstring(val >>> 0, 1024).split(';');
+        if (m) m.dirs = this.arena.dmaCstring(val >>> 0, 1024).split(';');
         return;
       }
       case CON_TAP:  this.tapOn = (val | 0) ? 1 : 0; return;
@@ -717,8 +850,7 @@ export class Devices {
       case CON_IN: {
         const n = val | 0;
         if (n < 0) { this.tapIn = null; return; }
-        const a = this.tapAddr >>> 0;
-        this.tapIn = this.arena.u8.slice(a, Math.min(a + n, this.arena.size));
+        this.tapIn = this.arena.dmaRead(this.tapAddr, n);
         this.tapInPos = 0;
         return;
       }
@@ -756,6 +888,12 @@ export class Devices {
         return;
       case HEAP_BASE: this.heapBase = val | 0; return;
       case HEAP_END:  this.heapEnd = val | 0;  return;
+      case STACK_GUARD:
+        this.stackGuard = (val && this.stackTop > this.stackBase) ? 1 : 0;
+        if (this.onGuard) this.onGuard();
+        return;
+      case SWAP_ADDR: this.swapAddr = val >>> 0; return;
+      case SWAP_CMD:  this.swapResult = this.swapOp(val); return;
       case HEAP_GEN:     if (this.genHeap()) this.machine.heap.gen = val | 0; return;
       case HEAP_RELEASE: if (this.genHeap()) this.machine.heap.release(val | 0); return;
       case MBOX_BELL: if (this.onDoorbell) this.onDoorbell(val | 0); return;

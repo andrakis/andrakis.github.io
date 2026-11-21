@@ -92,10 +92,14 @@ int ustat(char *path, int *out)       { return __c4ix_syscall(SYS_STAT, (int)pat
 int uunlink(char *path)               { return __c4ix_syscall(SYS_UNLINK, (int)path, 0, 0); }
 int urename(char *path, char *nn)     { return __c4ix_syscall(SYS_RENAME, (int)path, (int)nn, 0); }
 int ulazyfile(char *p, char *h, int n) { return __c4ix_syscall(SYS_LAZYFILE, (int)p, (int)h, n); }
+int urelazy(char *p, char *h, int s)  { return __c4ix_syscall(SYS_RELAZY, (int)p, (int)h, s); }
 int ustack(int bytes)                 { return __c4ix_syscall(SYS_STACK, bytes, 0, 0); }
 
 int uaffinity(int id, int mask)       { return __c4ix_syscall(SYS_AFFINITY, id, mask, 0); }
 int unice(int id, int nice)           { return __c4ix_syscall(SYS_NICE, id, nice, 0); }
+int uioperm(int bits)                 { return __c4ix_syscall(SYS_IOPERM, bits, 0, 0); }
+int umapfrom(int addr, int n)         { return __c4ix_syscall(SYS_MAPFROM, addr, n, 0); }
+int ufdgive(int pid, int fd, int to)  { return __c4ix_syscall(SYS_FDGIVE, pid, fd, to); }
 
 int spawn(char *path, int argc, char **argv) {
     return __c4ix_syscall(SYS_SPAWN, (int)path, argc, (int)argv);
@@ -154,9 +158,10 @@ void __c4ix_uva_adj(int n) {
 
 // ---- column output ----
 //
-// libc4ix's printf takes no width specifiers -- a deliberate limit --
-// so anything that wants columns pads explicitly. ps and top both do,
-// and both want it to look the same.
+// These helpers come from when libc4ix's printf took no width
+// specifiers; it has since 8c53fff (uformat, below). ps and top still
+// pad through them, so both look the same, and upadcycles scales a
+// cycle count, which no printf width does.
 // These build into the shared format buffer and flush once per
 // call. Writing a character at a time would be one kernel round trip
 // per character -- fine on a host, ruinous through a trap gateway.

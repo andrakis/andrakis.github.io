@@ -34,14 +34,54 @@ void win_begin(int op) { win_ch(27); win_ch('_'); win_ch('G'); win_ch(op); }
 void win_end() { win_ch(27); win_ch('\\'); }
 void win_arg(int v, int more) { win_num(v); if (more) win_ch(','); }
 
+// 1 when stdin and stdout are both pipes, as a window of the desktop's
+// gives them: a Terminal, or one the desktop opened for the program alone.
+// SYS_FSTAT's ST_MODE (c4ix_user.h): a pipe is S_IFIFO|0666, the console
+// S_IFCHR|0666.
+int win_here() {
+    int *st, k, r;
+    st = (int *)malloc(8 * sizeof(int));
+    if (!st) return 0;
+    r = 1; k = 0;
+    while (k < 2) {
+        if (win_sys(236, k, (int)st, 8) < 0 || st[6] != 4534) r = 0;
+        k = k + 1;
+    }
+    free((char *)st);
+    return r;
+}
+
 // Become a canvas, titled. 1 on success.
+//
+// With an input that has ended, the program is a job a Terminal's shell
+// ran in the background (sh.c gives one no input, as POSIX's shell does),
+// and that Terminal's canvas is its foreground job's: it asks for a
+// window of its own instead (op O, with its task id), and the desktop
+// gives it that window's pipes as its stdin and stdout (term.c,
+// term_adopt). It waits up to 10 seconds for them; with none, 0.
 int win_open(char *title) {
+    int k;
+    // a program in a window draws too: CPU 0, unless it was pinned (sched_softpin).
+    // SYS_DISPLAY, DISP_PIN, by the gate here: c4cc builds this file into a program
+    // with no libc4ix.
+    win_sys(240, 4, 0, 0);
     if (!win_out) {
         win_out = (char *)malloc(WIN_OUTCAP + 16);
         win_in = (char *)malloc(WIN_INCAP + 16);
         if (!win_out || !win_in) return 0;
     }
     win_olen = 0; win_ilen = 0;
+    if (win_sys(221, 0, 0, 0) < 0) {                                  // SYS_AVAIL: stdin has ended
+        win_begin('O'); win_num(win_sys(209, 0, 0, 0)); win_ch(';');   // SYS_GETPID
+        win_str(title); win_end();
+        win_flush();
+        k = 0;
+        while (win_sys(221, 0, 0, 0) < 0) {
+            if (k >= 500) return 0;
+            win_sleep(20);
+            k = k + 1;
+        }
+    }
     win_begin('o'); win_ch(';'); win_str(title); win_end();
     win_flush();
     return 1;
@@ -75,6 +115,15 @@ void win_present() { win_begin('p'); win_end(); win_flush(); }
 // 256 colours (0x00RRGGBB) at pal, scaled to fill the canvas; present to
 // show it. The window reads them when it draws, and then sends WIN_FRAME:
 // draw the next frame into them only after that, or into other memory.
+// The menu bar of a window of the program's own (window.h): menu n, and an
+// item of it. Sent with the next frame.
+void win_menu(int n, char *title) { win_begin('M'); win_num(n); win_ch(';'); win_str(title); win_end(); }
+void win_item(int n, char *label) { win_begin('I'); win_num(n); win_ch(';'); win_str(label); win_end(); }
+// the canvas follows the window's size: WIN_SIZE tells each new one
+void win_resizable() { win_begin('z'); win_num(1); win_end(); win_flush(); }
+// the mouse locked to the canvas at a click, its motion as WIN_REL (on 0: not)
+void win_lock(int on) { win_begin('L'); win_num(on != 0); win_end(); win_flush(); }
+
 void win_fb(char *pixels, int w, int h, int pitch, int *pal) {
     win_begin('f'); win_arg((int)pixels, 1); win_arg(w, 1); win_arg(h, 1);
     win_arg(pitch, 1); win_arg((int)pal, 0); win_end();
@@ -84,8 +133,8 @@ void win_fb(char *pixels, int w, int h, int pitch, int *pal) {
 void win_sleep(int ms) { win_sys(220, ms, 0, 0); }                  // SYS_SLEEP
 
 // The next event, or WIN_NONE; never waits. ev[0..2] get its numbers:
-// x, y and the button for the mouse; keycode, character and modifiers
-// for a key. -1 when stdin has ended (the window was closed).
+// x, y and the button for the mouse (dx, dy and the buttons for WIN_REL);
+// keycode, character and modifiers for a key. -1 when stdin has ended (the window was closed).
 int win_poll(int *ev) {
     int n, i, j, k, kind, v, neg;
     // take what has arrived
@@ -113,6 +162,8 @@ int win_poll(int *ev) {
         else if (k == 's') kind = WIN_SIZE;
         else if (k == 'K') kind = WIN_KEYUP;
         else if (k == 'f') kind = WIN_FRAME;
+        else if (k == 'c') kind = WIN_MENU;
+        else if (k == 'r') kind = WIN_REL;
         j = 3; k = 0;
         while (k < 3) {
             v = 0; neg = 0;

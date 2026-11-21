@@ -270,7 +270,7 @@ export function analyse(img) {
       else if (s !== null) ins.ref.str = s;
     } else if (pt && pt.type > 0) {
       const s = byId.get(pt.type);
-      ins.ref = { kind: 'extern', name: s ? s.name : `symbol ${pt.type}`, sym: s };
+      ins.ref = { kind: 'extern', name: (s ? s.name : `symbol ${pt.type}`) + (pt.val ? `+${pt.val}` : ''), sym: s };
     } else if (BP_REL.has(ins.op)) {
       ins.ref = { kind: 'bp', n: ins.arg };
     }
@@ -313,7 +313,9 @@ export function cString(data, off, max = 200) {
     s += String.fromCharCode(c);
     if (s.length >= max) return s + '...';
   }
-  return null;
+  // the data's end: c4lc leaves the last literal's NUL to the zeroed
+  // memory after it (an object's data can be exactly "%d\n")
+  return s;
 }
 
 export function hex(n) { return '0x' + (n >>> 0).toString(16); }

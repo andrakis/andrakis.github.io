@@ -18,7 +18,7 @@
 
 N=${1:-2}
 ENGINE="--cpus $N $2"
-LIBJS="node libjs/cli.js $ENGINE"
+LIBJS="node libjs/cli.js --mmu $ENGINE"
 IMAGES=src/c4bb/images
 U=$((4 + N - 1))                  # the root archive's unpack, task 4 on one CPU
 [ "$N" -lt 2 ] && U=4
@@ -34,12 +34,17 @@ if echo "$out" | grep -qF "protected mode on for user tasks, preemption on" && e
    echo "$out" | grep -qF "shutdown complete, 0 tasks remain" && ! echo "$out" | grep -qE "cache .task. .*live [1-9]|panic|illegal"; then
     ok "boots, runs ps, and shuts down with every task freed"
 else bad "boots, runs ps, and shuts down with every task freed"; echo "$out" | grep -E 'processors|tasks|panic|illegal|live|shutdown' | head -8; fi
-if echo "$out" | grep -qE '^c4ix: 64 MB of memory: the kernel below 0x[0-9a-f]+, the heap to 0x[0-9a-f]+ \([0-9]+ KB\)'; then
+# the layout: the kernel image, its arena, the heap, the guarded boot
+# stack (sched.c, sched_banner), each [mem FIRST-LAST]
+mem () { echo "$out" | grep -qE "^  \[mem 0x[0-9a-f]{8}-0x[0-9a-f]{8}\] $1"; }
+if echo "$out" | grep -qxF 'c4ix: 64 MB of memory:' && mem 'Kernel image \(' && mem 'Kernel arena - ' &&
+   mem 'Heap - ' && mem 'Boot stack, guarded \(1024 KB\)'; then
     ok "the boot says the memory and its layout"
-else bad "the boot says the memory and its layout"; echo "$out" | grep -E 'memory' | head -3; fi
+else bad "the boot says the memory and its layout"; echo "$out" | grep -E 'memory|\[mem' | head -6; fi
 if [ "$N" -ge 2 ]; then
     if [ -n "$2" ]; then how="a thread each, all at once"; else how="simulated, taking turns on one thread"; fi
-    if echo "$out" | grep -qF "c4ix: $N processors, $how; they share all memory and the heap" &&
+    if echo "$out" | grep -qxF "c4ix: $N processors" && echo "$out" | grep -qxF "  $how" &&
+       echo "$out" | grep -qxF "  CPUs share all memory and the heap" &&
        [ "$(echo "$out" | grep -cE ' idle[0-9]+$')" = $((N - 1)) ]; then
         ok "starts $N processors, an idle task each, and says how they run"
     else bad "starts $N processors, an idle task each, and says how they run"; echo "$out" | grep -E 'processors|idle' | head -6; fi
@@ -85,23 +90,26 @@ else bad "libc: libctest's output is the reference"
      echo "$out" | sed -n '/^printf: \[42/,/libctest: done/p' | diff - src/c4ix/libc/tests/libctest.txt | head -10; fi
 
 # libc is -fpic: its data slot is a word of the CPU-local window, which
-# each CPU points at the data of the task it runs
-out=$(printf 'pictest A 15 > /tmp/a &\npictest B 15 > /tmp/b &\npictest C 15 > /tmp/c &\nwait\ncat /tmp/a\ncat /tmp/b\ncat /tmp/c\nexit\n' | c4ix 1200000000)
+# each CPU points at the data of the task it runs. On two threads the
+# three and their cats came within a few cycles of 1.2G (2026-10-30, with
+# the MMU and the boot log), so a run that lost a little to the threads
+# stopped before B and C were shown: twice that.
+out=$(printf 'pictest A 15 > /tmp/a &\npictest B 15 > /tmp/b &\npictest C 15 > /tmp/c &\nwait\ncat /tmp/a\ncat /tmp/b\ncat /tmp/c\nexit\n' | c4ix 2400000000)
 if echo "$out" | grep -qx "A: ok" && echo "$out" | grep -qx "B: ok" && echo "$out" | grep -qx "C: ok" && ! echo "$out" | grep -qF "crossed"; then
     ok "three tasks share libc's code and keep their own data"
 else bad "three tasks share libc's code and keep their own data"; echo "$out" | grep -E 'ok|crossed|loader' | head -6; fi
 
 # S4: ps and top say which CPU runs each task, and top each CPU's load;
 # on one CPU, the columns there always were
-out=$(printf 'ps\ntop 1\nexit\n' | c4ix 1000000000)
+out=$(printf 'ps\ntop -b 1\nexit\n' | c4ix 1000000000)
 if [ "$N" -ge 2 ]; then
-    if echo "$out" | grep -qE '^  ID  PPID STATE    CPU PRIV' && echo "$out" | grep -qE "^$N CPUs: cpu0 [0-9]+% cpu1 [0-9]+%"; then
+    if echo "$out" | grep -qE '^  ID  PPID STATE    CPU PRIV' && echo "$out" | grep -qE '^%Cpu\(s\):.* 0: *[0-9]+% +1: *[0-9]+%' && echo "$out" | grep -qE 'PID +PPID USER +NI S +P +RES'; then
         ok "ps and top show the CPUs"
-    else bad "ps and top show the CPUs"; echo "$out" | grep -E 'ID|CPUs' | head -4; fi
+    else bad "ps and top show the CPUs"; echo "$out" | grep -E 'ID|CPU' | head -4; fi
 else
-    if echo "$out" | grep -qE '^  ID  PPID STATE   PRIV' && ! echo "$out" | grep -qE 'CPUs:'; then
+    if echo "$out" | grep -qE '^  ID  PPID STATE   PRIV' && echo "$out" | grep -qE 'PID +PPID USER +NI S +RES' && ! echo "$out" | grep -qE '^%Cpu\(s\):.* 0: *[0-9]+%'; then
         ok "ps and top: one CPU, no CPU column"
-    else bad "ps and top: one CPU, no CPU column"; echo "$out" | grep -E 'ID|CPUs' | head -4; fi
+    else bad "ps and top: one CPU, no CPU column"; echo "$out" | grep -E 'ID|CPU' | head -4; fi
 fi
 
 # nice: on one CPU a favoured program (nice -3: a turn of four slices)

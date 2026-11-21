@@ -53,6 +53,7 @@ static int win;                    // in the Terminal's window instead (--window
 static int *ring;
 static Uint32 palette[256];
 static SDL_Surface *screen;
+static SDL_Surface *small;         // the menus' 320x200, while shown (rott_show_small)
 // the palette as the game set it, which it also reads back (VL_GetPalette)
 static SDL_Color colors[256];
 static SDL_Palette pal8 = { 256, colors };
@@ -90,6 +91,7 @@ SDL_Surface *SDL_CreateRGBSurface(Uint32 flags, int w, int h, int depth, Uint32 
 void SDL_FreeSurface(SDL_Surface *s) {
 	if (!s) return;
 	if (s == screen) screen = NULL;
+	if (s == small) small = NULL;
 	free(s->pixels);
 	free(s);
 }
@@ -124,6 +126,63 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags) {
 SDL_Surface *SDL_GetVideoSurface(void) { return screen; }
 const SDL_VideoInfo *SDL_GetVideoInfo(void) { return &info; }
 
+// The screen again, as it is, in the palette just set: a VGA's palette
+// shows at once, and SDL 1.2 draws an 8-bit screen again when its colours
+// change. The game fades pictures in and out by the palette alone (the
+// registered game's opening cinematic, DoInBetweenCinematic: drawn and
+// flipped while the palette is black, then VL_FadeIn and a wait), and the
+// display kept the black frame. Not a frame of the game's: rott_frame does
+// not see it, so a timedemo's frames and checksum are as they were.
+// The screen on the display: 640x480 for the sizes up to it (320x200 is
+// the original's 4:3), and above that the display asked to be the
+// screen's size (GUI_W, GUI_H), as Quake's resolutions are (Extended User
+// Options' RESOLUTION). The picture sent, w by h of s, is scaled to it:
+// the screen, or the menus' 320x200 (rott_show_small).
+static int dw = W, dh = H;
+static void to_display(SDL_Surface *s, int pw, int ph) {
+	int sw = screen ? screen->w : s->w, sh = screen ? screen->h : s->h;
+	int w = sw > W ? sw : W, h = sh > H ? sh : H;
+	if (w != dw || h != dh) {
+		dw = w; dh = h;
+		*(int *) GUI_W = dw;
+		*(int *) GUI_H = dh;
+		gui_clear(0x000000);
+	}
+	gui_blit8(0, 0, pw, ph, (char *) s->pixels, s->pitch, (int *) palette, dw, dh);
+	gui_show();
+}
+// the picture to the window (--window), whose desktop scales it too, or
+// the display
+static void present(SDL_Surface *s, int pw, int ph) {
+	if (win) { rott_win_draw((Uint8 *) s->pixels, pw, ph, s->pitch, palette); return; }
+	if (on) to_display(s, pw, ph);
+}
+
+// The menus and the game's other screens draw in 320x200 when the screen
+// is bigger (modexlib.c's EnableScreenStretch, as the DOS game's were
+// always 320x200), which SDL_SoftStretch then made the screen's size, 8 M
+// instructions a frame at 640x480, most of a menu's time. Instead the
+// 320x200 goes to the display (or window) as it is, and it scales it, as
+// it does the 320x200 game. Not in a timedemo: rott_frame sees the
+// stretched screen there, as before, so its frames and checksum stay as
+// they were. small is that picture while it is the one shown, for a
+// palette change to send again.
+int rott_timing(void);              // rott-sum.c: a timedemo, shown or not
+int rott_show_small(SDL_Surface *s) {
+	if (!s || !s->pixels || rott_timing() || (!on && !win)) return 0;
+	small = s;
+	present(s, 320, 200);
+	rott_snd_poll();
+	return 1;
+}
+
+static void show_palette(void) {
+	SDL_Surface *s = small ? small : screen;
+	if (!s || !s->pixels) return;
+	if (s == small) present(s, 320, 200);
+	else present(s, s->w, s->h);
+}
+
 int SDL_SetColors(SDL_Surface *s, SDL_Color *c, int first, int n) {
 	int i;
 	(void) s;
@@ -131,6 +190,7 @@ int SDL_SetColors(SDL_Surface *s, SDL_Color *c, int first, int n) {
 		colors[first + i] = c[i];
 		palette[first + i] = ((Uint32) c[i].r << 16) | ((Uint32) c[i].g << 8) | c[i].b;
 	}
+	show_palette();
 	return 1;
 }
 int SDL_SetPalette(SDL_Surface *s, int flags, SDL_Color *c, int first, int n) {
@@ -143,10 +203,9 @@ void SDL_UpdateRect(SDL_Surface *s, Sint32 x, Sint32 y, Uint32 w, Uint32 h) {
 	(void) x; (void) y; (void) w; (void) h;
 	if (!s) return;
 	rott_frame((Uint8 *) s->pixels, s->w, s->h, s->pitch, palette);
-	if (win) { rott_win_draw((Uint8 *) s->pixels, s->w, s->h, s->pitch, palette); rott_snd_poll(); return; }
-	if (!on) return;
-	gui_blit8(0, 0, s->w, s->h, (char *) s->pixels, s->pitch, (int *) palette, W, H);
-	gui_show();
+	small = NULL;
+	if (!win && !on) return;
+	present(s, s->w, s->h);
 	rott_snd_poll();
 }
 

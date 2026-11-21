@@ -1167,6 +1167,7 @@ void PreloadGraphics (void);
 
 int DebugKeys (void);
 void ViewMap (void);
+void AutoMap (void);            // c4sdl: Tab's map of what has been seen (wl_draw.c)
 
 
 /*

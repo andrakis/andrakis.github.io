@@ -20,6 +20,7 @@
 	(define Obj false)
 	(define Cisc false)        ;; -mcisc: emit c4mp-only fused opcodes (M12)
 	(define Fuse false)
+	(define Fpu false)         ;; -mfpu: floats as the FPU opcode, docs/c4-float.md
 	(define Inline false)      ;; -minline: T3, docs/inline-small-functions.md
 	(define InlRep false)      ;; -minline-why: T3's reasoning, per function
 	(define Pp false)          ;; -P: preprocess internally (L9)
@@ -57,6 +58,12 @@
 		;; reason, and it implies -O since the pass lives in c4opt.
 		(if (= (+ "" (head Args)) "-mfuse")
 			(begin (set! Fuse true) (set! Opt true) (set! Args (tail Args)) (next flags))
+		;; -mfpu: a float's operations are the FPU opcode where they stand,
+		;; not calls to helpers that ask whether there is one
+		;; (docs/c4-float.md). Such an image needs the FPU: where there is
+		;; none, the opcode is illegal and the program stops there.
+		(if (= (+ "" (head Args)) "-mfpu")
+			(begin (set! Fpu true) (set! Args (tail Args)) (next flags))
 		;; -minline: splice the body of a small leaf function into its
 		;; call sites instead of calling it (docs/inline-small-functions.md).
 		;; A call costs JSR, ENT, ADJ and LEV whatever is on the other
@@ -118,7 +125,7 @@
 				(set! PreDefs (+ PreDefs (list (+ "" (index Args 1)))))
 				(set! Args (tail (tail Args)))
 				(next flags))
-		nil)))))))))))))))))
+		nil))))))))))))))))))
 	(flags)
 	(if (< (length Args) 2) (error "usage: c4lc.lisp [-O] [-c] in.c out"))
 	(define In (head Args))
@@ -126,8 +133,11 @@
 	(set! lex:conforming Conf)
 	(set! gen:objmode Obj)
 	(set! gen:cisc Cisc)
+	(set! gen:fuse Fuse)
+	(set! gen:fpu Fpu)
 	(set! gen:nobuiltin NoBuiltin)
 	(set! gen:pic Pic)
+	(set! gen:opt Opt)
 	(set! lex:locs Lines)
 	(set! p:lines Lines)
 	(define Ast (parse:program
@@ -163,9 +173,11 @@
 	;; object's MEMSZ when merging, so objects carry it too.
 	(set! c4r:v3 true)
 	(set! c4r:bss-extra gen:bssextra)
+	(set! c4r:bss-size gen:bsssize)
 	(if Lines (set! c4r:srcfiles lex:files) nil)
 	(define Out (c4r:encode M))
 	(set! c4r:bss-extra 0)
+	(set! c4r:bss-size 0)
 	(set! c4r:srcfiles (list))
 	(if (file:write OutName Out)
 		(print ";; c4lc:" In "-" (length Out) "bytes -" OutName)

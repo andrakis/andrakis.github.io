@@ -65,6 +65,16 @@ for t in hello32 test_basic test_static test_vprintf tests \
          test_printloop mandel test_float; do
     check "$t" $IMAGES/$t.c4r
 done
+# ... and test_float's own verdict at 32 bits. check holds c4bb to c4m32,
+# which run the same library, so a c4_float.h that is wrong at 32 bits
+# passes it with every product wrong -- 1,278 of 3,365 cases were, until
+# 2026-11-17 (f32_mul and f32_div needed more than 32 bits).
+if timeout 300 $C4M32 $IMAGES/test_float.c4r 2>&1 | grep -q "float tests passed"; then
+    echo "test-c4bb: test_float passes its own cases at 32 bits"
+else
+    echo "test-c4bb: test_float FAILED its own cases at 32 bits"
+    fail=1
+fi
 # The web front-end's two pieces of real logic: the terminal's screen
 # model (cursor addressing, deferred wrap) and the drive set (what is in
 # each drive, and what a soft reset does about an eject). Pure JS, no
@@ -265,12 +275,12 @@ for want in "C4IX booting" "protected mode on for user tasks, preemption on" \
 done
 
 # the C4IX VFS: vfsload populates a real hierarchical tree from
-# c4ix.vfs.txt at boot (src/c4ix/user/vfsload.c). KNOWN ISSUE: a
-# timing-sensitive race (documented at length in vfsload.c, not yet
-# root-caused - see docs/c4bb-design.md) intermittently corrupts one
-# entry's value, so this only requires the run to complete and load
-# MOST entries, not all of them.
-if echo "$c4ix_out" | grep -qE '[4-9][0-9]/[4-9][0-9] entries loaded from c4ix\.vfs\.txt'; then
+# c4ix.vfs.txt at boot (src/c4ix/user/vfsload.c). A timing-sensitive
+# race (documented at length in vfsload.c, never root-caused - see
+# docs/c4bb-design.md) once corrupted one entry's value (2026-08). It
+# has not been seen since, but this still only requires the run to
+# complete and load MOST entries, not all of them.
+if echo "$c4ix_out" | grep -qE '([4-9][0-9]|[1-9][0-9][0-9])/([4-9][0-9]|[1-9][0-9][0-9]) entries loaded from c4ix\.vfs\.txt'; then
     echo "test-c4bb: c4ix-vfs manifest mostly loaded OK"
 else
     echo "test-c4bb: c4ix-vfs manifest mostly loaded FAILED"

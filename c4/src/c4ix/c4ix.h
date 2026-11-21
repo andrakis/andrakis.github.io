@@ -28,9 +28,26 @@ enum {
 // writes events, into a task's memory. task.c reads it, and clears it
 // when the memory goes with a task that never detached.
 enum { C4IX_GUI_RING = 0x410 };
+// The kernel image as libjs's loader placed it (src/c4bb/sim/devices.js,
+// IMG_*): code, data, where the file's data ends and BSS begins, and the
+// end. Libjs's alone: C4IX_I_C4MJS.
+enum { C4IX_IMG_CODE = 0x1f0, C4IX_IMG_DATA = 0x1f4, C4IX_IMG_BSS = 0x1f8, C4IX_IMG_END = 0x1fc };
+// More of the machine, for the boot report (boot.c): the drives, the
+// mailbox, the display and the sound card
+enum { C4IX_DISK_DRIVE = 0x13c, C4IX_DISK_COUNT = 0x188, C4IX_DISK_RO = 0x18c,
+       C4IX_MBOX_BASE = 0x1b4, C4IX_MBOX_LEN = 0x1b8,
+       C4IX_GUI_CAPS = 0x400, C4IX_GUI_W = 0x404, C4IX_GUI_H = 0x408,
+       C4IX_I_PIT = 0x800, C4IX_I_MBOX = 0x2000, C4IX_I_SND = 0x8000, C4IX_I_FPU = 0x10000, C4IX_I_DRV = 0x40000 };
+// The sound card's RESET (libjs/snd-device.js): every voice and the OPL quiet
+enum { C4IX_SND_RESET = 0x4b8 };
 // The heap's extent and use (c4bb's HEAP_BASE and HEAP_END, libjs's
 // HEAP_USED, src/c4bb/sim/devices.js), for the CPU snapshot.
 enum { C4IX_HEAP_BASE = 0x144, C4IX_HEAP_END = 0x148, C4IX_HEAP_USED = 0x1c0, C4IX_I_C4MJS = 8 };
+// The boot stack (libjs's STACK_BASE, STACK_TOP and STACK_GUARD, same
+// file): the megabyte at the top of memory, under the arguments, where the
+// machine started the kernel. Once the kernel is off it for good, libjs
+// guards it (sched.c, "Off the boot stack"). Libjs's alone: C4IX_I_C4MJS.
+enum { C4IX_BOOT_BASE = 0x1e4, C4IX_BOOT_TOP = 0x1e8, C4IX_BOOT_GUARD = 0x1ec };
 // Processors (docs/c4ix-smp.md S3): c4mp's C4I_SMP, which libjs reports
 // with --cpus. Only libjs has the CPU-local window C4IX needs, 0x800 to
 // 0x8FF, where each CPU sees 64 words of its own: its struct cpu at the
@@ -101,10 +118,17 @@ enum {
     SYS_AFFINITY = 242,
     // a task's priority (sched.c, sched_nice)
     SYS_NICE = 243,
-    SYS_TOP = 244          // one past the last: sched_trap's range check
+    // c4bb's device registers for this task, under the MMU (mmu.c)
+    SYS_IOPERM = 244,
+    SYS_MAPFROM = 245,
+    // a file saved is the host's again (vfs.c, vfs_relazy; persist.c)
+    SYS_RELAZY = 246,
+    // a descriptor given to a task this one started (sys.c, sys_fdgive)
+    SYS_FDGIVE = 247,
+    SYS_TOP = 248          // one past the last: sched_trap's range check
 };
 // SYS_DISPLAY's operations, and TAKE's flag (include/display.h)
-enum { DISP_TAKE = 0, DISP_STATE = 1, DISP_YIELD = 2, DISP_GIVE = 3, DISP_YIELDS = 1 };
+enum { DISP_TAKE = 0, DISP_STATE = 1, DISP_YIELD = 2, DISP_GIVE = 3, DISP_PIN = 4, DISP_YIELDS = 1 };
 // What SYS_STAT and SYS_FSTAT write, a word each, as many as the caller
 // asks for: SYS_STAT's callers from before M7c ask for none, which is
 // the first four.
@@ -114,7 +138,8 @@ enum {
     ST_INO = 4,            // the vnode's number: two names of one file share it
     ST_NLINK = 5,          // its names (SYS_LINK)
     ST_MODE = 6,           // made up: 0755 for directories and programs, 0644 for the rest
-    ST_DEV = 7,            // 1 for the RAM filesystem, 2 for a host file, 0 for the console or a pipe
+    ST_DEV = 7,            // 1 for the RAM filesystem, 2 for a host file, 0 for the console or a pipe,
+                           // 3 for a directory whose entries are still the host's (vfs.c, vfs_lazydir)
     ST_WORDS = 8
 };
 // SYS_WAITPID: options, and the two words it writes (exit code, signal)
@@ -129,7 +154,7 @@ enum { C4IX_WNOHANG = 1 };
 // Past the name, at TI_CPU, the CPU running the task (-1 none), and at
 // TI_NCPU how many the machine has (docs/c4ix-smp.md S4).
 enum { TASKINFO_WORDS = 24, TI_CPU = 20, TI_NCPU = 21 };
-enum { FD_STDIN = 0, FD_STDOUT = 1, FD_STDERR = 2, FD_MAX = 16 };
+enum { FD_STDIN = 0, FD_STDOUT = 1, FD_STDERR = 2, FD_MAX = 64 };
 
 int  sys_dispatch(int num, int *args);   // args[0]=first, args[1]=second...
 int  sys_write(int fd, char *buf, int len);
@@ -199,16 +224,33 @@ struct vnode {
     int cap;                   // bytes allocated
     int rpos;                  // PIPE: read cursor into data
     int host;                  // HOSTFILE: the host descriptor
-    int writers;               // PIPE: descriptions still open for write
+    int waiters;               // PIPE: the first task blocked reading it (struct task *: sched_pipewake)
+    int writers;               // descriptions still open for write (a PIPE's end of file)
     struct vnode *next;        // sibling in the parent directory
     struct vnode *child;        // VN_DIR: first entry
     struct vnode *parent;       // VN_DIR: enclosing directory
     char name[VN_NAME_MAX];     // one component, not a path
     // A lazy RAM file (SYS_LAZYFILE): its bytes are still on the host,
-    // under this name, and are read in the first time anything opens,
-    // reads, writes or loads it. size is already right.
+    // under this name, and size is already right. Where the host reads a
+    // span of a file (vfs_spans), a read or a load takes what it asks for
+    // from there; a small file read is read in whole and kept, and so is
+    // any file something writes to or wants in place (vfs_getdata).
+    // Elsewhere the first use reads it in.
+    // A directory with a hostname has entries on the host, under that
+    // prefix, not yet made (vfs_lazydir).
     char *hostname;
     int lazy;
+    // Its bytes are still the host's: lazy, or read in and not changed
+    // since (vfs_touch ends it). The copy in RAM is then a cache, which
+    // vfs_reclaim drops, least recently used first, when memory is short;
+    // the file is lazy again. Not while it is open for writing (writers
+    // counts those descriptions, for every kind of vnode), or held: a
+    // caller has its bytes in place (vfs_getdata).
+    int backed;
+    int held;
+    struct vnode *cnext;        // the cache: filled backed files, most recently used first
+    struct vnode *cprev;
+    int sig;                    // a lazy file's C4R signature, once looked at: 1 not a program, 2 a program
     // When it last changed, as a place in the order of changes rather
     // than a time (vfs_touch): b4ke compares two, nothing else does. A
     // file still on the host is 0, older than anything made here.
@@ -245,11 +287,27 @@ int          vfs_truncate(struct vnode *vn, int len);  // a RAM file cut, or gro
 int          vfs_unlink(char *path);
 int          vfs_rename(char *path, char *newname);
 int          vfs_lazyfile(char *path, char *host, int size);
+int          vfs_relazy(char *path, char *host, int stamp);
+void         mmu_counts(int *c);   // /proc/meminfo's, ten: user frames, swap, the heap's biggest block (mmu.c)
 int          vfs_fill(struct vnode *vn);         // read a lazy file's bytes in; 1 if it has them
+int          vfs_pread(struct vnode *vn, char *buf, int pos, int len);   // a RAM file's bytes at POS, wherever they are
+extern int   vfs_spans;                          // the host reads a span of a file: "NAME@OFF+LEN"
+// Memory for the kernel: malloc, and when it has none, files' cached
+// bytes dropped (vfs_reclaim) until it has. vfs_trim drops them while
+// memory is short (7/8 of the heap in use, where the host says).
+char        *vfs_malloc(int n);
+int          vfs_reclaim(int want);              // the bytes it freed
+extern struct vnode *vfs_ctail;
+int          vfs_trim_slow();
+#define vfs_trim() (vfs_ctail ? vfs_trim_slow() : 0)
+extern int   vfs_ncached, vfs_cachedbytes, vfs_dropped;   // the cache, and files dropped from it
 int          vfs_put(char *path, char *buf, int len);   // C4KE OP_VFS_PUT
-struct vnode *vfs_klog();                                // /log/kernel, held by the kernel
-void         vfs_logc(struct vnode *vn, int c, int max); // one byte on its end, up to MAX
-char        *vfs_getdata(char *path, int *plen);        // C4KE OP_VFS_GET
+struct vnode *vfs_klog();                                // /var/log/kernel, held by the kernel
+int          vfs_logc(struct vnode *vn, int c, int max); // one byte on its end, up to MAX: 0 if it had no room
+// C4KE OP_VFS_GET: the file's own bytes. HOLD, if not 0, gets the vnode,
+// which keeps them until vfs_unhold; without, they are kept for good.
+char        *vfs_getdata(char *path, int *plen, struct vnode **hold);
+void         vfs_unhold(struct vnode *vn);
 int          vfs_nfiles();                              // C4KE OP_VFS_COUNT: files in the cwd
 char        *vfs_fname(int i);                          // C4KE OP_VFS_NAME
 struct vnode *vfs_root();
@@ -272,6 +330,7 @@ int          fd_install(struct task *t, struct file *f);
 int          fd_open_vnode(struct task *t, struct vnode *vn, int flags);
 int          fd_close(struct task *t, int fd);
 int          fd_dup2(struct task *t, int oldfd, int newfd);
+int          fd_give(struct task *from, int oldfd, struct task *to, int newfd);
 void         fd_init_console(struct task *t);
 void         fd_clone(struct task *dst, struct task *src);
 void         fd_clone_all(struct task *dst, struct task *src);   // vfork: close-on-exec fds too
@@ -293,11 +352,30 @@ void con_wake();           // let the next poll reach the host again
 int con_poll();            // 1 if a console read would not block
 int con_read(char *buf, int len);
 int kputc(int c);
-void con_logopen();        // /log/kernel exists now: the console is logged to it
+void con_logopen();        // /var/log/kernel exists now: the console is logged to it
 void con_booted();         // boot is over: tasks' console output is no longer logged
 void con_write_task(char *buf, int len);  // a task's bytes to the console
+void con_task_gone(int id);   // task id has died: the raw keys it asked for go back
 int kputs(char *s);
 int kprintf(char *fmt, ...);
+// The kernel log (console.c): every line the kernel says, stamped with
+// the machine's time, in a ring that dmesg reads through /proc/kmsg.
+// klog's lines go there, and to the console too while the boot goes on
+// libjs (klog_boot: the page and cli.js, as Linux's boot does; -q keeps
+// them in the log) and always when the kernel was booted with -v
+// (klog_verbose); kprintf's go to both.
+int klog(char *fmt, ...);
+extern int klog_verbose;
+extern int klog_boot;
+extern int klog_cpms;          // cycles in a machine millisecond, once klog_calibrate has measured
+int klog_calibrate();
+int klog_copy(char *dst);      // the log into DST, KLOG_MAX bytes at least; its length
+enum { KLOG_MAX = 65536 };
+int con_is_booting();          // init has not started the shell yet
+extern int vfs_nlazy, vfs_lazybytes;   // what the boot left on the host (SYS_LAZYFILE)
+void boot_report();            // the machine, into the kernel log (boot.c)
+void boot_done();              // the boot is over: how long it took (boot.c)
+extern int boot_lastid;        // the last task the boot made: its tasks' exits are logged
 
 // ---- varargs (va.c) ----
 // The stock stdarg.h keeps its va area in per-unit statics. Statics
@@ -318,6 +396,9 @@ enum { SL4B_NAME_MAX = 16 };
 
 struct sl4b_slab {
     struct sl4b_slab *next;
+    // (only while sl4b_tidy has them: its free objects, and which)
+    int nfree;
+    int free[2];
 };
 
 struct sl4b_cache {
@@ -328,6 +409,8 @@ struct sl4b_cache {
     int nallocs;
     int nfrees;
     int nslabs;
+    int nspilled;              // ... of them out of the arena, the heap's: what sl4b_tidy can give back
+    int moves;                 // a live object may be copied elsewhere (sl4b_tidy, and it is the MMU's region records)
     struct sl4b_cache *next;   // all-caches list, for sl4b_stats
     char name[SL4B_NAME_MAX];
 };
@@ -336,6 +419,26 @@ struct sl4b_cache *sl4b_cache_create(char *name, int objsize, int perslab);
 char *sl4b_alloc(struct sl4b_cache *c);
 void  sl4b_free(struct sl4b_cache *c, char *obj);
 void  sl4b_stats();
+int   sl4b_tidy();             // slabs out of the arena given back, what is in them moved first: 1 if there is more to do
+int   sl4b_spilled();          // slabs out of the arena now
+
+// ---- the kernel arena (sl4b.c) ----
+// What the kernel keeps for as long as it runs -- the slabs and their
+// caches, the kernel task's and the idle tasks' stacks, the shared
+// libraries' books -- is carved from one block taken at boot, before
+// anything a program could have: on libjs, the heap's lowest addresses,
+// directly after the kernel image. A program that writes past the end of
+// its block runs upwards, into other programs' memory and then the boot
+// stack's guard, and never into a task struct or an idle task's frames.
+// Nothing carved is given back (kmem_free leaves it be). Past the end,
+// kmem_alloc takes from the heap and counts it (kmem_spills).
+// KMEM_STACK_BYTES: the kernel task's stack, and each idle task's.
+// KMEM_SLAB_BYTES: room for slabs and books, a few times what the desktop uses.
+enum { KMEM_STACK_BYTES = 65536, KMEM_SLAB_BYTES = 524288 };
+extern int kmem_base, kmem_end, kmem_brk, kmem_spills;
+void  kmem_init(int ncpu);
+char *kmem_alloc(int bytes);
+void  kmem_free(char *p);
 
 // ---- tasks (task.c) ----
 // Tasks live on a malloc'd singly linked list -- no fixed table.
@@ -410,7 +513,8 @@ struct task {
     struct vnode *block_vn;    // TS_BLOCKED: the vnode being waited on
     int  block_pos;            // position the blocked read wants data past
     int  fds[FD_MAX];          // struct file *, 0 where the fd is closed
-    int  fdcloexec[FD_MAX];    // 1: this fd is not inherited on spawn (SYS_CLOEXEC)
+    char fdcloexec[FD_MAX];    // 1: this fd is not inherited on spawn (SYS_CLOEXEC); a byte
+                               //   each, so 64 fds cost a task 576 bytes, not 1024
     struct vnode *cwd;         // working directory, inherited on spawn
     int  lockdepth;            // preemption-mask depth, saved across switches
     int  parent;               // task id that spawned this one
@@ -431,6 +535,10 @@ struct task {
     // it reads (sched_events)
     int  ev_wait;
     int  ev_ring;
+    // The queue it is on (sched.c), which says where its state says it should be
+    struct task *qnext;
+    struct task *qprev;
+    int  q;
     // C4KE compatibility state (c4ke.c). Zero for every task that
     // never uses it -- sl4b_alloc memsets, so this costs nothing to
     // carry and nothing to initialise.
@@ -467,8 +575,49 @@ struct task {
     // next runs: only then may it preempt a less favoured one.
     int  nice;
     int  woke;
+    // Under the MMU (mmu.c): the regions of memory it owns, the chunk its
+    // small blocks are being cut from, and its slabs of each size
+    int  urgns;
+    int  uchunk;
+    int  uslab[8];
+    int  iopm;                 // what of page 0 it asked for (SYS_IOPERM)
+    int  ckabi;                // has made a C4KE call: a C4KE program
+    int  mmdir;                // its page directory: its address space (0 until it needs one)
     char name[TASK_NAME_MAX];
+    // Load control (mmu.c, mmu_balance): held, it is not run while paging
+    // is most of what the machine does -- the machine ms it was held, 0
+    // if it is not; and when it was last let go
+    int  held;
+    int  letgo;
+    int  tflags;               // TF_*: what is true of it, kept as it changes
+    int  fdtop;                // one past the highest fd it has had: what a walk of fds needs see
+    int  evgen;                // SYS_EVWAIT: sched_pipegen when its pipes were last looked at
 };
+
+// What the hot paths ask of a task, answered from one word, kept where the
+// fields change (TF_SET, TF_CLR) instead of read field by field at each test.
+// state is not in it: it changes at every switch, and costs a compare where it
+// is wanted. TF_NOPAGE is for the two states it takes rarely.
+enum {
+    TF_USER = 1,               // privs is PRIV_USER
+    TF_VFCHILD = 2,            // vfparent: a vfork child, in its parent's memory
+    TF_GUI = 4,                // ev_ring: it has a window on the display
+    TF_FAV = 8,                // nice < 0
+    TF_SIG = 16,               // killsig or ck_sigpend: a signal to take
+    TF_HELD = 32,              // held (mmu.c)
+    TF_NOPAGE = 64,            // TS_ZOMBIE or TS_VFORK: its pages stay
+    TF_PINNED = 128,           // cpumask: only some CPUs may run it
+    TF_PINSOFT = 256           // ... CPU 0 by default, not asked for: its children do not inherit it
+};
+#define TF_SET(t, b) ((t)->tflags = (t)->tflags | (b))
+#define TF_CLR(t, b) ((t)->tflags = (t)->tflags & ~(b))
+#define TF_PUT(t, b, on) ((on) ? TF_SET(t, b) : TF_CLR(t, b))
+// ... ck_sigpend has gone to 0: no signal left, unless it is dying of one
+#define TF_UNSIG(t) ((t)->killsig || (t)->ck_sigpend ? 0 : TF_CLR(t, TF_SIG))
+// May its pages go out? (mmu.c, with the region's own flag)
+#define TF_PAGEOK(t) (((t)->tflags & (TF_USER | TF_VFCHILD | TF_NOPAGE)) == TF_USER)
+// May it be held? (mmu.c)
+#define TF_HOLDOK(t) (((t)->tflags & (TF_USER | TF_VFCHILD | TF_GUI | TF_FAV | TF_SIG | TF_HELD)) == TF_USER && ((t)->state == TS_READY || (t)->state == TS_RUNNING))
 
 // What SYS_CPUSTAT copies out (sched_cpustat): a header, then one record
 // per task, all taken in one trap so that every number describes the
@@ -491,6 +640,8 @@ struct cpustat {
     int cnap[CPU_MAX];
     long long cbusy[CPU_MAX];
     long long cidle[CPU_MAX];
+    int cpms;                  // cycles in a machine ms (klog_cpms), 0 if not measured
+    int total;                 // tasks there are: more than ntasks if max was too few
 };
 struct cpustat_task {
     int id, parent, state, privs, nsyscalls;
@@ -528,9 +679,10 @@ void         task_drop_image(struct task *t);   // execve: free its image, libra
 void         task_unborrow(struct task *t);     // a vfork child is done with its parent's memory
 struct task *task_get(int id);
 int sched_affinity(int id, int mask);
+void sched_softpin(struct task *t);
 int sched_nice(int id, int nice);
-struct task *task_first();
-struct task *task_next(struct task *t);
+#define task_first() task_head
+#define task_next(t) ((t)->next ? (t)->next : task_head)
 int          task_count();
 void         task_shutdown();
 // A userland task's memory (SYS_SBRK, and malloc behind protected mode):
@@ -607,11 +759,17 @@ enum {
 enum { CK_TASK_SLOTS = 128 };
 enum { CK_SIG_MAX = 64 };
 enum { CK_SIGINT = 2, CK_SIGKILL = 9, CK_SIGUSR1 = 10, CK_SIGTERM = 15 };
+// The machine's TLEV word (libjs's ROM, at TLEV_ADDR): where a signal
+// handler returns under the MMU, which lets user mode run nothing else
+// of the kernel's
+enum { CK_TLEV_ROM = 0x10 };
 // u0.h:27 -- note this disagrees with C4IX's own PRIV_*, which is
 // PRIV_KERNEL = 0, PRIV_USER = 1. Convert at the boundary.
 enum { CK_PRIV_NONE = 0, CK_PRIV_USER = 1, CK_PRIV_KERNEL = 2 };
 
 extern int loader_quiet;   // suppress "not an image" while probing paths
+extern int loader_err;     // why c4r_load last failed, SYS_SPAWN's answer:
+enum { SPAWN_NOENT = -1, SPAWN_NOMEM = -2, SPAWN_BAD = -3 };   // as include/c4ix_user.h
 
 int  ck_dispatch(int num, int *args);
 void ck_task_free(struct task *t);   // release compat state on reap
@@ -631,16 +789,38 @@ void ck_signal_deliver(struct task *t, int *pa, int *pbp, int *psp,
 // Every switch runs in a trap handler (soft trap for yield, cycle
 // interrupt for preemption) that rewrites its own parameters; TLEV
 // loads them into the VM registers.
+int          sched_ncpus();       // the processors C4IX will use
+// Run ENTRY(argc, argv) as the kernel task, on a stack of its own, and
+// return what it returns: the boot stack is left until then (sched.c)
+int          sched_offboot(int entry, int argc, int argv);
 void         sched_init(int interval);
 void         sched_run();
+void         task_state(struct task *t, int s);   // every change of a task's state: it goes where the state says (sched.c)
+void         task_unqueue(struct task *t);        // ... off them all, as it leaves the table
+void         sched_pipewake(struct vnode *vn);    // data or end of file on a pipe: its readers run again
+extern int   sched_rqlost;                        // tasks the watch found off their queues: must stay 0
 int          sched_sleep_due(int *pms);   // earliest sleeper deadline, 0 if none
 void         sched_forge_argv(struct task *t, int argv);  // pre-start argv patch
 void         sched_stop();
 void         sched_yield();
 void         sched_new_slice();   // the running task's slice restarts
+void         sched_setnice(struct task *t, int nice);   // its nice, and the count of those with one
+int          sched_busiest();     // the cycles the busiest CPU has run since the last asking (mmu_balance)
+// Something may be ready for an idle CPU that was not: smp_kick looks at this
+// trap's end, not at the next millisecond's (sched.c). A site that does not say
+// costs that millisecond, never a wakeup.
+extern int   sched_wake;
 int          sched_intr_below(struct task *root);   // a terminal's Ctrl-C
-void         sched_lock();     // disable preemption (nestable)
-void         sched_unlock();
+// Preemption masked (nestable). In the trap handler, which nothing
+// preempts, that is only the depth; but for the light path, which has not
+// got the kernel lock, and outside the handler, which has to mask it.
+// Macros, like the others below (docs/c4ix-design.md, "Fast paths"): the
+// common case costs no call, and -minline cannot inline across modules.
+// They are expressions, and an argument may be evaluated more than once.
+int          sched_lock_slow();
+int          sched_unlock_slow();
+#define sched_lock()   ((sched_intrap && !cpu_self->light) ? ++cpu_self->lockdepth : sched_lock_slow())
+#define sched_unlock() ((sched_intrap && !cpu_self->light) ? --cpu_self->lockdepth : sched_unlock_slow())
 int          sched_forge(struct task *t, int entry, int argc, int argv);
 // SYS_VFORK, from the trap handler, which has the registers (bp is the
 // frame of the function that executed the syscall: the child returns
@@ -666,6 +846,9 @@ struct cpu {
     struct task *prev;         // switched out here; its oncpu is cleared once this CPU is off its stack
     struct task *idle;         // this CPU's idle task
     int bkl_task;              // the running task holds the kernel lock (a kernel task)
+    int light;                 // a trap on the light path, without the kernel lock: sched_lock takes it
+    int okva;                  // a page the running task may read, checked (UARGS_OK), -1 for none
+    int okgen;                 // ... as of this mmu_mapgen
 };
 extern struct cpu *cpu_self;
 extern int smp_ncpu;           // processors in use: 1 unless the host has SMP
@@ -674,8 +857,14 @@ int  task_busy(struct task *t);   // some CPU may be on its stack: not to be fre
 int  task_cpu(struct task *t);    // the CPU running it, -1 if none is
 int  smp_slot_alloc();         // a library's data slot in the window, 0 if none is left
 // A lock: { 1 + the CPU holding it, its holds }, nested per CPU (sched.c)
-void klock_take(int *lk);
-void klock_drop(int *lk);
+// In the handler a lock is only the lock, and on one CPU not even that;
+// outside it, it masks preemption too (sched.c)
+int klock_spin(int *lk);
+int klock_let(int *lk);
+int klock_take_slow(int *lk);
+int klock_drop_slow(int *lk);
+#define klock_take(lk) (sched_intrap ? (smp_ncpu < 2 ? 0 : klock_spin(lk)) : klock_take_slow(lk))
+#define klock_drop(lk) (sched_intrap ? (smp_ncpu < 2 ? 0 : klock_let(lk)) : klock_drop_slow(lk))
 // SYS_EXECVE replaced the running task's context: the trap returns into
 // the forged one, and the old stack, still under the handler, is freed
 // at the next trap.
@@ -726,5 +915,128 @@ struct task *task_spawn_priv(char *path, int argc, int argv, int privs);
 
 // ---- init (init.c) ----
 int init_main(int argc, int argv);
+
+// ---- the MMU (mmu.c, docs/c4ix-mmu.md) ----
+// libjs's, when its host fits one (C4I_MMU). It translates user mode;
+// the kernel runs untranslated. Its registers are each CPU's own.
+enum { C4IX_I_MMU = 0x80000 };
+enum {
+    MMU_CTL = 0x500, MMU_PTBR = 0x504, MMU_KSP = 0x508, MMU_FADDR = 0x50c,
+    MMU_FINFO = 0x510, MMU_FPC = 0x514, MMU_INVLPG = 0x518, MMU_FLUSH = 0x51c,
+    MMU_IOPM = 0x520, MMU_MISSES = 0x524, MMU_FAULTS = 0x528, MMU_MEMSIZE = 0x52c,
+    MMU_UWIN = 0x530, MMU_UDIR = 0x534
+};
+// Where user addresses start: a user page is mapped at its physical
+// address plus this, and kernel mode reaches it at either (libjs's user
+// window). Memory larger than it keeps the identity map.
+enum { MMU_UWIN_BASE = 0x10000000 };
+// A page table entry's bit the host sets in the kernel's map (UDIR) on a
+// page the kernel or a device has used: it never goes to swap
+enum { PTE_PIN = 0x200 };
+// ... and the bit, in the kernel's map, of a page put out to swap: not
+// present, and the host's slot for it in the entry's upper 20 bits
+enum { PTE_SWAP = 0x400 };
+// A page; a CPU's stack for the traps that come from user mode
+enum { MMU_PAGE = 4096, MMU_KSTACK = 262144 };
+// A page table entry: the frame's address and these
+enum { PTE_P = 1, PTE_W = 2, PTE_U = 4, PTE_X = 8, PTE_A = 0x20, PTE_D = 0x40 };
+// What a fault was (MMU_FINFO)
+// DMA: a device's access, at an address the task gave it
+enum { MMU_FK_READ = 1, MMU_FK_WRITE = 2, MMU_FK_FETCH = 4, MMU_FK_PRESENT = 8, MMU_FK_SPLIT = 16, MMU_FK_DMA = 32 };
+// The signal a page fault kills with, as waitpid reports it
+enum { C4IX_SIGSEGV = 11 };
+extern int mmu_on;
+extern int mmu_uoff;                   // the user window's base, or 0: user addresses are physical
+int  mmu_uva(int p);                   // a user region's memory as user mode sees it (else P)
+int  mmu_phys(int p);                  // ... and as it is in memory
+void mmu_init();                       // at boot: tables, and on
+extern int sched_bkl[2];               // the kernel lock (sched.c)
+#define sched_has_bkl() (smp_ncpu < 2 || sched_bkl[0] == cpu_self->id + 1)   // this CPU holds it
+// Where this CPU is, for the TLB's shootdown (mmu.c): each word of
+// mmu_inkernel has one writer, its CPU, so one compare-and-swap (a fence)
+// is enough; and a flush asked of it
+extern int mmu_inkernel[CPU_MAX];
+extern int mmu_shoot[CPU_MAX];
+int  mmu_trap_flush();
+// sched_trap's first thing: a shootdown asked of this CPU
+#define mmu_trap_in() (__c4_cas((int)&mmu_inkernel[cpu_self->id], mmu_inkernel[cpu_self->id], 1), mmu_shoot[cpu_self->id] ? mmu_trap_flush() : 0)
+// ... and its last, T the task it goes back to
+#define mmu_trap_out(t) (__c4_cas((int)&mmu_inkernel[cpu_self->id], mmu_inkernel[cpu_self->id], !(t) || (t)->privs != PRIV_USER), mmu_shoot[cpu_self->id] ? mmu_trap_flush() : 0)
+// ... an IPI inside a handler: the flush, if asked
+#define mmu_trap_nested() (mmu_shoot[cpu_self->id] ? mmu_trap_flush() : 0)
+void mmu_cpu(int k);                   // another CPU, as it starts
+int  mmu_map(int *dir, int va, int pa, int n, int flags);
+extern int mmu_short;                  // memory is short: allocation takes the kernel lock (sched_light)
+// Pages are moving (mmu_still): no CPU takes the light path, and each says
+// when it is on it. Under SMP: each word is written by its own CPU.
+extern int mmu_moving;
+extern int sched_lightcpu[CPU_MAX];
+void mmu_fault(struct task *t, int va);   // TRAP_SEGV from a user task: kill it
+// What user mode may use of page 0 (MMU_IOPM)
+enum { IOPM_ROM = 1, IOPM_DEV = 2, IOPM_GUI = 4, IOPM_SND = 8, IOPM_LOCAL = 16, IOPM_LOCALW = 32 };
+// ... every user task's: the ROM, the display, the sound card, reading the window
+// A user task's: the display, the sound card, and the CPU-local window to
+// read. Not the ROM: a null pointer's read faults (TLEV still runs there).
+enum { MMU_IOPM_USER = 4 | 8 | 16 };
+int  umalloc_stack(int n);             // umalloc, and a guard page below it
+int  mmu_ioperm(struct task *t, int bits);   // SYS_IOPERM
+int  mmu_mapfrom(struct task *t, int va, int n);   // SYS_MAPFROM
+// A user task's memory. Without the MMU these are malloc and free.
+// umalloc: whole pages, the kernel's until mmu_adopt gives them to the
+// task they were made for (its stack, image, arguments); ufree gives such
+// a region back, or frees a kernel block. umem_alloc and umem_free: the
+// blocks a task asks for (SYS_SBRK, malloc behind protected mode), small
+// ones from slabs of its own pages, big ones with no memory until each
+// page is used (swap's); umem_free_all, its heap (ALL: everything it
+// owns).
+// loader.c: the image being loaded is a user task's, relocated to the
+// addresses user mode sees (mmu_uva)
+extern int loader_uva;
+int  umalloc(int n);
+void ufree(int p);
+void umem_share(int p);                // a cached library's code: in every space, never freed
+void mmu_adopt(struct task *t);        // what was made for T is T's
+int  umem_alloc(struct task *t, int n);
+void umem_free(struct task *t, int p);
+void umem_free_all(struct task *t, int all);
+int  umem_bytes(struct task *t);
+int  mmu_user_entry(struct task *t);   // a page that runs T's constructors, main and exit
+int  mmu_slot();                       // a word user mode may read: a library's data slot
+void mmu_switch(struct task *t);       // T is about to run here: its space
+void mmu_task_done(struct task *t);    // T is gone: its space too
+void mmu_gone();                       // a task is done: blocks of frames emptied into others, one held let go
+// A task has gone, and the kernel's own memory may be tidied, at a trap's start and
+// at most once a MMU_TIDY_MS (sched_trap): nothing in hand there
+enum { MMU_TIDY_MS = 1000 };
+extern int mmu_tidying, mmu_tidywhen;
+void mmu_tidy();
+int  mmu_rmove(char *from, char *to);  // the region record FROM has been copied to TO: everything that names it told
+char *umem_block(int n);               // without the MMU: a program's block, from the heap's top where the host can
+// Load control: a task held, or let go, each MMU_LOAD_MS (mmu.c)
+enum { MMU_LOAD_MS = 250 };
+extern int mmu_swapok;                 // the host keeps pages
+extern int mmu_lwin;                   // when mmu_balance last looked
+void mmu_balance();
+void mmu_letgo(struct task *t);        // ... T run again
+// malloc for a big kernel buffer: with swap, pages put out to make one
+// run of N bytes when the heap has none (a program's image as the loader
+// reads it, a file's bytes)
+char *mmu_kalloc(int n);
+// ... and N bytes the kernel keeps for good, which cannot move: as low as can
+// be had, programs' pages moved or put out from below if that lowers it
+char *mmu_klow(int n);
+// Could the running task use the N bytes at P (to write, if W)? And the
+// string at S: its length, or -1. Always yes without the MMU.
+int  uaccess(int p, int n, int w);
+// ... and a syscall's three words of arguments, in the task's stack: a page
+// checked once, while the task runs here and nothing anywhere is unmapped
+// (mmu_mapgen), for the check is a fifth of what a syscall costs. Only for
+// reading: a page that has gone out since is read through the kernel's map.
+extern int mmu_mapgen;
+int  uaccess_args(int p);
+#define UARGS_OK(p) (((p) & ~(MMU_PAGE - 1)) == cpu_self->okva && cpu_self->okgen == mmu_mapgen && ((p) & (MMU_PAGE - 1)) <= MMU_PAGE - 3 * sizeof(int) ? 1 : uaccess_args(p))
+int  ustrlen(char *s);
+int  uvecok(char **v, int n);          // N strings (N < 0: up to a null pointer) and their vector
+char *ucopy(char *p, int n);           // N bytes at P, copied into the running task's memory
 
 #endif // __C4IX_H

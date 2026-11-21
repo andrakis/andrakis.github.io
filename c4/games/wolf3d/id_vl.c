@@ -1,6 +1,7 @@
 // ID_VL.C
 
 #include "wl_def.h"
+#include "c4/c4accel.h"         // c4sdl: the browser's accelerators
 
 // Uncomment the following line, if you get destination out of bounds
 // assertion errors and want to ignore them during debugging
@@ -652,6 +653,17 @@ void VL_MemToScreenScaledCoord (byte *source, int width, int height, int destx, 
     dest = VL_LockSurface(screenBuffer);
     if(dest == NULL) return;
 
+#ifdef C4IX
+    // c4sdl: in one instruction where the machine has the game's
+    // accelerators (c4/c4accel.h), the same pixels
+    if (WOLF_ACCEL())
+    {
+        wolf_blit(source, width, 0, 0, width, height, dest, ylookup, destx, desty, scaleFactor);
+        VL_UnlockSurface(screenBuffer);
+        return;
+    }
+#endif
+
     for(j = 0, scj = 0; j < height; j++, scj += scaleFactor)
     {
         for(i = 0, sci = 0; i < width; i++, sci += scaleFactor)
@@ -695,6 +707,17 @@ void VL_MemToScreenScaledCoord2 (byte *source, int origwidth, int srcx, int srcy
 
     dest = VL_LockSurface(screenBuffer);
     if(dest == NULL) return;
+
+#ifdef C4IX
+    // c4sdl: in one instruction where the machine has the game's
+    // accelerators (c4/c4accel.h), the same pixels
+    if (WOLF_ACCEL())
+    {
+        wolf_blit(source, origwidth, srcx, srcy, width, height, dest, ylookup, destx, desty, scaleFactor);
+        VL_UnlockSurface(screenBuffer);
+        return;
+    }
+#endif
 
     for(j = 0, scj = 0; j < height; j++, scj += scaleFactor)
     {

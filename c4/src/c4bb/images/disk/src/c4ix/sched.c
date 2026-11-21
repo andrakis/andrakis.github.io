@@ -39,6 +39,9 @@ static struct task *kernel_task;
 static struct task *idle_task;
 static int sched_idle(int argc, int argv);
 static int sched_unblocked(struct task *n);
+static int sched_napto;         // CPU 0's idle loop naps until this ms (0: it does not)
+static int sched_pipesready(struct task *t);
+static int sched_pipegen;       // bumped by every pipe's write and last writer's close (sched_events)
 static void sched_banner();
 static int sched_interval;   // preemption interval, 0 = none
 
@@ -75,8 +78,10 @@ static int sched_interval;   // preemption interval, 0 = none
 struct cpu *cpu_self;
 static struct cpu cpu_boot;
 int smp_ncpu;
-static int smp_idle[CPU_MAX];        // 1: that CPU runs its idle task
-static int smp_park[CPU_MAX];        // what an idle CPU parks on: only an IPI wakes it
+static int smp_idlemask;             // the CPUs running their idle tasks, bit k for CPU k
+#define SMP_IDLE(k, on) (smp_idlemask = (on) ? smp_idlemask | (1 << (k)) : smp_idlemask & ~(1 << (k)))
+static int smp_park[CPU_MAX];        // what an idle CPU parks on: an IPI wakes it, and a switch
+                                     // back to its idle task makes it 1 (smp_ap)
 static int smp_stack[CPU_MAX];       // each other CPU's boot stack, its idle task's
 static struct task *smp_idle_t[CPU_MAX];   // ... and that idle task
 static int smp_stopping;             // shutdown: the other CPUs halt
@@ -95,32 +100,61 @@ void sched_early() {
 // A kernel lock is two words: 1 + the CPU holding it (0 if none), and
 // its holds, nested, so a CPU can take one it has. A CPU spins a little
 // on one held elsewhere, then parks in CWAI until the holder lets go.
-// On one CPU there is nothing to lock against, and these do nothing.
-void klock_take(int *lk) {
+// On one CPU there is no other CPU to lock against, and these only mask
+// preemption (below).
+int klock_spin(int *lk) {
     int me, o, spin;
-    if (smp_ncpu < 2) return;
+    if (smp_ncpu < 2) return 0;
     me = cpu_self->id + 1;
-    if (lk[0] == me) { ++lk[1]; return; }
+    if (lk[0] == me) { ++lk[1]; return 0; }
     spin = 0;
     while ((o = __c4_cas((int)lk, 0, me))) {
         if (++spin > BKL_SPIN) { __c4_wait((int)lk, o); spin = 0; }
     }
     lk[1] = 1;
+    return 0;
 }
 
-void klock_drop(int *lk) {
-    if (smp_ncpu < 2) return;
-    if (--lk[1]) return;
+int klock_let(int *lk) {
+    if (smp_ncpu < 2) return 0;
+    if (--lk[1]) return 0;
     __c4_xchg((int)lk, 0);
     __c4_wake((int)lk, 1);
+    return 0;
+}
+
+// A lock is the CPU's, not the task's: taken again on the CPU that holds
+// it, it is had at once. So whoever holds one is not to be switched out
+// while it does -- outside the trap handler, which nothing preempts, that
+// is a kernel task, and the clock would switch it out where it stood. A
+// trap of the task switched in then took the lock as its own, and went
+// through what the kernel task was halfway through: init's mmu_valloc,
+// its scan of the window half done, gave a new task's image the page a
+// program's malloc had just been given there (the program's write then
+// killed it, "the kernel's, for a task being made"). On one CPU, where
+// the lock itself is nothing, the same. So outside the handler a lock
+// masks preemption while it is held, as sched_lock does.
+int klock_take_slow(int *lk) {
+    if (sched_lockdepth == 0 && sched_interval) __c4_configure(C4IX_CONF_INTERVAL, 0);
+    ++sched_lockdepth;
+    return klock_spin(lk);
+}
+
+int klock_drop_slow(int *lk) {
+    klock_let(lk);
+    --sched_lockdepth;
+    if (sched_lockdepth == 0 && sched_interval) __c4_configure(C4IX_CONF_INTERVAL, sched_interval);
+    return 0;
 }
 
 // The big one, the KERNEL LOCK: everything in the kernel but what has a
 // lock of its own -- so far, the tasks' memory (task.c, umem_lock), which
 // a program's malloc and free reach without it (sched_trap's light path).
-static int bkl[2];
-static void bkl_take() { klock_take(bkl); }
-static void bkl_drop() { klock_drop(bkl); }
+int sched_bkl[2];
+int sched_lightcpu[CPU_MAX];
+static void bkl_take() { klock_spin(sched_bkl); }
+// Whether this CPU holds the kernel lock: the MMU swaps only then (mmu.c)
+static void bkl_drop() { klock_let(sched_bkl); }
 
 // Whether N may run on CPU K by its mask (pin, SYS_AFFINITY). A mask
 // naming no CPU this machine has is no mask at all.
@@ -131,18 +165,22 @@ static int sched_allows(struct task *n, int k) {
     return !m || (m & (1 << k)) != 0;
 }
 
+// Is N held (mmu.c, load control)? Not with a signal to take: it runs
+// to take it.
+#define sched_held(n) (((n)->tflags & (TF_HELD | TF_SIG)) == TF_HELD)
+
 // Whether this CPU may run N: not while another CPU is on its stack,
 // an idle task only on its own CPU, a kernel task only on CPU 0, and a
-// pinned task only on its CPUs.
-static int sched_mine(struct task *n) {
+// pinned task only on its CPUs; and no CPU a task held.
+static int sched_mine_smp(struct task *n) {
     int me;
-    if (smp_ncpu < 2) return 1;
     me = cpu_self->id + 1;
     if (n->oncpu && n->oncpu != me) return 0;
     if (n->cpuidle) return n->cpuidle == me;
     if (n->privs == PRIV_KERNEL) return me == 1;
     return sched_allows(n, me - 1);
 }
+#define sched_mine(n) (!sched_held(n) && (smp_ncpu < 2 || sched_mine_smp(n)))
 
 // This CPU is off the stack of the task it last switched out. Under the
 // lock: at a trap's start, or in an idle loop.
@@ -178,38 +216,195 @@ static int smp_idlefor(struct task *n) {
     int k;
     k = smp_ncpu - 1;
     while (k >= 0) {
-        if (k != cpu_self->id && smp_idle[k] && sched_allows(n, k)) return k;
+        if (k != cpu_self->id && (smp_idlemask & (1 << k)) && sched_allows(n, k)) return k;
         --k;
     }
     return 0 - 1;
 }
 
-// Work some idle CPU could do: an IPI to one for each task ready, among
-// the CPUs it may run on. Kernel tasks are CPU 0's. Under the lock, at
-// the end of every trap; only when some CPU is idle does it look.
-static void smp_kick() {
-    struct task *n;
-    int k, me, kern, idle;
-    me = cpu_self->id;
-    idle = 0;
-    k = 0;
-    while (k < smp_ncpu) { if (k != me && smp_idle[k]) ++idle; ++k; }
-    if (!idle) return;
-    kern = 0;
-    n = task_head;
-    while (n && !kern) {
-        if (n->privs == PRIV_KERNEL && !n->cpuidle && !n->oncpu &&
-            (n->state == TS_READY || sched_unblocked(n))) kern = 1;
-        n = n->next;
+// ---- the queues ----
+//
+// A task is on the queue its state says, and what the scheduler looks at is the
+// queues, not the table: on a machine with many tasks and few of them ready the
+// walks were most of a switch's cost, a yield with 50 asleep four times one alone.
+//
+//   Q_READY  ready, oldest first. A task goes on the tail as it is preempted or woken,
+//            so the turns go round; each CPU takes the first it may run (sched_mine:
+//            pins, a task still on another's stack, kernel tasks CPU 0's, the held).
+//   Q_SLEEP  on the clock alone, soonest first: one compare says if anyone is due.
+//   Q_POLL   what nothing says has arrived, because the host writes it: an event in
+//            a window's ring (SYS_EVWAIT), the console's input. Looked at each ms.
+//   Q_PIPE   blocked reading a pipe, on the pipe's own list: woken by a write, and by
+//            the last writer's close (sched_pipewake).
+//
+// Every change of state comes through task_state, under the lock. And the walk that
+// used to find the ready is kept, each 16 ms, as a watch (sched_tick): a task its state
+// says should be on a queue and is not, it puts there, and counts. So a site that
+// forgets costs a few ms, not a task that never runs; and the tests fail on the count
+// (/proc/meminfo's rqlost).
+enum { Q_READY = 1, Q_SLEEP = 2, Q_POLL = 3, Q_PIPE = 4 };
+static struct task *rq_head, *rq_tail, *sl_head, *pl_head;
+int sched_rqlost;
+static int sched_tickms;        // the machine ms it last looked
+static int sched_watchms;       // ... and when the watch last walked the table
+enum { SCHED_WATCH_MS = 16 };
+
+static void q_off(struct task *t) {
+    if (!t->q) return;
+    if (t->qprev) t->qprev->qnext = t->qnext;
+    else if (t->q == Q_READY) rq_head = t->qnext;
+    else if (t->q == Q_SLEEP) sl_head = t->qnext;
+    else if (t->q == Q_POLL) pl_head = t->qnext;
+    else t->block_vn->waiters = (int)t->qnext;
+    if (t->qnext) t->qnext->qprev = t->qprev;
+    else if (t->q == Q_READY) rq_tail = t->qprev;
+    t->q = 0;
+    t->qnext = 0;
+    t->qprev = 0;
+}
+
+static void rq_add(struct task *t) {
+    t->q = Q_READY;
+    t->qnext = 0;
+    t->qprev = rq_tail;
+    if (rq_tail) rq_tail->qnext = t;
+    else rq_head = t;
+    rq_tail = t;
+}
+
+// On a list with no tail kept, at its head
+#define Q_PUSH(head, t, which) ((t)->q = (which), (t)->qprev = 0, (t)->qnext = (head), ((head) ? ((head)->qprev = (t)) : 0), (head) = (t))
+
+static void sl_add(struct task *t) {
+    struct task *p;
+    t->q = Q_SLEEP;
+    if (!sl_head || t->ck_wake - sl_head->ck_wake < 0) {
+        t->qprev = 0;
+        t->qnext = sl_head;
+        if (sl_head) sl_head->qprev = t;
+        sl_head = t;
+        return;
     }
-    if (kern && me != 0 && smp_idle[0]) { __c4_ipi(0); smp_idle[0] = 0; --idle; }
+    p = sl_head;
+    while (p->qnext && p->qnext->ck_wake - t->ck_wake <= 0) p = p->qnext;
+    t->qprev = p;
+    t->qnext = p->qnext;
+    if (p->qnext) p->qnext->qprev = t;
+    p->qnext = t;
+}
+
+void task_state(struct task *t, int s) {
+    struct task *h;
+    sched_lock();
+    q_off(t);
+    t->state = s;
+    if (s == TS_READY) {
+        if (!t->cpuidle) rq_add(t);
+    } else if (s == TS_SLEEPING) {
+        if (t->ev_wait) Q_PUSH(pl_head, t, Q_POLL);
+        else sl_add(t);
+        // CPU 0's idle loop naps to the soonest deadline it knew of, and
+        // the other CPUs park with none: one sooner, set on another CPU,
+        // ends the nap, or nobody looks until it is over. A task pinned to
+        // CPU 1 slept 100 ms, the nap with nobody asleep, for each 3 it
+        // asked (test-c4ix-pipewake's writer).
+        if (sched_napto && t->ck_wake - sched_napto < 0 && cpu_self->id) { sched_napto = 0; __c4_ipi(0); }
+    } else if (s == TS_BLOCKED) {
+        if (t->block_vn->type == VN_PIPE) {
+            h = (struct task *)t->block_vn->waiters;
+            Q_PUSH(h, t, Q_PIPE);
+            t->block_vn->waiters = (int)h;
+        } else Q_PUSH(pl_head, t, Q_POLL);
+    }
+    sched_unlock();
+}
+
+void task_unqueue(struct task *t) {
+    sched_lock();
+    q_off(t);
+    sched_unlock();
+}
+
+// N can run: its wait is over
+static void sched_wakeup(struct task *n) {
+    n->ev_wait = 0;
+    task_state(n, TS_READY);
+    n->woke = 1;
+    sched_wake = 1;
+}
+
+// Whoever's time has come
+#define SCHED_DUE(now) while (sl_head && (now) - sl_head->ck_wake >= 0) sched_wakeup(sl_head)
+
+// Data has come to a pipe, or its last writer has gone. Their reads run again,
+// and whoever is too late blocks again.
+void sched_pipewake(struct vnode *vn) {
+    sched_lock();
+    ++sched_pipegen;
+    while (vn->waiters) sched_wakeup((struct task *)vn->waiters);
+    sched_unlock();
+}
+
+// Each ms of the machine's clock, by whoever has the lock first
+static void sched_tick(int now) {
+    struct task *n, *x;
+    int s;
+    sched_tickms = now;
+    SCHED_DUE(now);
+    n = pl_head;
+    while (n) {
+        x = n->qnext;
+        sched_unblocked(n);
+        n = x;
+    }
+    // the watch: a walk of the whole table, for what should never be
+    if (now - sched_watchms < SCHED_WATCH_MS) return;
+    sched_watchms = now;
     n = task_head;
-    while (n && idle > 0) {
-        if (n->privs != PRIV_KERNEL && !n->cpuidle && !n->oncpu &&
-            (n->state == TS_READY || sched_unblocked(n)) && (k = smp_idlefor(n)) >= 0) {
-            __c4_ipi(k); smp_idle[k] = 0; --idle;
+    while (n) {
+        s = n->state;
+        if (!n->q && !n->cpuidle && (s == TS_READY || s == TS_SLEEPING || s == TS_BLOCKED)) {
+            if (!sched_rqlost) klog("sched: task %d (%s) in state %d was on no queue\n", n->id, n->name, s);
+            ++sched_rqlost;
+            task_state(n, s);
+            sched_wake = 1;
+        } else if (n->q == Q_PIPE && vfs_readable(n->block_vn, n->block_pos)) {
+            if (!sched_rqlost) klog("sched: task %d (%s) was left waiting for a pipe that has data\n", n->id, n->name);
+            ++sched_rqlost;
+            sched_wakeup(n);
+        } else if (n->q == Q_POLL && n->state == TS_SLEEPING && (n->ev_wait & 2) && n->evgen == sched_pipegen &&
+                   sched_pipesready(n)) {
+            if (!sched_rqlost) klog("sched: task %d (%s) was left asleep with a pipe it reads ready\n", n->id, n->name);
+            ++sched_rqlost;
+            sched_wakeup(n);
         }
         n = n->next;
+    }
+}
+
+// Work some idle CPU could do: an IPI to one for each task ready, among
+// the CPUs it may run on. Kernel tasks are CPU 0's. Under the lock, at the end
+// of a trap, when some CPU is idle and something has changed: a switch, or
+// sched_wake. Each millisecond of the machine's clock it looks anyway, for what
+// nothing says: a sleeper's time come, an event in a window's ring, which the
+// host writes. A walk at every trap made a getpid with 50 tasks asleep cost 6
+// times what it did alone. A millisecond is 100,000 cycles at 100 MHz, two
+// slices, in which the CPU running would be picking for itself anyway.
+int sched_wake;
+static int smp_kickms;          // the machine ms it last looked
+
+static void smp_kick(int now) {
+    struct task *n;
+    int k, me;
+    me = cpu_self->id;
+    n = rq_head;
+    while (n && (smp_idlemask & ~(1 << me))) {
+        if (!n->cpuidle && !n->oncpu && !sched_held(n)) {
+            if (n->privs == PRIV_KERNEL) {
+                if (me != 0 && (smp_idlemask & 1)) { __c4_ipi(0); SMP_IDLE(0, 0); }
+            } else if ((k = smp_idlefor(n)) >= 0) { __c4_ipi(k); SMP_IDLE(k, 0); }
+        }
+        n = n->qnext;
     }
 }
 
@@ -217,11 +412,20 @@ static void smp_kick() {
 // before it parks
 static int sched_ready_here() {
     struct task *n;
-    n = task_head;
+    int now;
+    now = __time();
+    if (now != sched_tickms) sched_tick(now);
+    else SCHED_DUE(now);
+    n = rq_head;
     while (n) {
-        if (!n->cpuidle && sched_mine(n) && (n->state == TS_READY || sched_unblocked(n))) return 1;
-        n = n->next;
+        if (!n->cpuidle && sched_mine(n)) return 1;
+        n = n->qnext;
     }
+    // Ready, but not for this CPU: a task pinned to another, which this
+    // look may have just woken. That CPU is parked, and nothing else would
+    // tell it until this one trapped again, after its nap: 100 ms for each
+    // 3 ms sleep of a task pinned to CPU 1 (test-c4ix-pipewake's writer).
+    if (rq_head && smp_ncpu > 1) smp_kick(now);
     return 0;
 }
 
@@ -250,6 +454,24 @@ static int acct_napms;
 static long long acct_cbusy[CPU_MAX];
 static long long acct_cidle[CPU_MAX];
 static int acct_cnap[CPU_MAX];
+
+// The cycles the busiest CPU has run its tasks since the last asking: how long
+// that was, in the cycles it had. The machine's clock is no measure of them:
+// on threads a CPU runs what its host gives it, however many MHz it says.
+static int sched_lastbusy[CPU_MAX];
+int sched_busiest() {
+    int k, b, d, most;
+    most = 0;
+    k = 0;
+    while (k < smp_ncpu) {
+        b = (int)acct_cbusy[k];
+        d = b - sched_lastbusy[k];
+        sched_lastbusy[k] = b;
+        if (d > most) most = d;
+        ++k;
+    }
+    return most;
+}
 
 static void acct_cpu(struct task *t, int d) {
     if (t->cpuidle) acct_cidle[cpu_self->id] = acct_cidle[cpu_self->id] + d;
@@ -324,6 +546,7 @@ void sched_retire(struct task *t) {
 // (its ublocks, each with its header, task.c)
 static int task_mem(struct task *t) {
     int b;
+    if (mmu_on) return task_umem(t);   // its pages, all of them
     b = t->img_bytes;
     if (t->stack) b = b + t->stack_words * sizeof(int);
     return b + task_umem(t);
@@ -378,6 +601,10 @@ int sched_cpustat(struct cpustat *h, struct cpustat_task *r, int max) {
     h->idles[0] = h->idle;
     i = 1;
     while (i < h->ncpu) { if (smp_idle_t[i]) h->idles[i] = smp_idle_t[i]->id; ++i; }
+    h->cpms = klog_cpms;
+    // and how many tasks there are, should max have been too few
+    h->total = n;
+    while (t) { ++h->total; t = t->next; }
     return n;
 }
 
@@ -405,20 +632,29 @@ int sched_switches;          // context switches since boot
 // Under SMP the mask is also the kernel lock, outside the handler: the
 // handler holds that already. Masked first, so that nothing preempts a
 // CPU holding it.
-void sched_lock() {
+// In the trap handler the kernel lock is held already -- but on the light
+// path (sched_light), where a program's malloc runs without it, and where
+// what the malloc reaches past the task's own blocks locks this way: the
+// slab caches (sl4b.c, a record for a new region), the files' cache
+// (vfs_trim, vfs_reclaim). Unlocked there, a region's record went to two
+// at once, freed by a task's exit on one CPU as a compile's malloc took
+// it on another: a region list with a cycle in it, and c4sc writing where
+// it had no memory (a -j 3 build in 32 MB).
+int sched_lock_slow() {
     if (!sched_intrap) {
         if (sched_lockdepth == 0 && sched_interval) __c4_configure(C4IX_CONF_INTERVAL, 0);
         bkl_take();
-    }
-    ++sched_lockdepth;
+    } else bkl_take();
+    return ++sched_lockdepth;
 }
 
-void sched_unlock() {
+int sched_unlock_slow() {
     --sched_lockdepth;
     if (!sched_intrap) {
         bkl_drop();
         if (sched_lockdepth == 0 && sched_interval) __c4_configure(C4IX_CONF_INTERVAL, sched_interval);
-    }
+    } else bkl_drop();
+    return 0;
 }
 
 // The running task's slice starts again now: after a service that
@@ -429,7 +665,7 @@ void sched_new_slice() {
 
 // ---- picking the next task ----
 
-// What a parked task is waiting for, asked as sched_pick passes it. (A
+// What a parked task is waiting for, asked of the poll list each ms. (A
 // TS_WAITING task is not asked: task_zombify wakes it when its target
 // dies, below.)
 // A TS_BLOCKED task is parked on a vnode -- an empty pipe. It wakes
@@ -437,41 +673,59 @@ void sched_new_slice() {
 // and the emptiness becomes end-of-file instead.
 // A TS_SLEEPING task is parked on the clock. Subtract rather than
 // compare the raw values -- the habit that survives a wrap.
+static int sched_evpoll(struct task *t);
 static int sched_unblocked(struct task *n) {
     if (n->state == TS_SLEEPING) {
-        if (__time() - n->ck_wake < 0 && !(n->ev_wait && sched_events(n))) return 0;
-        n->ev_wait = 0;
-        n->state = TS_READY;
-        n->woke = 1;
+        if (__time() - n->ck_wake < 0 && !(n->ev_wait && sched_evpoll(n))) return 0;
+        sched_wakeup(n);
         return 1;
     }
     if (n->state != TS_BLOCKED) return 0;
     if (!vfs_readable(n->block_vn, n->block_pos)) return 0;
-    n->state = TS_READY;
-    n->woke = 1;
+    sched_wakeup(n);
     return 1;
 }
 
 // What SYS_EVWAIT waits for besides the clock: an event in the task's GUI
 // ring, whose header is [capacity, head, tail] -- the host moves the head,
-// the task the tail -- or data, or end of file, on a pipe it reads.
-int sched_events(struct task *t) {
+// the task the tail -- or data, or end of file, on a pipe it reads. The
+// pipes are walked only as far as the task has had an fd (fdtop), and each
+// walk notes sched_pipegen, so the poll each ms (sched_evpoll) walks them
+// again only once some pipe has had data or lost its last writer since.
+// Walked every ms, they were half the kernel's time with Quake in a window,
+// and 2% of the machine's with Wolf3D or Duke3D in one.
+static int sched_pipesready(struct task *t) {
     struct file *f;
-    int fd, *ring;
+    int fd;
+    t->evgen = sched_pipegen;
+    fd = 0;
+    while (fd < t->fdtop) {
+        f = (struct file *)t->fds[fd];
+        if (f && f->vn->type == VN_PIPE && (f->flags & 3) == C4IX_O_RDONLY
+            && (f->vn->size > f->vn->rpos || !f->vn->writers)) return 1;
+        ++fd;
+    }
+    return 0;
+}
+
+int sched_events(struct task *t) {
+    int *ring;
     if (t->ev_wait & 1) {
         ring = (int *)t->ev_ring;
         if (ring && ring[1] != ring[2]) return 1;
     }
-    if (t->ev_wait & 2) {
-        fd = 0;
-        while (fd < FD_MAX) {
-            f = (struct file *)t->fds[fd];
-            if (f && f->vn->type == VN_PIPE && (f->flags & 3) == C4IX_O_RDONLY
-                && (f->vn->size > f->vn->rpos || !f->vn->writers)) return 1;
-            ++fd;
-        }
+    return (t->ev_wait & 2) && sched_pipesready(t);
+}
+
+// ... asked each ms of a task asleep in SYS_EVWAIT: its ring, which the host
+// writes with no event the kernel sees, and its pipes only if one has changed
+static int sched_evpoll(struct task *t) {
+    int *ring;
+    if (t->ev_wait & 1) {
+        ring = (int *)t->ev_ring;
+        if (ring && ring[1] != ring[2]) return 1;
     }
-    return 0;
+    return (t->ev_wait & 2) && t->evgen != sched_pipegen && sched_pipesready(t);
 }
 
 // The earliest deadline among sleeping tasks, or 0 if none. The idle
@@ -481,13 +735,16 @@ int sched_sleep_due(int *pms) {
     int found;
 
     found = 0;
-    t = task_head;
+    sched_lock();
+    if (sl_head) { *pms = sl_head->ck_wake; found = 1; }
+    t = pl_head;
     while (t) {
         if (t->state == TS_SLEEPING) {
             if (!found || t->ck_wake - *pms < 0) { *pms = t->ck_wake; found = 1; }
         }
-        t = t->next;
+        t = t->qnext;
     }
+    sched_unlock();
     return found;
 }
 
@@ -501,6 +758,15 @@ int sched_sleep_due(int *pms) {
 // task_zombify and sched_retire count them out.
 int sched_nlive;
 int sched_nzombies;
+
+// A signal by name, for the log
+static char *sched_signame(int sig) {
+    if (sig == CK_SIGINT) return "SIGINT, Ctrl-C";
+    if (sig == CK_SIGKILL) return "SIGKILL";
+    if (sig == C4IX_SIGSEGV) return "SIGSEGV, a fault";
+    if (sig == CK_SIGTERM) return "SIGTERM";
+    return "a signal";
+}
 
 // Every death comes through here: a task's exit, a Ctrl-C, a signal's
 // default action. Whoever waits on the task is woken now, with its code,
@@ -518,19 +784,32 @@ void task_zombify(struct task *t, int code) {
     int was;
     if (t->state == TS_ZOMBIE) return;
     was = t->state;
+    // Said in the kernel log (dmesg): every task the boot made, and after
+    // it every death that was not a plain exit(0) -- a signal's, or a
+    // code that says something went wrong -- so that a program that
+    // vanishes from the screen has its reason in dmesg -w. (What killed
+    // one for a fault, mmu.c and the stack guard say on the console too.)
+    if (con_is_booting() || t->id <= boot_lastid) klog("task %d (%s) exited %d\n", t->id, t->name, code);
+    else if (t->killsig) klog("task %d (%s) killed by signal %d (%s)\n", t->id, t->name, t->killsig, sched_signame(t->killsig));
+    else if (code) klog("task %d (%s) exited %d\n", t->id, t->name, code);
     t->exitcode = code;
-    t->state = TS_ZOMBIE;
+    task_state(t, TS_ZOMBIE);
+    TF_SET(t, TF_NOPAGE);
+    if (t->held) mmu_letgo(t);
+    if (t->nice) sched_setnice(t, 0);
     ++sched_nzombies;
     if (t != kernel_task && !t->cpuidle) --sched_nlive;
     task_unborrow(t);
     sys_display_drop(t->id);      // the desktop has the display back
+    con_task_gone(t->id);         // ... and the console its line, should it have asked for raw keys
     if (was == TS_VFORK && (w = task_get(t->wait_for)) && w->vfparent == t) task_zombify(w, code);
     w = task_head;
     while (w) {
         if (w->state == TS_WAITING && w->wait_posix &&
             (w->wait_for == t->id || (w->wait_for == -1 && t->parent == w->id))) {
             w->wait_posix = 0;
-            w->state = TS_READY;
+            task_state(w, TS_READY);
+            sched_wake = 1;
             w->woke = 1;
             return;
         }
@@ -540,7 +819,8 @@ void task_zombify(struct task *t, int code) {
             // sv_a into the accumulator, where SYS_WAIT's result belongs
             w->wait_result = code;
             w->sv_a = code;
-            w->state = TS_READY;
+            task_state(w, TS_READY);
+            sched_wake = 1;
             w->woke = 1;
             task_release(t);
             return;
@@ -549,25 +829,23 @@ void task_zombify(struct task *t, int code) {
     }
 }
 
-// Round-robin after t: the next runnable task; else t itself, if it can
-// still run; else the idle task, which never takes a turn of its own.
-// A task that has just died may be off the list already -- its waiter
-// reaped it -- so the walk starts from the head for a zombie, and stops
-// when it comes back round to where it started.
-// Under SMP, only what this CPU may run (sched_mine), and the idle task
-// is this CPU's.
+// The queue's first that this CPU may run (sched_mine), and the idle task is
+// this CPU's; else t itself, if it can still run; else the idle task, which
+// never takes a turn of its own. N stays on the queue until it is switched to:
+// the caller may yet keep T.
 static struct task *sched_pick(struct task *t) {
-    struct task *n, *start, *idle;
+    struct task *n, *x, *idle;
+    int now;
     idle = cpu_self->idle;
-    start = (t->state == TS_ZOMBIE) ? task_head : task_next(t);
-    n = start;
+    now = __time();
+    SCHED_DUE(now);
+    n = rq_head;
     while (n) {
-        if (n != t && n != idle && !n->cpuidle && sched_mine(n)) {
-            if (n->state == TS_READY) return n;
-            if (sched_unblocked(n)) return n;
-        }
-        n = task_next(n);
-        if (n == start) n = 0;
+        x = n->qnext;
+        // (an idle task is one only once it has been made)
+        if (n->cpuidle) q_off(n);
+        else if (n != t && n != idle && sched_mine(n)) return n;
+        n = x;
     }
     if ((t->state == TS_RUNNING || t->state == TS_READY || sched_unblocked(t)) &&
         (t == idle || t->cpuidle || sched_mine(t))) return t;
@@ -610,23 +888,30 @@ static struct task *sched_pick(struct task *t) {
 // The turns still go round, so a favoured task that never sleeps cannot
 // starve the others; a task with a positive nice is only ever preempted
 // by a woken task with a lower one. A child starts with its parent's.
-static int sched_niced;          // some task has had a nice set
+static int sched_nniced;         // tasks alive with a nice set
+
+void sched_setnice(struct task *t, int nice) {
+    sched_nniced = sched_nniced + (nice != 0) - (t->nice != 0);
+    t->nice = nice;
+    TF_PUT(t, TF_FAV, nice < 0);
+}
 
 // the cycles a task runs before its turn passes
-static int sched_turn(struct task *t) {
-    return t->nice < 0 ? sched_interval * (1 - t->nice) : sched_interval;
-}
+#define sched_turn(t) ((t)->nice < 0 ? sched_interval * (1 - (t)->nice) : sched_interval)
+
+// May the task running here go on running here? Only being held or pinned can
+// say no; anything else sched_mine asks is true of it.
+#define SCHED_STAYS(t) (!((t)->tflags & (TF_HELD | TF_PINNED)) || sched_mine(t))
 
 // A task that has woken and is more favoured than T, this CPU's to run:
 // the most favoured, or 0
 static struct task *sched_waker(struct task *t) {
     struct task *n, *best;
     best = 0;
-    n = task_head;
+    n = rq_head;
     while (n) {
-        if (n != t && !n->cpuidle && n->nice < t->nice && (!best || n->nice < best->nice) &&
-            sched_mine(n) && (n->state == TS_READY || sched_unblocked(n)) && n->woke) best = n;
-        n = n->next;
+        if (n->woke && n != t && !n->cpuidle && n->nice < t->nice && (!best || n->nice < best->nice) && sched_mine(n)) best = n;
+        n = n->qnext;
     }
     return best;
 }
@@ -641,8 +926,7 @@ int sched_nice(int id, int nice) {
     if (!t || t->cpuidle || t->privs == PRIV_KERNEL) { sched_unlock(); return 0 - 100; }
     old = t->nice;
     if (nice >= 0 - 10 && nice <= 10) {
-        t->nice = nice;
-        if (nice) sched_niced = 1;
+        sched_setnice(t, nice);
     }
     sched_unlock();
     return old;
@@ -657,18 +941,11 @@ int sched_nice(int id, int nice) {
 // and this CPU has nothing to settle. Everything else takes the lock, and
 // does what the light path leaves for later -- the reaping, the stack
 // guard -- at the next trap.
-static int sched_light(int trap, int param) {
-    struct task *t;
-    t = sched_cur;
-    return trap == C4IX_TRAP_PM && (param == C4IX_OP_MALC || param == C4IX_OP_FREE) &&
-        t && t->state == TS_RUNNING && t->privs == PRIV_USER && !t->ck_sigpend &&
-        !sched_dying && !sched_resched && !sched_reload && !cpu_self->prev &&
-        (!sched_interval || acct_in - sched_slice0 < sched_turn(t));
-}
+#define sched_light(t, trap, param) ((trap) == C4IX_TRAP_PM && ((param) == C4IX_OP_MALC || (param) == C4IX_OP_FREE) && (t) && (t)->state == TS_RUNNING && ((t)->tflags & (TF_USER | TF_SIG)) == TF_USER && !mmu_short && !(sched_dying | sched_resched | sched_reload | (int)cpu_self->prev) && (!sched_interval || acct_in - sched_slice0 < sched_turn(t)))
 
 static void sched_trap(int interval, int trap, int param, int mode, int a, int bp, int sp, int returnpc) {
     struct task *t, *n, *me, *fv;
-    int reload, hold;
+    int reload, hold, d, rc;
 
     // Re-entry guard. c4m disables the cycle interrupt when IT takes
     // a trap, but not when user code raises one (the syscall gateway
@@ -679,7 +956,24 @@ static void sched_trap(int interval, int trap, int param, int mode, int a, int b
     // handler exactly where it was, and the interrupt stays disabled
     // (c4m's own cycle path clears the interval) until the outer
     // handler re-arms it on the way out.
-    if (sched_intrap) return;
+    //
+    // Nor are IPIs held while a handler runs (c4m.js boundary), and the
+    // flag cannot cover all of one: an IPI can land before its first
+    // instruction, or after the flag is cleared on its way out. A trap
+    // that interrupted the kernel while the task is a user task's is in
+    // another trap's handler, then -- a user task runs the kernel's code
+    // only there. Served here as a handler, it would end by sending the
+    // task to user mode at the kernel address it interrupted, in the
+    // frame of the trap it landed in ("jump to ... the kernel's image").
+    // It is only a shootdown's flush to do, if one is asked of this CPU
+    // (mmu.c); the handler it landed in does the rest.
+    if (sched_intrap || (mode == C4IX_MODE_UNPROTECTED && sched_cur && sched_cur->privs == PRIV_USER)) {
+        if (mmu_on && smp_ncpu > 1) mmu_trap_nested();
+        return;
+    }
+    // A shootdown another CPU is waiting on (mmu.c): before anything that
+    // might wait for the kernel lock, which that CPU holds
+    if (mmu_on && smp_ncpu > 1) mmu_trap_in();
     // Claim the handler BEFORE anything else, including the mask
     // below. Neither the syscall gateway nor __c4_trap disables the
     // cycle interrupt on the way in, so an interrupt can land in the
@@ -703,24 +997,36 @@ static void sched_trap(int interval, int trap, int param, int mode, int a, int b
         __c4_configure(C4IX_CONF_INTERVAL, 0);
         // The light path: a program's malloc or free that leaves it
         // running is served without the kernel lock (sched_light)
-        if (sched_light(trap, param)) {
-            me = sched_cur;
+        me = sched_cur;
+        // Whoever moves pages sets mmu_moving and then waits for this word to
+        // clear; this sets the word and then reads mmu_moving: one of the two
+        // sees the other, whichever went first (mmu_still)
+        hold = sched_light(me, trap, param);
+        if (hold) {
+            __c4_cas((int)&sched_lightcpu[cpu_self->id], 0, 1);
+            if (mmu_moving) { __c4_cas((int)&sched_lightcpu[cpu_self->id], 1, 0); hold = 0; }
+        }
+        if (hold) {
             ++me->ntraps;
             me->uacc = me->uacc + (acct_in - acct_out);
-            acct_cpu(me, acct_in - acct_out);
+            d = acct_out;
+            cpu_self->light = 1;
             sys_pmviolation(param, (int *)sp, (int *)returnpc, &a);
+            cpu_self->light = 0;
             acct_out = __c4_cycles();
             me->kacc = me->kacc + (acct_out - acct_in);
-            acct_cpu(me, acct_out - acct_in);
+            acct_cpu(me, acct_out - d);
             if ((me->uacc | me->kacc) & ACCT_FOLD_AT) acct_fold(me);
             mode = C4IX_MODE_PROTECTED;
             interval = (sched_interval && sched_lockdepth == 0) ? sched_interval : 0;
+            if (mmu_on) mmu_trap_out(me);
+            __c4_cas((int)&sched_lightcpu[cpu_self->id], 1, 0);
             sched_intrap = 0;
             return;
         }
         bkl_take();
-        smp_settle();
-        acct_unpark();
+        if (cpu_self->prev) smp_settle();
+        if (acct_parked[cpu_self->id]) acct_unpark();
         // Killed by another CPU while it ran here: nothing of it is to be
         // served, only switched away from
         if (sched_cur && sched_cur->state == TS_ZOMBIE) trap = C4IX_TRAP_SOFT_IRQ;
@@ -728,23 +1034,45 @@ static void sched_trap(int interval, int trap, int param, int mode, int a, int b
     if ((me = sched_cur)) {
         ++me->ntraps;
         me->uacc = me->uacc + (acct_in - acct_out);
-        acct_cpu(me, acct_in - acct_out);
     }
+    // load control: a task held, or let go, while paging is most of what
+    // the machine does (mmu.c)
+    d = __time();
+    if (mmu_swapok && d - mmu_lwin >= MMU_LOAD_MS) mmu_balance();
+    // the kernel's own memory, tidied now and then once a task has gone
+    if (mmu_tidying && d - mmu_tidywhen >= MMU_TIDY_MS) mmu_tidy();
+    // the queues: what nothing says has happened (sched_tick)
+    if (d != sched_tickms) sched_tick(d);
 
     // no nested switches while kernel structures move
     __c4_configure(C4IX_CONF_INTERVAL, 0);
 
     // Safe point: we are on the trapped task's stack, so any corpse
     // left over from an earlier exit can finally be freed. Usually
-    // there is none, and then not even the call.
-    if (task_reaplist) task_reap();
+    // there is none, and then not even the call. What that costs -- the
+    // dead task's memory given back, and the rest moved up (task_destroy)
+    // -- is the kernel's, not this task's: charged to whoever trapped next,
+    // a program that never stopped showed in ps as using three or four
+    // slices more for each one beside it that ended (test-c4ix-smp's nice).
+    rc = 0;
+    if (task_reaplist) {
+        rc = __c4_cycles();
+        task_reap();
+        rc = __c4_cycles() - rc;
+        if (kernel_task) {
+            kernel_task->kacc = kernel_task->kacc + rc;
+            if (kernel_task->kacc & ACCT_FOLD_AT) acct_fold(kernel_task);
+        }
+    }
     // the stack an execve left, which its handler was standing on
-    if (sched_stale_stack) { free((int *)sched_stale_stack); sched_stale_stack = 0; }
+    if (sched_stale_stack) { ufree(sched_stale_stack); sched_stale_stack = 0; }
     // The stack guard. A task whose stack pointer is inside the guard,
     // or whose top guard word has been written, ran off the end of its
     // stack: kill it here, before what it wrote under the stack -- some
     // other allocation -- takes the machine down in some other task.
-    if (sched_cur && sched_cur->stack && sched_cur->privs == PRIV_USER && sched_cur->state != TS_ZOMBIE &&
+    // Under the MMU the guard page below the stack does this, at the
+    // store that runs into it (mmu.c), and the poison is just stack.
+    if (!mmu_on && sched_cur && sched_cur->stack && sched_cur->privs == PRIV_USER && sched_cur->state != TS_ZOMBIE &&
         (sp < sched_cur->stack + C4IX_STACK_GUARD * sizeof(int) ||
          ((int *)sched_cur->stack)[C4IX_STACK_GUARD - 1] != C4IX_STACK_POISON)) {
         kprintf("c4ix: task %d (%s) overran its %d-byte stack; killing it\n",
@@ -771,8 +1099,14 @@ static void sched_trap(int interval, int trap, int param, int mode, int a, int b
             // C4KE's ABI puts the opcode at sp[0] too.
             a = ck_dispatch(param, (int *)sp + 1);
         } else {
-            kprintf("c4ix: task %d hit illegal opcode %d\n",
-                sched_cur ? sched_cur->id : -1, param);
+            // 89 is FPU. softfp's helpers ask first, so only a program built
+            // with c4lc -mfpu gets here, and the machine is why it cannot run
+            if (param == 89)
+                kprintf("c4ix: task %d needs an FPU (it was built with -mfpu), and this machine has none\n",
+                    sched_cur ? sched_cur->id : -1);
+            else
+                kprintf("c4ix: task %d hit illegal opcode %d\n",
+                    sched_cur ? sched_cur->id : -1, param);
             task_exit(-1);
         }
     } else if (trap == C4IX_TRAP_OPV) {
@@ -789,6 +1123,9 @@ static void sched_trap(int interval, int trap, int param, int mode, int a, int b
         sys_pmviolation(param, (int *)sp, (int *)returnpc, &a);
     } else if (trap == C4IX_TRAP_SIGNAL) {
         sched_interrupt();
+    } else if (trap == C4IX_TRAP_SEGV) {
+        // a page fault: only user mode is translated (mmu.c)
+        if (sched_cur && sched_cur->privs == PRIV_USER) mmu_fault(sched_cur, param);
     }
 
     // The syscall could not finish because the task had to block.
@@ -813,14 +1150,14 @@ static void sched_trap(int interval, int trap, int param, int mode, int a, int b
     // a syscall at the wrong moments would never be preempted.
     t = sched_cur;
     // a favoured task that has woken goes first (nice, above)
-    fv = (sched_niced && sched_lockdepth == 0 && t->state == TS_RUNNING && !t->cpuidle)
+    fv = (sched_nniced && sched_lockdepth == 0 && t->state == TS_RUNNING && !t->cpuidle)
         ? sched_waker(t) : 0;
     if (fv) {
         n = fv;
         sched_slice0 = acct_in;
     }
     else if ((trap == C4IX_TRAP_ILLOP || trap == C4IX_TRAP_PM) && !sched_resched
-        && t->state == TS_RUNNING && (t->cpuidle || sched_mine(t))
+        && t->state == TS_RUNNING && SCHED_STAYS(t)
         && (!sched_interval || acct_in - sched_slice0 < sched_turn(t)))
         n = t;
     // An IPI arrives whatever the mask: a task that masked preemption (an
@@ -846,6 +1183,8 @@ static void sched_trap(int interval, int trap, int param, int mode, int a, int b
             smp_idlefor(n) >= 0) n = t;
         sched_slice0 = acct_in;
     }
+    // (kept, and it was woken in its own trap: it is running, not waiting its turn)
+    if (n == t && t->q == Q_READY) { q_off(t); t->state = TS_RUNNING; }
     sched_resched = 0;
     // An execve forged the running task a new context: it is resumed
     // from that even if it is picked again, and the trap's registers,
@@ -853,11 +1192,16 @@ static void sched_trap(int interval, int trap, int param, int mode, int a, int b
     reload = sched_reload;
     sched_reload = 0;
     if (n != t || reload) {
+        sched_wake = 1;
         if (!reload) {
             t->sv = SV_REGS;
             t->sv_a = a; t->sv_bp = bp; t->sv_sp = sp; t->sv_pc = returnpc;
         }
-        if (t->state == TS_RUNNING) t->state = TS_READY;
+        // to the queue's tail, unless it is going on or it is an idle task
+        if (t->state == TS_RUNNING) {
+            t->state = TS_READY;
+            if (n != t && !t->cpuidle) rq_add(t);
+        }
         if (n->sv == SV_REGS) {
             a = n->sv_a; bp = n->sv_bp; sp = n->sv_sp; returnpc = n->sv_pc;
         } else {
@@ -871,6 +1215,7 @@ static void sched_trap(int interval, int trap, int param, int mode, int a, int b
         // the mask travels with the task, not with the machine
         t->lockdepth = sched_lockdepth;
         sched_lockdepth = n->lockdepth;
+        q_off(n);
         n->state = TS_RUNNING;
         n->woke = 0;
         sched_cur = n;
@@ -878,7 +1223,8 @@ static void sched_trap(int interval, int trap, int param, int mode, int a, int b
             // this CPU stays on t's stack until the trap returns
             if (n != t) cpu_self->prev = t;
             n->oncpu = cpu_self->id + 1;
-            smp_idle[cpu_self->id] = (n == cpu_self->idle);
+            SMP_IDLE(cpu_self->id, n == cpu_self->idle);
+            if (n != t && n == cpu_self->idle) smp_park[cpu_self->id] = 1;
         }
         loader_switch(n);
         ++sched_switches;
@@ -917,10 +1263,12 @@ static void sched_trap(int interval, int trap, int param, int mode, int a, int b
     if (sched_cur->ck_sigpend)
         ck_signal_deliver(sched_cur, &a, &bp, &sp, &returnpc, mode, interval);
 
+    // (the CPU's count takes the trap's cycles and the task's before it at once)
+    d = acct_out;
     acct_out = __c4_cycles();
     if (me) {
-        me->kacc = me->kacc + (acct_out - acct_in);
-        acct_cpu(me, acct_out - acct_in);
+        me->kacc = me->kacc + (acct_out - acct_in) - rc;
+        acct_cpu(me, acct_out - d);
         if ((me->uacc | me->kacc) & ACCT_FOLD_AT) acct_fold(me);
     }
 
@@ -928,13 +1276,21 @@ static void sched_trap(int interval, int trap, int param, int mode, int a, int b
     // a kernel task keeps a hold of its own while it runs, and the
     // handler lets go of its.
     if (smp_ncpu > 1) {
-        smp_kick();
+        if (smp_idlemask & ~(1 << cpu_self->id)) {
+            d = __time();
+            if (sched_wake || d != smp_kickms) {
+                sched_wake = 0;
+                smp_kickms = d;
+                smp_kick(d);
+            }
+        }
         hold = sched_cur->privs == PRIV_KERNEL && !sched_cur->cpuidle;
         if (cpu_self->bkl_task && !hold) { bkl_drop(); cpu_self->bkl_task = 0; }
         else if (!cpu_self->bkl_task && hold) { bkl_take(); cpu_self->bkl_task = 1; }
         bkl_drop();
     }
 
+    if (mmu_on && smp_ncpu > 1) mmu_trap_out(sched_cur);
     // The flag stays set for the WHOLE handler, not just the service
     // call: everything below it -- task_release, the slab allocator,
     // any kprintf -- takes sched_lock, and an unlock outside the flag
@@ -1030,6 +1386,7 @@ int sched_intr_below(struct task *root) {
     if (t == root || t->state == TS_ZOMBIE || t->privs != PRIV_USER) return 0;
     if (ck_has_handler(t, CK_SIGINT)) { ck_kill(t->id, CK_SIGINT); return 1; }
     t->killsig = CK_SIGINT;
+    TF_SET(t, TF_SIG);
     task_zombify(t, C4IX_EXIT_INTERRUPTED);
     return 1;
 }
@@ -1058,6 +1415,7 @@ static void sched_interrupt() {
     }
     kprintf("\nc4ix: interrupt: cancelling task %d '%s'\n", t->id, t->name);
     t->killsig = CK_SIGINT;
+    TF_SET(t, TF_SIG);
     task_zombify(t, C4IX_EXIT_INTERRUPTED);
 }
 
@@ -1077,10 +1435,23 @@ int sched_affinity(int id, int mask) {
     old = t->cpumask;
     if (mask >= 0) {
         t->cpumask = mask;
+        TF_PUT(t, TF_PINNED, mask);
+        TF_CLR(t, TF_PINSOFT);
+        sched_wake = 1;
         if (t == sched_cur) sched_resched = 1;
     }
     sched_unlock();
     return old;
+}
+
+// A program that draws runs on CPU 0, where the display is: its frames go there
+// anyway, each from another CPU a round trip to it, and it is what a person watches.
+// Not if anything chose its CPUs (pin), and not its children: what a desktop starts
+// from a Terminal, a build among them, may run anywhere.
+void sched_softpin(struct task *t) {
+    if (t->cpumask || t->privs != PRIV_USER) return;
+    sched_affinity(t->id, 1);
+    TF_SET(t, TF_PINSOFT);
 }
 
 void sched_yield() {
@@ -1186,7 +1557,7 @@ int task_wait(struct task *t) {
     me = sched_cur;
     me->wait_for = t->id;
     me->wait_posix = 0;
-    me->state = TS_WAITING;
+    task_state(me, TS_WAITING);
     while (me->state == TS_WAITING) sched_yield();
     return me->wait_result;
 }
@@ -1198,13 +1569,18 @@ int task_wait(struct task *t) {
 //   X[2] where task_shim's own LEV would land -> task_lost
 //   X[3..5] task_shim's args, last first: argv, argc, entry
 int sched_next_stack_words;
+// An idle task's stack comes from the kernel arena instead (sched_init)
+static int sched_next_kstack;
 
 int sched_forge(struct task *t, int entry, int argc, int argv) {
     int *stk, *x;
     int i, words;
 
     words = sched_next_stack_words > C4IX_STACK_WORDS ? sched_next_stack_words : C4IX_STACK_WORDS;
-    if (!(stk = (int *)malloc(words * sizeof(int)))) return 0;
+    if (sched_next_kstack) {
+        words = KMEM_STACK_BYTES / sizeof(int);
+        if (!(stk = (int *)kmem_alloc(words * sizeof(int)))) return 0;
+    } else if (!(stk = (int *)umalloc_stack(words * sizeof(int)))) return 0;
     memset(stk, 0, words * sizeof(int));
     x = stk + words - 8;              // slack above, as C4KE leaves
     t->stack_words = words;
@@ -1266,7 +1642,7 @@ int sched_vfork(int bp) {
     n = w[0] - (bp + 2 * sizeof(int));
     if (n < 0 || n > C4IX_STACK_WORDS * sizeof(int) / 2) return -1;
     if (!(c = task_vchild(p))) return -1;
-    top = c->stack + (c->stack_words - 8) * sizeof(int);   // sched_forge's slack
+    top = mmu_uva(c->stack + (c->stack_words - 8) * sizeof(int));   // sched_forge's slack, where the child sees it
     c->sv = SV_REGS;
     c->sv_a = 0;
     c->sv_bp = w[0];
@@ -1275,7 +1651,8 @@ int sched_vfork(int bp) {
     memcpy((char *)c->sv_sp, (char *)(bp + 2 * sizeof(int)), n);
     p->posix = 1;
     p->wait_for = c->id;
-    p->state = TS_VFORK;
+    task_state(p, TS_VFORK);
+    TF_SET(p, TF_NOPAGE);
     return c->id;
 }
 
@@ -1289,10 +1666,80 @@ void sched_forge_argv(struct task *t, int argv) {
     int *x;
     if (!t || t->sv != SV_FRAME) return;
     x = (int *)t->sv_sp;
-    x[3] = argv;
+    x[3] = mmu_uva(argv);
 }
 
 // ---- lifecycle ----
+
+// The processors C4IX uses: libjs's SMP, which has the window, up to
+// CPU_MAX; otherwise one.
+int sched_ncpus() {
+    int n;
+    if (!host_has(C4IX_I_C4MJS) || !host_has(C4IX_I_SMP)) return 1;
+    n = __c4_cpu_count();
+    return n > CPU_MAX ? CPU_MAX : n;
+}
+
+// ---- off the boot stack ----
+//
+// The machine starts the kernel on its boot stack, the megabyte at the top
+// of memory, above the heap. While the kernel task stood on it -- main,
+// parked in sched_run for as long as the machine ran -- a program that
+// wrote past the top of the heap landed in its frames, and nothing noticed
+// until shutdown, or until something switched to it. So main's work after
+// boot is the kernel task's on a stack from the kernel arena, the boot
+// stack is left with only main's own frame on it, and libjs guards it:
+// from then on a read or write there halts the machine, naming the pc and
+// the address (libjs/c4m.js, guardHit), before it can do harm. At the end
+// the guard is lifted and the kernel comes back, so main returns as it
+// always did, through the image's destructors.
+//
+// Both hops are a trap whose handler swaps the registers with the ones
+// saved on the other side, as every task switch is (sched_trap).
+static int hop_sp, hop_bp, hop_pc;   // the side that is not running
+static int hop_entry, hop_argc, hop_argv, hop_ret;
+
+static void sched_hop(int interval, int trap, int param, int mode, int a, int bp, int sp, int returnpc) {
+    int x;
+    x = sp; sp = hop_sp; hop_sp = x;
+    x = bp; bp = hop_bp; hop_bp = x;
+    x = returnpc; returnpc = hop_pc; hop_pc = x;
+}
+
+// The boot stack guarded (1) or not (0), where libjs can
+static void sched_bootguard(int on) {
+    if (host_has(C4IX_I_C4MJS)) *(int *)C4IX_BOOT_GUARD = on;
+}
+
+// Where the first hop lands: the kernel task's stack, with nothing below.
+static void sched_kmain() {
+    int e;
+    install_trap_handler(0);
+    sched_bootguard(1);
+    e = hop_entry;
+    hop_ret = e(hop_argc, hop_argv);
+    sched_bootguard(0);
+    install_trap_handler((int)&sched_hop);
+    __c4_trap(C4IX_TRAP_SOFT_IRQ, 0);
+}
+
+int sched_offboot(int entry, int argc, int argv) {
+    int *stk, *x;
+    if (!(stk = (int *)kmem_alloc(KMEM_STACK_BYTES))) {
+        kputs("c4ix: panic: no stack for the kernel task\n");
+        exit(-1);
+    }
+    // a return from sched_kmain, which never returns, is lost
+    x = stk + KMEM_STACK_BYTES / sizeof(int) - 8;
+    x[0] = (int)&task_lost;
+    hop_entry = entry; hop_argc = argc; hop_argv = argv;
+    hop_sp = (int)x; hop_bp = 0; hop_pc = (int)&sched_kmain;
+    install_trap_handler((int)&sched_hop);
+    __c4_trap(C4IX_TRAP_SOFT_IRQ, 0);
+    // back from the kernel task: everything has shut down
+    install_trap_handler(0);
+    return hop_ret;
+}
 
 // This CPU's traps: the handler, and preemption. Every CPU's own.
 static void sched_arm(int interval) {
@@ -1319,11 +1766,28 @@ static void smp_ap() {
     cpu_self->idle = me;
     acct_out = __c4_cycles();
     sched_arm(sched_interval);
+    mmu_cpu(k);
     while (!smp_stopping) {
+        // A switch back to this loop sets the park word, so that the
+        // park below falls through and the loop settles first. The loop
+        // can be switched out anywhere -- an IPI held while it had the
+        // lock lands as it lets go -- and comes back where it was: a
+        // park then would keep the mark of the task it ran meanwhile
+        // (oncpu, smp_settle), which no CPU then resumes and no IPI is
+        // sent for (smp_kick). A -j 3 build in 32 MB stopped so: b4ke
+        // ready, three children to reap, three CPUs parked.
+        //
+        // And any idle CPU sweeps the zombies nobody waits on, as CPU 0's
+        // idle task does: a shell's background job is collected only so,
+        // and with CPU 0 busy its memory stayed taken -- three programs
+        // running on four CPUs kept a finished one's 20 MB, and nothing
+        // moved up into it (PARALLEL=0 test-c4ix-movable).
+        if (sched_nzombies) task_reap_orphans();
         sched_lock();
+        smp_park[k] = 0;
         smp_settle();
         r = sched_ready_here();
-        if (!r) smp_idle[k] = 1;
+        if (!r) SMP_IDLE(k, 1);
         sched_unlock();
         if (r) sched_yield();
         else {
@@ -1345,23 +1809,23 @@ void sched_init(int interval) {
 
     // The idle task first, so it is task 0, as NT's idle
     // is; then the context we are running in becomes the kernel task.
-    if (!(idle_task = task_create("idle", (int)&sched_idle, 0, 0))) {
+    // Both stand on the kernel arena (sched_offboot).
+    sched_next_kstack = 1;
+    idle_task = task_create("idle", (int)&sched_idle, 0, 0);
+    sched_next_kstack = 0;
+    if (!idle_task) {
         kputs("c4ix: panic: cannot create the idle task\n");
         exit(-1);
     }
     idle_task->cpuidle = 1;
     cpu_self->idle = idle_task;
     kernel_task = task_adopt("kernel");
-    kernel_task->state = TS_RUNNING;
+    task_state(kernel_task, TS_RUNNING);
     idle_task->parent = kernel_task->id;
     // Processors: libjs's SMP, which has the window. Each other CPU's
     // idle task is in the list now, running, so nothing picks it, and
     // the CPU becomes it when it starts (smp_ap).
-    smp_ncpu = 1;
-    if (host_has(C4IX_I_C4MJS) && host_has(C4IX_I_SMP)) {
-        smp_ncpu = __c4_cpu_count();
-        if (smp_ncpu > CPU_MAX) smp_ncpu = CPU_MAX;
-    }
+    smp_ncpu = sched_ncpus();
     kprintf("c4ix: %d processor%s\n", smp_ncpu, (smp_ncpu > 1) ? "s" : "");
     if (smp_ncpu > 1) {
         // The boot CPU's state moves into the window, where it is its
@@ -1417,16 +1881,20 @@ void sched_init(int interval) {
         __c4_configure(C4IX_CONF_INTERVAL, interval);
         kprintf("c4ix: cycle interval set to %dk\n", interval / 1024);
     }
+    klog("sched: round robin by nice, a slice of %d cycles; idle task %d, kernel task %d\n",
+        interval, idle_task->id, kernel_task->id);
 
-    // and the other CPUs, each on a stack of its own
+    // and the other CPUs, each on a stack of its own, in the kernel arena
     k = 1;
     while (k < smp_ncpu) {
-        if (!(smp_stack[k] = (int)malloc(SMP_STACK_BYTES))) {
+        if (!(smp_stack[k] = (int)kmem_alloc(SMP_STACK_BYTES))) {
             kputs("c4ix: panic: cannot start the other processors\n");
             exit(-1);
         }
         __c4_cpu_start(k, (int)&smp_ap, smp_stack[k] + SMP_STACK_BYTES);
         kprintf("c4ix: CPU %d stack allocated: 0x%08x, CPU booting\n", k, smp_stack[k]);
+        klog("smp: CPU %d started, %d-byte stack at 0x%08x, idle task %d\n",
+            k, SMP_STACK_BYTES, smp_stack[k], smp_idle_t[k]->id);
         ++k;
     }
     sched_banner();
@@ -1434,22 +1902,31 @@ void sched_init(int interval) {
 
 // What the machine is, said once at boot, where libjs says it: the
 // memory and its layout, and the processors -- which share all of it and
-// the one heap, each with nothing of its own but its window (and, past
-// CPU 0, its idle task's stack, from the heap).
+// the one heap, each with nothing of its own but its window (and its idle
+// task's stack, in the kernel arena). From the bottom: the kernel image,
+// the kernel arena (which starts where the heap does: the va area is the
+// heap's first block, taken before main), the heap programs use, whatever
+// the host keeps for itself (the mailbox), the boot stack, guarded, and
+// the arguments above it, which are the rest.
 static void sched_banner() {
-    int hb, he, mb, bs;
+    int hb, he, bb, bt;
     if (host_has(C4IX_I_C4MJS)) {
         hb = *(int *)C4IX_HEAP_BASE;
         he = *(int *)C4IX_HEAP_END;
-        // the heap ends a megabyte below the top, under the boot stack
-        bs = (he + 2 * 1048576 - 1);
-        mb = bs / 1048576;
-        kprintf("c4ix: %d MB of memory:\n", mb);
-        kprintf("  [mem 0x%08x-0x%08x] Kernel\n", 0, hb - 1);
-        kprintf("  [mem 0x%08x-0x%08x] Heap (%d MB)\n", hb, he - 1, ((he - hb) / 1024) / 1024);
-        kprintf("  [mem 0x%08x-0x%08x] Boot stack (%d MB)\n", he, bs, (((bs + 1) - he) / 1024) / 1024);
+        bb = *(int *)C4IX_BOOT_BASE;
+        bt = *(int *)C4IX_BOOT_TOP;
+        kprintf("c4ix: %d MB of memory:\n", (bt + 4096) / 1048576);
+        kprintf("  [mem 0x%08x-0x%08x] Kernel image (%d KB)\n", 0, hb - 1, hb / 1024);
+        kprintf("  [mem 0x%08x-0x%08x] Kernel arena - tasks, files, kernel stacks (%d KB)\n",
+            hb, kmem_end - 1, (kmem_end - hb) / 1024);
+        kprintf("  [mem 0x%08x-0x%08x] Heap - all your applications and memory (%d MB)\n",
+            kmem_end, he - 1, ((he - kmem_end) / 1024) / 1024);
+        if (bb > he)
+            kprintf("  [mem 0x%08x-0x%08x] Reserved by the host - its mailbox (%d KB)\n", he, bb - 1, (bb - he) / 1024);
+        kprintf("  [mem 0x%08x-0x%08x] Boot stack, guarded (%d KB)\n", bb, bt - 1, (bt - bb) / 1024);
+        kprintf("  [mem 0x%08x-0x%08x] Arguments (%d KB)\n", bt, bt + 4095, 4);
     }
-    
+
     if (smp_ncpu > 1) {
         kprintf("  %s\n  CPUs share all memory and the heap\n  each with a %d-byte window of its own at 0x%08x\n",
             host_has(C4IX_I_PAR) ? "a thread each, all at once" : "simulated, taking turns on one thread",
@@ -1475,7 +1952,7 @@ static void smp_stop() {
     --sched_lockdepth;
     if (sched_interval) __c4_configure(C4IX_CONF_INTERVAL, sched_interval);
     k = 1;
-    while (k < smp_ncpu) { free((int *)smp_stack[k]); smp_stack[k] = 0; ++k; }
+    while (k < smp_ncpu) { kmem_free((char *)smp_stack[k]); smp_stack[k] = 0; ++k; }
 }
 
 // Disarm the trap machinery: after this the scheduler is inert and
@@ -1495,12 +1972,16 @@ void sched_stop() {
 // A task parked on console input: what a keystroke would wake.
 static int sched_console_reader() {
     struct task *t;
-    t = task_head;
-    while (t) {
-        if (sched_reading_console(t)) return 1;
-        t = t->next;
+    int r;
+    r = 0;
+    sched_lock();
+    t = pl_head;
+    while (t && !r) {
+        r = sched_reading_console(t);
+        t = t->qnext;
     }
-    return 0;
+    sched_unlock();
+    return r;
 }
 
 // The idle task: what runs when nothing else can, which is to say
@@ -1525,7 +2006,7 @@ static int sched_idle(int argc, int argv) {
             sched_lock();
             smp_settle();
             ready = sched_ready_here();
-            smp_idle[0] = !ready;
+            SMP_IDLE(0, !ready);
         }
         // The idle task runs only when nothing else can: everything alive
         // is parked on something that has not arrived, and nothing can
@@ -1552,8 +2033,12 @@ static int sched_idle(int argc, int argv) {
             if (budget < 0) budget = 0;
             if (budget < nap) nap = budget;
         }
-        // (an IPI ends the nap early: another CPU left work for this one)
-        if (smp_ncpu > 1) sched_unlock();
+        // (an IPI ends the nap early: another CPU left work for this one,
+        // or put a task to sleep with a deadline before the nap's end)
+        if (smp_ncpu > 1) {
+            if (!ready) sched_napto = __time() + (nap + 999) / 1000;
+            sched_unlock();
+        }
         // the counter stands still meanwhile: idle time in ms instead
         ms = __time();
         if (smp_ncpu > 1) {
@@ -1565,7 +2050,7 @@ static int sched_idle(int argc, int argv) {
         // The cycle counter stood still while we slept, so the
         // console's own rate limit has no way to know that real
         // time passed. Tell it.
-        if (smp_ncpu > 1) sched_lock();
+        if (smp_ncpu > 1) { sched_lock(); sched_napto = 0; }
         con_wake();
         if (smp_ncpu > 1) sched_unlock();
         sched_yield();

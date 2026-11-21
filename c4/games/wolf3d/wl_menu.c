@@ -15,6 +15,7 @@
 #endif
 
 #include "wl_def.h"
+#include "c4/c4accel.h"         // c4sdl: the browser's accelerators
 
 //
 // PRIVATE PROTOTYPES
@@ -119,7 +120,7 @@ CP_itemtype SndMenu[] = {
 #ifdef JAPAN
 enum { CTL_MOUSEENABLE, CTL_JOYENABLE, CTL_JOY2BUTTONUNKNOWN, CTL_GAMEPADUNKONWN, CTL_MOUSESENS, CTL_CUSTOMIZE };
 #else
-enum { CTL_MOUSEENABLE, CTL_MOUSESENS, CTL_JOYENABLE, CTL_CUSTOMIZE };
+enum { CTL_MOUSEENABLE, CTL_MOUSESENS, CTL_JOYENABLE, CTL_CUSTOMIZE, CTL_ACCEL };
 #endif
 
 CP_itemtype CtlMenu[] = {
@@ -134,7 +135,8 @@ CP_itemtype CtlMenu[] = {
     {0, STR_MOUSEEN, 0},
     {0, STR_SENS, MouseSensitivity},
     {0, STR_JOYEN, 0},
-    {1, STR_CUSTOM, CustomControls}
+    {1, STR_CUSTOM, CustomControls},
+    {0, "Accelerated", 0}       // c4sdl: the browser's accelerators
 #endif
 };
 
@@ -1668,6 +1670,15 @@ CP_Control (int blank)
                 ShootSnd ();
                 break;
 
+#ifndef JAPAN
+            case CTL_ACCEL:
+                // c4sdl: the browser's accelerators (c4/c4accel.h), on or off
+                wolf_accel_set (!wolf_accel_on);
+                DrawCtlScreen ();
+                ShootSnd ();
+                break;
+#endif
+
             case CTL_MOUSESENS:
             case CTL_CUSTOMIZE:
                 DrawCtlScreen ();
@@ -1838,6 +1849,9 @@ DrawCtlScreen (void)
     }
 
     CtlMenu[CTL_MOUSESENS].active = mouseenabled;
+#ifndef JAPAN
+    CtlMenu[CTL_ACCEL].active = wolf_accel_avail ();    // c4sdl: greyed where there are none
+#endif
 
 
     DrawMenu (&CtlItems, CtlMenu);
@@ -1855,6 +1869,14 @@ DrawCtlScreen (void)
         VWB_DrawPic (x, y, C_SELECTEDPIC);
     else
         VWB_DrawPic (x, y, C_NOTSELECTEDPIC);
+
+#ifndef JAPAN
+    y = CTL_Y + 55;     // c4sdl: Accelerated, the fifth line
+    if (wolf_accel_on && wolf_accel_avail ())
+        VWB_DrawPic (x, y, C_SELECTEDPIC);
+    else
+        VWB_DrawPic (x, y, C_NOTSELECTEDPIC);
+#endif
 
     //
     // PICK FIRST AVAILABLE SPOT
@@ -3745,6 +3767,34 @@ static int c4sdl_found (const char *name)
     fclose (f);
     return 1;
 }
+
+// c4sdl: the person's own files are in a folder of the game's own first,
+// where the page's Uploads put them when asked to, then in /home, then
+// where it runs: on C4IX /home/wolf3d and /home; on the bare machine and
+// under C4DOS, which have no /home, wolf3d/ at drive 0's root and the
+// root. (Not "/home/..." there: the host finds a path it does not have
+// by its last part, so that would find a file at the root first.) The
+// data files are then read from that folder (c4file.c); the game's
+// settings and saves stay where it runs.
+extern char c4file_datadir[48];
+static int c4sdl_finddata (const char *name)
+{
+    static char *c4ix[] = { "/home/wolf3d/", "/home/", "", 0 };
+    static char *bare[] = { "wolf3d/", "", 0 };
+    struct stat st;
+    char path[64];
+    char **d;
+    for (d = stat ("/home", &st) == 0 ? c4ix : bare; *d; d++)
+    {
+        snprintf (path, sizeof(path), "%s%s", *d, name);
+        if (c4sdl_found (path))
+        {
+            snprintf (c4file_datadir, sizeof(c4file_datadir), "%s", *d);
+            return 1;
+        }
+    }
+    return 0;
+}
 #endif
 
 void
@@ -3824,7 +3874,7 @@ CheckForEpisodes (void)
     // c4sdl: opened, not stat()ed, since C4IX finds a file the page's
     // Uploads put on the host's drive only by opening it (wolfinst.c);
     // and wolf3d6 is for the registered files alone (gfxv_wl6.h)
-    if(c4sdl_found("vswap.wl6"))
+    if(c4sdl_finddata("vswap.wl6"))
     {
         snprintf (extension,sizeof(extension),"wl6");
         NewEmenu[2].active =
@@ -3839,11 +3889,10 @@ CheckForEpisodes (void)
         EpisodeSelect[5] = 1;
     }
     else
-        Quit ("NO REGISTERED WOLFENSTEIN 3-D DATA FILES to be found!
-"
-              "wolf3d6 plays the registered game from its *.WL6 files:
-"
-              "beside it, or added with the page's Uploads.");
+        Quit ("NO REGISTERED WOLFENSTEIN 3-D DATA FILES to be found!\n"
+              "wolf3d6 plays the registered game from its *.WL6 files:\n"
+              "beside it, or added with the page's Uploads (in /home/wolf3d\n"
+              "or /home).");
 #endif
 #endif
 

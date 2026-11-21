@@ -10,8 +10,10 @@
 // itself: its books are shared (sheap.js).
 
 import { Arena } from '../src/c4bb/sim/arena.js';
-import { OP, STOP, Machine } from './c4m.js';
-import { C, K, S, R, KIND, ParCore, POSTED, PQLEN, PQSTRIDE } from './par.js';
+import { OP, STOP, Machine, C4I_MMU, C4I_ACCEL } from './c4m.js';
+import { accel, loadAccel, adoptAccelSwitch } from './accel.js';
+import { Mmu, FAULT } from './mmu.js';
+import { C, K, S, R, KIND, ParCore, POSTED, PQLEN, PQSTRIDE, DMA_FAULT } from './par.js';
 import { SharedHeap } from './sheap.js';
 
 const word = (k, f) => C.CPU0 + k * C.STRIDE + f;
@@ -34,6 +36,14 @@ class ApDev {
   }
   simMs() { return Atomics.load(this.ctl, C.TIMEMS) | 0; }
   hostNow() { return Date.now(); }
+  // the boot stack's guard, as CPU 0 last set it (par.js ParHost). Plain reads:
+  // MCPY alone looks at these 15 times a call, and in Atomics.load they took 9%
+  // of Quake's time on this CPU with no MMU (docs/quake-performance.md). They
+  // change only at boot, at a guard hit, and at shutdown, and the loop's own
+  // copy (guardLo) is already up to a slice old.
+  get stackGuard() { return this.ctl[C.GUARD]; }
+  get stackBase() { return this.ctl[C.GLO]; }
+  get stackTop() { return this.ctl[C.GHI]; }
 }
 
 class ApMachine extends Machine {
@@ -71,6 +81,8 @@ class ApMachine extends Machine {
     ctl[b + K.KIND] = kind; ctl[b + K.OP] = op; ctl[b + K.SP] = this.sp; ctl[b + K.A] = this.a;
     ctl[b + K.RPC] = this.pc;
     ctl[b + K.ADDR] = addr | 0; ctl[b + K.VAL] = val | 0;
+    ctl[b + K.PTBR] = this.vm && this.mmu ? this.mmu.ptbr : 0;
+    ctl[b + K.UDIR] = this.udir;
     Atomics.store(ctl, b + K.REQ, R.ASK);
     this.core.ring();
     while (Atomics.load(ctl, b + K.REQ) === R.ASK) {
@@ -79,6 +91,8 @@ class ApMachine extends Machine {
     }
     const ra = ctl[b + K.RA], rstop = ctl[b + K.RSTOP];
     Atomics.store(ctl, b + K.REQ, R.IDLE);
+    // a device refused what this task gave it: the task's page fault
+    if (rstop === DMA_FAULT) { this.mmu.refuse(ctl[b + K.FADDR], ctl[b + K.FINFO]); throw FAULT; }
     return { ra, rstop };
   }
 
@@ -102,6 +116,23 @@ class ApMachine extends Machine {
     }
     if (op === OP.EXIT) return this.halt(this.ld32(this.sp));
     return super.sys(op);
+  }
+
+  // A byte of a page put out to swap: CPU 0 keeps them (par.js KIND.SWAP)
+  swapRd8(slot, off) { const r = this.ask(KIND.SWAP, 0, slot, off & 4095); return r === STOP.HALT ? 0 : r.ra & 255; }
+  swapWr8(slot, off, v) { this.ask(KIND.SWAP, 1, slot, (off & 4095) | ((v & 255) << 16)); }
+
+  // A guard hit is told where the console is, and halts the machine
+  // there: CPU 0 says it with this CPU's registers (par.js, KIND.GUARD)
+  guardHit(x, n, write, v, op = 0, from = 0) {
+    const ctl = this.core.ctl, b = word(this.cpuId, 0);
+    ctl[b + K.BP] = this.bp;
+    ctl[b + K.CYCLES] = this.cycle | 0;
+    ctl[b + K.GN] = n | 0; ctl[b + K.GFROM] = from | 0; ctl[b + K.GW] = (write ? 1 : 0) | (this.mode ? 2 : 0);
+    this.flushPosted();
+    this.ask(KIND.GUARD, op, x, v);
+    this.dev.halted = true;
+    return 0;
   }
 
   // EXIT: this processor, never the machine
@@ -160,6 +191,12 @@ function main(msg) {
   arena.io = null;                    // device registers go through ApBus, to CPU 0
   bus.m = m;
   m.noFpu = msg.noFpu;
+  // CPU 0 has an MMU: so has this CPU, its own, off until the kernel turns it on here
+  if (msg.info & C4I_MMU) m.mmu = new Mmu(m);
+  // ... and the accelerators, as CPU 0's INFO says, its modules loaded in
+  // its order (start, below): every CPU tells a task the same and runs the
+  // same numbers, wherever it runs
+  if (msg.info & C4I_ACCEL) m.accel = accel;
   m.heap = new SharedHeap(arena, msg.heap);
   m.smp = core;
   m.cpuId = id;
@@ -182,27 +219,39 @@ function main(msg) {
     m.i32[m.sp >> 2] = 0x18;            // CPU_HALT_ADDR: the entry function's LEV lands on CPUH
     m.bp = m.sp; m.pc = entry | 0; m.a = 0;
     m.ipiPending = 0;
-    m.cpuState = 'run';
-    Atomics.store(ctl, word(id, K.IPI), 0);
+    m.cpuState = 'run';                 // (its IPI word: cleared by par.js start)
 
     for (;;) {
       // a slice, then an IPI or the machine's end looked for: not inside
       // the instruction loop, which would run it at half speed
       const r = m.run(65536);
       m.flushPosted();
-      core.poll(m);
+      // Halted, its IPI word is left alone: CPU 0 may already have started
+      // it again and sent it one, which taken here the restart dropped.
+      // One sent before the start, start clears (par.js).
+      if (r !== STOP.CPUHALT) core.poll(m);
       Atomics.store(ctl, word(id, K.CYCLES), m.cycle | 0);
       if (dev.halted || Atomics.load(ctl, C.HALT)) return;
       if (r === STOP.CPUHALT) break;
       if (r === STOP.PARK) {
         // wait for the word, a CWAK, an IPI or the machine's end; then
-        // CWAI returns 0 and its caller looks again
-        Atomics.wait(m.i32, m.waitAddr >> 2, m.waitVal, 1000);
+        // CWAI returns 0 and its caller looks again. In slices, each
+        // looking again at the word and for an IPI: an IPI that came before
+        // CWAI said where it waits found no word to wake (par.js ipi), and
+        // the word can move on with no wake seen here -- the kernel lock,
+        // let go while this CPU parked on it, stayed free a second while
+        // it waited, and a task pinned here with it (test-c4ix-pipewake).
+        const t0 = Date.now(), wi = m.waitAddr >> 2;
+        while (!m.ipiPending && !Atomics.load(ctl, word(id, K.IPI)) && !Atomics.load(ctl, C.HALT) &&
+               Atomics.load(m.i32, wi) === m.waitVal && Date.now() - t0 < 1000)
+          Atomics.wait(m.i32, wi, m.waitVal, 10);
         if (Atomics.load(ctl, C.HALT)) return;
-        if (Atomics.load(ctl, word(id, K.IPI))) { Atomics.store(ctl, word(id, K.IPI), 0); m.ipiPending = 1; }
+        // running again before the IPI is taken: with neither, CPU 0 would
+        // count this one parked (par.js othersRunning)
         m.cpuState = 'run';
         Atomics.store(ctl, word(id, K.WAITADDR), 0);
         Atomics.store(ctl, st, S.RUN);
+        if (Atomics.load(ctl, word(id, K.IPI))) { Atomics.store(ctl, word(id, K.IPI), 0); m.ipiPending = 1; }
       } else if (r === STOP.INPUT) {
         Atomics.wait(ctl, word(id, K.SLEEP), 0, 5);   // a key may come; ask again soon
       }
@@ -215,7 +264,7 @@ const isNode = typeof process !== 'undefined' && process.versions && process.ver
   typeof self === 'undefined';
 if (isNode) {
   const { parentPort } = await import('node:worker_threads');
-  parentPort.once('message', msg => { main(msg); process.exit(0); });
+  parentPort.once('message', async msg => { adoptAccelSwitch(msg.accelSwitch); await loadAccel(msg.accelNames); main(msg); process.exit(0); });
 } else {
-  self.onmessage = e => { if (e.data.type === 'init') { main(e.data); self.close(); } };
+  self.onmessage = async e => { if (e.data.type === 'init') { adoptAccelSwitch(e.data.accelSwitch); await loadAccel(e.data.accelNames); main(e.data); self.close(); } };
 }

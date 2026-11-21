@@ -78,7 +78,12 @@
 	;; inserted.
 	LDL LDG PSHL PSHG LEAP IMMP LIP ADDL STL POPA
 	;; F3: IEEE arithmetic (docs/c4-float.md). Appended.
-	FPU))
+	FPU
+	;; 16-bit loads and store, logical shift right (docs/c4-16bit.md).
+	;; Appended.
+	LH LHU SH LSR
+	;; an unsigned char's load. Appended.
+	LCU))
 (define c4r:nops (length c4r:ops))
 
 ;; does opcode n take an operand word? LEA..ADJ are 0..7; JSRI 61 JSRS 62;
@@ -126,6 +131,7 @@
 	;; MEMSZ: v3 reads the padding word; v2 has none (no BSS)
 	(define Memsz (if (>= Version 3) (string:word F 5) Datalen))
 	(if (< Memsz Datalen) (set! Memsz Datalen) nil)
+	(set! c4r:bss-size (if (if (>= Version 3) (= W 4) false) (string:word F 9) 0))
 	(define Patchlen  (string:word F (+ H (* 3 W))))
 	(define Symslen   (string:word F (+ H (* 4 W))))
 	(define Conslen   (string:word F (+ H (* 5 W))))
@@ -626,8 +632,7 @@
 						(if (= -1 T) (list 'code (third P) Operand)
 							(if (= -2 T) (list 'data (third P) Operand)
 								;; extern keeps the patch value word too:
-								;; it is compile-time garbage, preserved
-								;; for the byte-identical round trip
+								;; what to add to the symbol (opt:refplus)
 								(list 'extern T Operand (third P))))) Acc))
 					(next c4r:decode-code F At Codelen Labels (tail Patches) (+ Pos 2) Acc))
 				(begin
@@ -657,6 +662,12 @@
 ;; caller (c4lc.lisp) before each encode; reset to 0 afterward so a
 ;; later encode without BSS is unaffected.
 (define c4r:bss-extra 0)
+
+;; how much of MEMSZ, at its end, is BSS: written at byte 9 in a 32-bit
+;; v3 image, where the field's last four bytes were zeros (load-c4r.c's
+;; C4R_HDR_BSS); 0 for unknown. The compiler sets it before an encode, and
+;; decode sets it from the file, so a roundtrip writes it back.
+(define c4r:bss-size 0)
 
 ;; chunks the next encode appends to the module's own (test-srcmap's
 ;; fixture). Reset by whoever sets it, as c4r:bss-extra is.
@@ -732,7 +743,8 @@
 	(define I 5)
 	;; padding word (byte 5): MEMSZ in v3, else 'p' filler as asm-c4r uses
 	(if EmitV3
-		(begin (c4r:fill-bytes Out 5 8 0) (string:word! Out 5 Memsz))
+		(begin (c4r:fill-bytes Out 5 8 0) (string:word! Out 5 Memsz)
+			(if (= W 4) (string:word! Out 9 c4r:bss-size) nil))
 		(c4r:fill-bytes Out 5 8 112))
 	(string:word! Out 13 (if (= -1 Entry) -1 (c4r:label LT (second Entry))))
 	(string:word! Out (+ 13 W) Codelen)
@@ -883,8 +895,7 @@
 					(string:word! Out (+ PatchAt (* 2 W))
 						(if (= 'code T) (c4r:label LT (second Op))
 							(if (= 'data T) (second Op)
-								;; extern: the preserved garbage value word,
-								;; or 0 for optimizer-created references
+								;; extern: what to add to the symbol, or 0
 								(if (= 4 (length Op)) (index Op 3) 0))))
 					(set! PatchAt (+ PatchAt (* 3 W)))
 					;; operand word: raw if preserved, else the target

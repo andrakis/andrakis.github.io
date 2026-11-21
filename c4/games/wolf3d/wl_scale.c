@@ -1,6 +1,7 @@
 // WL_SCALE.C
 
 #include "wl_def.h"
+#include "c4/c4accel.h"         // c4sdl: the browser's accelerators
 
 #ifdef USE_SHADING
 #include "wl_shade.h"
@@ -42,6 +43,16 @@ void ScaleLine (int x, int toppix, fixed fracstep, byte *linesrc, byte *linecmds
     int startpix,endpix;
     fixed   frac;
     int     pitch = bufferPitch, vh = viewheight;      // c4sdl: locals in the loops
+
+#if defined(C4IX) && !defined(USE_SHADING)
+    // c4sdl: every segment in one instruction where the machine has the
+    // game's accelerators (c4/c4accel.h), the same pixels
+    if (WOLF_ACCEL())
+    {
+        wolf_line(x, toppix, fracstep, linesrc, linecmds, vbuf, ylookup, pitch, vh);
+        return;
+    }
+#endif
 
     for (end = ReadShort(linecmds) >> 1; end; end = ReadShort(linecmds) >> 1)
     {

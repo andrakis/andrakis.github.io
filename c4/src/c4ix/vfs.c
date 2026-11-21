@@ -95,9 +95,96 @@ static int vfs_fmt(char *p, int whole, int cents) {
     return i + 3;
 }
 
+static int vfs_dec(char *p, int v);
+static int vfs_heapinfo;        // the host says how much of the heap is in use (C4IX_HEAP_USED)
+
+static int vfs_kv(char *p, int n, char *name, int v);
+
+// RAM files' bytes under D, and how many: c[0], c[1] those written and not
+// the host's too (persist has not saved them, or they are /tmp's)
+static void vfs_ramuse(struct vnode *d, int *c) {
+    struct vnode *vn;
+    vn = d->child;
+    while (vn) {
+        if (vn->type == VN_DIR) vfs_ramuse(vn, c);
+        else if (vn->type == VN_RAMFILE && vn->data && !vn->backed) { c[0] = c[0] + vn->cap; c[1] = c[1] + 1; }
+        vn = vn->next;
+    }
+}
+
 static void vfs_proc(struct vnode *vn) {
-    int ms, n;
-    if (!vn_grow(vn, 64)) return;
+    int ms, n, size, r[2], c[12];
+    // /proc/kmsg: the kernel log (console.c), as dmesg prints it
+    if (vn->name[0] == 'k') {
+        if (!vn_grow(vn, KLOG_MAX + 1)) return;
+        vn->size = klog_copy(vn->data);
+        return;
+    }
+    // /proc/meminfo: where memory is, in KB, "name value" a line (free
+    // prints it): the heap, its use, what is free and the biggest block
+    // of that; RAM files written and not saved, and how many; files kept
+    // from the host as a cache, and how many; files' bytes left on the
+    // host; and under the MMU the heap's blocks of single frames, every
+    // block of frames, how many, the frames in use in them and the blocks
+    // less than an eighth in use (mmu_counts), and swap: its slots, the pages out
+    // and in since boot, the tasks load control holds, the pages moved in memory
+    if (vn->name[0] == 'm') {
+        if (!vn_grow(vn, 640)) return;
+        r[0] = 0; r[1] = 0;
+        vfs_ramuse(rootdir, r);
+        mmu_counts(c);
+        size = *(int *)C4IX_HEAP_END - *(int *)C4IX_HEAP_BASE;
+        n = vfs_kv(vn->data, 0, "heap ", size / 1024);
+        if (vfs_heapinfo) {
+            n = vfs_kv(vn->data, n, "used ", *(int *)C4IX_HEAP_USED / 1024);
+            n = vfs_kv(vn->data, n, "free ", (size - *(int *)C4IX_HEAP_USED) / 1024);
+        }
+        if (c[5] >= 0) n = vfs_kv(vn->data, n, "largest ", c[5] / 1024);
+        n = vfs_kv(vn->data, n, "files ", r[0] / 1024);
+        n = vfs_kv(vn->data, n, "nfiles ", r[1]);
+        n = vfs_kv(vn->data, n, "cached ", vfs_cachedbytes / 1024);
+        n = vfs_kv(vn->data, n, "ncached ", vfs_ncached);
+        n = vfs_kv(vn->data, n, "lazy ", vfs_lazybytes / 1024);
+        if (mmu_on) {
+            n = vfs_kv(vn->data, n, "frames ", c[0] / 1024);
+            n = vfs_kv(vn->data, n, "blocks ", c[6] / 1024);
+            n = vfs_kv(vn->data, n, "nblocks ", c[7]);
+            n = vfs_kv(vn->data, n, "inuse ", c[8] / 1024);
+            n = vfs_kv(vn->data, n, "sparse ", c[9] / 1024);
+        }
+        if (c[1] > 0) {
+            n = vfs_kv(vn->data, n, "swap ", c[1] * 4);
+            n = vfs_kv(vn->data, n, "swapfree ", c[2] * 4);
+            n = vfs_kv(vn->data, n, "swapouts ", c[3]);
+            n = vfs_kv(vn->data, n, "swapins ", c[4]);
+            n = vfs_kv(vn->data, n, "held ", c[10]);
+            n = vfs_kv(vn->data, n, "moves ", c[11]);
+        }
+        n = vfs_kv(vn->data, n, "spilled ", sl4b_spilled());
+        n = vfs_kv(vn->data, n, "rqlost ", sched_rqlost);
+        vn->data[n] = 0;
+        vn->size = n;
+        return;
+    }
+    if (!vn_grow(vn, 128)) return;
+    // /proc/cache: what files' bytes are where (the cache, below): files
+    // still on the host and their bytes, files read in and kept and their
+    // bytes, and how many times one was dropped since boot
+    if (vn->name[0] == 'c') {
+        n = 0;
+        memcpy(vn->data, "lazy ", 5); n = 5;
+        n = n + vfs_dec(vn->data + n, vfs_nlazy); vn->data[n++] = ' ';
+        n = n + vfs_dec(vn->data + n, vfs_lazybytes);
+        memcpy(vn->data + n, "\ncached ", 8); n = n + 8;
+        n = n + vfs_dec(vn->data + n, vfs_ncached); vn->data[n++] = ' ';
+        n = n + vfs_dec(vn->data + n, vfs_cachedbytes);
+        memcpy(vn->data + n, "\ndropped ", 9); n = n + 9;
+        n = n + vfs_dec(vn->data + n, vfs_dropped);
+        vn->data[n++] = '\n';
+        vn->data[n] = 0;
+        vn->size = n;
+        return;
+    }
     ms = __time() - vfs_boot_ms;
     if (ms < 0) ms = 0;
     n = vfs_fmt(vn->data, ms / 1000, ms % 1000 / 10);
@@ -107,6 +194,8 @@ static void vfs_proc(struct vnode *vn) {
     vn->data[n] = 0;
     vn->size = n;
 }
+
+static void vfs_cache_init();
 
 void vfs_init() {
     struct vnode *vn;
@@ -138,23 +227,36 @@ void vfs_init() {
     vfs_boot_ms = __time();
     vfs_mkdir("/proc");
     if ((vn = vfs_ramfile("/proc/uptime"))) vn->type = VN_PROC;
-    // /log/kernel: the console, logged (console.c)
+    // /proc/kmsg: the kernel log, which dmesg prints (console.c)
+    if ((vn = vfs_ramfile("/proc/kmsg"))) vn->type = VN_PROC;
+    // /proc/cache: files on the host and in RAM (the cache, below)
+    if ((vn = vfs_ramfile("/proc/cache"))) vn->type = VN_PROC;
+    // /proc/meminfo: where memory is, which free prints (vfs_proc)
+    if ((vn = vfs_ramfile("/proc/meminfo"))) vn->type = VN_PROC;
+    vfs_cache_init();
+    // /var/log/kernel: the console, logged (console.c)
     con_logopen();
+    klog("vfs: / and /tmp in RAM, /proc/uptime and /proc/kmsg made when read, /var/log/kernel\n");
 }
 
-// /log/kernel, made at boot. The kernel holds a reference, so it cannot
-// be unlinked from under the console.
+// What the boot left on the host (SYS_LAZYFILE): files, and their bytes
+int vfs_nlazy, vfs_lazybytes;
+
+// /var/log/kernel, made at boot. The kernel holds a reference, so it
+// cannot be unlinked from under the console.
 struct vnode *vfs_klog() {
     struct vnode *vn;
-    vfs_mkdir("/log");
-    if ((vn = vfs_ramfile("/log/kernel"))) ++vn->refs;
+    vfs_mkdir("/var");
+    vfs_mkdir("/var/log");
+    if ((vn = vfs_ramfile("/var/log/kernel"))) ++vn->refs;
     return vn;
 }
 
-void vfs_logc(struct vnode *vn, int c, int max) {
-    if (vn->size >= max || !vn_grow(vn, vn->size + 1)) return;
+int vfs_logc(struct vnode *vn, int c, int max) {
+    if (vn->size >= max || !vn_grow(vn, vn->size + 1)) return 0;
     vn->data[vn->size] = c;
     ++vn->size;
+    return 1;
 }
 
 struct vnode *vfs_root() { return rootdir; }
@@ -180,10 +282,13 @@ struct vnode *vfs_cwd() {
 // directories: "." and ".." mean something, and a name is only ever
 // matched against the entries of one directory.
 
+static void vfs_dirfill(struct vnode *dir);
+
 static struct vnode *vfs_child(struct vnode *dir, char *name, int len) {
     struct vnode *vn;
     int i;
     if (!vfs_isdir(dir)) return 0;
+    vfs_dirfill(dir);
     vn = dir->child;
     while (vn) {
         i = 0;
@@ -273,21 +378,158 @@ static struct vnode *vn_alloc(int type) {
 // which is all a build tool needs to know which file is stale.
 static int vfs_clock;
 
+static void vn_unback(struct vnode *vn);
+
 void vfs_touch(struct vnode *vn) {
     vfs_clock = vfs_clock + 1;
     vn->mtime = vfs_clock;
+    // what it holds now is its own, not the host's
+    if (vn->backed) vn_unback(vn);
+    vn->sig = 0;
+}
+
+// ---- the cache: files whose bytes are the host's too ----
+//
+// A lazy file read in is kept (vfs_fill), but its bytes are still the
+// host's: such a file is on this list, most recently used at the head,
+// and when memory is short (vfs_trim) or an allocation finds none
+// (vfs_malloc), files are dropped from its tail -- their bytes freed and
+// the files lazy again, to be read from the host when next wanted. A
+// file that changes leaves the list for good (vfs_touch). The root
+// archive's files are such files where there is a drive to keep its tar
+// (persist.c): they cost RAM only while in use.
+enum { VFS_KEEP = 65536 };      // a lazy file this big or smaller is kept once read
+int vfs_spans;                  // the host reads "NAME@OFF+LEN" (libjs; devices.js diskOpen)
+static struct vnode *vfs_chead; // most recently used
+struct vnode *vfs_ctail;
+int vfs_ncached, vfs_cachedbytes, vfs_dropped;
+
+// libjs announces both (C4IX_I_C4MJS). Native c4m reads whole files and
+// says nothing of its heap: there a file is read in whole on first use,
+// and dropped only when an allocation finds no memory.
+static void vfs_cache_init() {
+    vfs_spans = host_has(C4IX_I_C4MJS);
+    vfs_heapinfo = vfs_spans;
+}
+
+static int vn_cached(struct vnode *vn) {
+    return vn->cprev || vfs_chead == vn;
+}
+
+static void cache_out(struct vnode *vn) {
+    if (!vn_cached(vn)) return;
+    if (vn->cprev) vn->cprev->cnext = vn->cnext; else vfs_chead = vn->cnext;
+    if (vn->cnext) vn->cnext->cprev = vn->cprev; else vfs_ctail = vn->cprev;
+    vn->cnext = 0;
+    vn->cprev = 0;
+    --vfs_ncached;
+    vfs_cachedbytes = vfs_cachedbytes - vn->cap;
+}
+
+static void cache_in(struct vnode *vn) {
+    vn->cprev = 0;
+    vn->cnext = vfs_chead;
+    if (vfs_chead) vfs_chead->cprev = vn; else vfs_ctail = vn;
+    vfs_chead = vn;
+    ++vfs_ncached;
+    vfs_cachedbytes = vfs_cachedbytes + vn->cap;
+}
+
+// it was used: to the head
+static void cache_use(struct vnode *vn) {
+    if (!vn_cached(vn) || vfs_chead == vn) return;
+    cache_out(vn);
+    cache_in(vn);
+}
+
+static void vn_unback(struct vnode *vn) {
+    cache_out(vn);
+    vn->backed = 0;
+}
+
+// its bytes freed: lazy again
+static void vn_drop(struct vnode *vn) {
+    cache_out(vn);
+    free(vn->data);
+    vn->data = 0;
+    vn->cap = 0;
+    vn->lazy = 1;
+    ++vfs_nlazy;
+    vfs_lazybytes = vfs_lazybytes + vn->size;
+    ++vfs_dropped;
+}
+
+// no longer lazy: its bytes are in RAM, or it was emptied
+static void vn_unlazy(struct vnode *vn) {
+    if (!vn->lazy) return;
+    vn->lazy = 0;
+    --vfs_nlazy;
+    vfs_lazybytes = vfs_lazybytes - vn->size;
+}
+
+static int vfs_short() {
+    int used, size;
+    if (!vfs_heapinfo) return 0;
+    used = *(int *)C4IX_HEAP_USED;
+    size = *(int *)C4IX_HEAP_END - *(int *)C4IX_HEAP_BASE;
+    return used > size / 8 * 7;
+}
+
+// May the cache let VN go? Not while it is open for writing, or held.
+static int vn_droppable(struct vnode *vn) {
+    return !vn->held && !vn->writers;
+}
+
+int vfs_reclaim(int want) {
+    struct vnode *vn, *p;
+    int freed;
+    freed = 0;
+    if (!vfs_ctail) return 0;
+    sched_lock();
+    vn = vfs_ctail;
+    while (vn && freed < want) {
+        p = vn->cprev;
+        if (vn_droppable(vn)) { freed = freed + vn->cap; vn_drop(vn); }
+        vn = p;
+    }
+    sched_unlock();
+    return freed;
+}
+
+int vfs_trim_slow() {
+    struct vnode *vn, *p;
+    if (!vfs_short()) return 0;
+    sched_lock();
+    vn = vfs_ctail;
+    while (vn && vfs_short()) {
+        p = vn->cprev;
+        if (vn_droppable(vn)) vn_drop(vn);
+        vn = p;
+    }
+    sched_unlock();
+}
+
+char *vfs_malloc(int n) {
+    char *p;
+    vfs_trim();
+    while (!(p = (char *)malloc(n))) {
+        if (!vfs_reclaim(n)) return mmu_kalloc(n);
+    }
+    return p;
 }
 
 // Growable storage for RAM files and pipes. c4m's realloc opcode is
-// the known-broken one, so this is malloc + copy + free by hand.
+// the known-broken one, so this is malloc + copy + free by hand. A
+// file grown is about to change: it leaves the cache.
 static int vn_grow(struct vnode *vn, int need) {
     char *nd;
     int cap;
 
     if (vn->cap >= need) return 1;
+    if (vn->backed) vn_unback(vn);
     cap = vn->cap ? vn->cap : 64;
     while (cap < need) cap = cap * 2;
-    if (!(nd = (char *)malloc(cap))) return 0;
+    if (!(nd = vfs_malloc(cap))) return 0;
     memset(nd, 0, cap);
     if (vn->size) memcpy(nd, vn->data, vn->size);
     if (vn->data) free(vn->data);
@@ -327,41 +569,303 @@ struct vnode *vfs_ramfile(char *path) {
 // manifest: on a host that fetches files over a network (libjs in a
 // browser) that is the difference between a boot that downloads the
 // whole disk and one that downloads what it runs. The size is known
-// now, so stat and ls are right before anything is read.
+// now, so stat and ls are right before anything is read. HOST may be a
+// span of a host file, "NAME@OFF+LEN" (vfs_spans): persist.c makes the
+// root archive's files so, each its bytes in the tar kept on drive 1.
+// It is a change, as writing the file would be: it takes the next
+// modification stamp, so files made in a tar's order are ordered as
+// unpacking them was.
+static int vfs_lazydir(char *path, char *host);
+
 int vfs_lazyfile(char *path, char *host, int size) {
     struct vnode *vn;
+    char *h;
     int n;
+    if (size < 0) return vfs_lazydir(path, host);
     sched_lock();
     if (!(vn = vfs_walk(path, 1, 0)) || vn->type != VN_RAMFILE) { sched_unlock(); return -1; }
     n = 0; while (host[n]) ++n;
+    if (!(h = vfs_malloc(n + 1))) { sched_unlock(); return -1; }
+    memcpy(h, host, n + 1);
     if (vn->hostname) free(vn->hostname);
-    if (!(vn->hostname = (char *)malloc(n + 1))) { sched_unlock(); return -1; }
-    memcpy(vn->hostname, host, n + 1);
+    vn->hostname = h;
+    vfs_touch(vn);
+    vn_unlazy(vn);
     if (vn->data) { free(vn->data); vn->data = 0; vn->cap = 0; }
     vn->size = size;
     vn->lazy = 1;
+    vn->backed = 1;
+    ++vfs_nlazy;
+    vfs_lazybytes = vfs_lazybytes + size;
     sched_unlock();
     return 0;
 }
 
-// Read a lazy file's bytes in from the host, once. After this it is an
-// ordinary RAM file. A host file that has gone leaves it empty.
-int vfs_fill(struct vnode *vn) {
-    int fd, n;
-    if (!vn || !vn->lazy) return 1;
-    vn->lazy = 0;
-    n = vn->size;
-    vn->size = 0;
-    if ((fd = open(vn->hostname, 0)) < 0) return 0;
-    if (!vn_grow(vn, n > 0 ? n : 64)) { close(fd); return 0; }
-    while (1) {
-        if (vn->size + 4096 > vn->cap && !vn_grow(vn, vn->cap * 2)) break;
-        n = read(fd, vn->data + vn->size, vn->cap - vn->size);
-        if (n <= 0) break;
-        vn->size = vn->size + n;
+// ---- directories whose entries are the host's ----
+//
+// A host directory: PATH holds whatever the host has under the name
+// prefix HOST ("games/doom/"), but none of it is made until something
+// first looks in it -- a lookup through it, a listing, an rmdir. Then
+// the host's HOST.c4ix-dir (build-images.sh writes one in every such
+// directory) says what is there, a line each: "SIZE NAME" a file, made a
+// lazy file of the host's HOST + NAME, and "d NAME" a directory, made a
+// host directory of HOST + NAME + "/" in its turn. vfsload makes one of
+// each hostdir(PREFIX) in its manifest (SYS_LAZYFILE with a size of
+// -1), where it made a lazy file of every host file under PREFIX at
+// every boot: the games' sources and data were three thousand of them,
+// four seconds of the boot. An entry the directory already has is left
+// as it is, and a directory of the manifest's that the host has too gets
+// the host's entries the same way, when it is first looked in.
+//
+// What is made is stamped 0, not a change: persist (which stats such a
+// directory as device 3 and does not go in) saves only what is stamped
+// after its epoch there. A directory waiting to be listed is one with a
+// hostname, which is its prefix; once listed it has none.
+static int vfs_lazydir(char *path, char *host) {
+    struct vnode *vn;
+    char *h;
+    int n;
+    sched_lock();
+    if (!(vn = vfs_walk(path, 0, 0))) vn = vfs_walk(path, 1, 1);
+    if (!vn || vn->type != VN_DIR || vn == rootdir) { sched_unlock(); return -1; }
+    n = 0; while (host[n]) ++n;
+    if (!n || host[n - 1] != '/' || !(h = vfs_malloc(n + 1))) { sched_unlock(); return -1; }
+    memcpy(h, host, n + 1);
+    if (vn->hostname) free(vn->hostname);
+    vn->hostname = h;
+    sched_unlock();
+    return 0;
+}
+
+// One entry the listing names, NAME (LEN bytes) in DIR, whose host
+// prefix is PFX (PL bytes): a lazy file of SIZE bytes, or with ISDIR a
+// host directory. 0 when there was no memory for it.
+static int vfs_dirent_make(struct vnode *dir, char *pfx, int pl, char *name, int len, int isdir, int size) {
+    struct vnode *vn;
+    char *h;
+    if ((vn = vfs_child(dir, name, len))) {
+        // the manifest's directory: the host's entries join it when it is looked in
+        if (isdir && vn->type == VN_DIR && !vn->hostname) {
+            if (!(h = vfs_malloc(pl + len + 2))) return 0;
+            memcpy(h, pfx, pl); memcpy(h + pl, name, len); h[pl + len] = '/'; h[pl + len + 1] = 0;
+            vn->hostname = h;
+        }
+        return 1;
+    }
+    if (!(h = vfs_malloc(pl + len + 2))) return 0;
+    memcpy(h, pfx, pl); memcpy(h + pl, name, len);
+    h[pl + len] = isdir ? '/' : 0; h[pl + len + 1] = 0;
+    if (!(vn = vn_alloc(isdir ? VN_DIR : VN_RAMFILE))) { free(h); return 0; }
+    vfs_namecpy2(vn->name, name, len);
+    vn->parent = dir;
+    vn->next = dir->child;
+    dir->child = vn;
+    vn->mtime = 0;
+    vn->hostname = h;
+    if (!isdir) {
+        vn->size = size;
+        vn->lazy = 1;
+        vn->backed = 1;
+        ++vfs_nlazy;
+        vfs_lazybytes = vfs_lazybytes + size;
+    }
+    return 1;
+}
+
+static void vfs_dirlist(struct vnode *dir);
+
+// (lookups take no lock, and this changes the tree)
+static void vfs_dirfill(struct vnode *dir) {
+    if (!dir || dir->type != VN_DIR || !dir->hostname) return;
+    sched_lock();
+    if (dir->hostname) vfs_dirlist(dir);
+    sched_unlock();
+}
+
+static void vfs_dirlist(struct vnode *dir) {
+    char *pfx, *buf, *nb, *p, *e;
+    char host[PATH_MAX];
+    int fd, n, got, cap, pl, size, isdir, nl;
+    pfx = dir->hostname;
+    dir->hostname = 0;      // listed from here on, however this goes
+    pl = 0; while (pfx[pl]) ++pl;
+    if (pl + 10 > PATH_MAX) { free(pfx); return; }
+    memcpy(host, pfx, pl); memcpy(host + pl, ".c4ix-dir", 10);
+    if ((fd = open(host, 0)) < 0) { free(pfx); return; }
+    cap = 4096; got = 0;
+    if (!(buf = vfs_malloc(cap))) { close(fd); free(pfx); return; }
+    while ((n = read(fd, buf + got, cap - 1 - got)) > 0) {
+        got = got + n;
+        if (got < cap - 1) continue;
+        if (!(nb = vfs_malloc(cap * 2))) break;
+        memcpy(nb, buf, got);
+        free(buf);
+        buf = nb;
+        cap = cap * 2;
     }
     close(fd);
+    buf[got] = 0;
+    p = buf;
+    while (*p) {
+        e = p;
+        while (*e && *e != 10) ++e;
+        isdir = 0; size = 0;
+        if (*p == 'd') { isdir = 1; ++p; }
+        else while (*p >= '0' && *p <= '9') { size = size * 10 + *p - '0'; ++p; }
+        if (*p == ' ') ++p;
+        // (the length first: c4lc and c4fc order pl + (e - p) differently)
+        nl = e - p;
+        if (nl > 0 && nl < VN_NAME_MAX && pl + nl + 2 < PATH_MAX &&
+            !vfs_dirent_make(dir, pfx, pl, p, nl, isdir, size)) break;
+        p = *e ? e + 1 : e;
+    }
+    free(buf);
+    free(pfx);
+}
+
+// PATH, saved (persist.c), is the host's again at HOST, its span of the
+// snapshot just written: unless it has changed since STAMP, whose bytes
+// are newer than the saved ones. It did not change, so its stamp stays
+// (persist -d would see a change at every save otherwise). Read from
+// there when wanted, as a file of the kept system is: a big one's bytes
+// freed now, a small one's kept in the cache, to go when memory is short;
+// while it is open to write or held, the cache keeps it (vn_droppable).
+int vfs_relazy(char *path, char *host, int stamp) {
+    struct vnode *vn;
+    char *h;
+    int n;
+    sched_lock();
+    if (!(vn = vfs_walk(path, 0, 0)) || vn->type != VN_RAMFILE || vn->mtime != stamp) { sched_unlock(); return -1; }
+    n = 0; while (host[n]) ++n;
+    // (taking the memory may drop it from the cache: lazy, as below)
+    if (!(h = vfs_malloc(n + 1))) { sched_unlock(); return -1; }
+    memcpy(h, host, n + 1);
+    if (vn->hostname) free(vn->hostname);
+    vn->hostname = h;
+    vn->backed = 1;
+    if (!vn->lazy) {
+        if (vn->size > VFS_KEEP && vn_droppable(vn)) {
+            cache_out(vn);
+            free(vn->data);
+            vn->data = 0;
+            vn->cap = 0;
+            vn->lazy = 1;
+            ++vfs_nlazy;
+            vfs_lazybytes = vfs_lazybytes + vn->size;
+        } else if (!vn_cached(vn)) cache_in(vn);
+    }
+    sched_unlock();
+    return 0;
+}
+
+// P from N gets "NAME V\n" (V not below 0); where it ends
+static int vfs_kv(char *p, int n, char *name, int v) {
+    while (*name) p[n++] = *name++;
+    n = n + vfs_dec(p + n, v < 0 ? 0 : v);
+    p[n++] = '\n';
+    return n;
+}
+
+// P gets V in decimal; its length
+static int vfs_dec(char *p, int v) {
+    char d[12];
+    int n, i;
+    n = 0;
+    d[n++] = '0' + v % 10; v = v / 10;
+    while (v > 0) { d[n++] = '0' + v % 10; v = v / 10; }
+    i = 0;
+    while (n) p[i++] = d[--n];
+    p[i] = 0;
+    return i;
+}
+
+// Is this host name a span, NAME@OFF+LEN? Where its '@' is, or -1.
+static int vfs_span_at(char *h) {
+    int n, i, plus;
+    n = 0; while (h[n]) ++n;
+    i = n - 1; plus = -1;
+    while (i > 0 && ((h[i] >= '0' && h[i] <= '9') || (h[i] == '+' && plus < 0))) {
+        if (h[i] == '+') plus = i;
+        --i;
+    }
+    if (i > 0 && h[i] == '@' && plus > i + 1 && plus < n - 1) return i;
+    return -1;
+}
+
+// LEN bytes of VN's host bytes from POS into BUF, through a span; the
+// count, or -1. A span's own offset is added to POS.
+static int vfs_span_read(struct vnode *vn, char *buf, int pos, int len) {
+    char name[PATH_MAX + 32];
+    int at, off, i, k, fd, got, n;
+    at = vfs_span_at(vn->hostname);
+    off = 0;
+    if (at >= 0) {
+        i = at + 1;
+        while (vn->hostname[i] != '+') { off = off * 10 + vn->hostname[i] - '0'; ++i; }
+    } else { at = 0; while (vn->hostname[at]) ++at; }
+    if (at >= PATH_MAX) return -1;
+    memcpy(name, vn->hostname, at);
+    k = at;
+    name[k++] = '@';
+    k = k + vfs_dec(name + k, off + pos);
+    name[k++] = '+';
+    vfs_dec(name + k, len);
+    if ((fd = open(name, 0)) < 0) return -1;
+    got = 0;
+    while (got < len && (n = read(fd, buf + got, len - got)) > 0) got = got + n;
+    close(fd);
+    return got;
+}
+
+// Read a lazy file's bytes in from the host, and keep them: it is an
+// ordinary RAM file from now on, and a cached one (above) while it does
+// not change. A host file that has gone leaves it empty. With no memory
+// for it, even once the cache has given up what it can, it stays lazy,
+// and 0.
+int vfs_fill(struct vnode *vn) {
+    int fd, n, size, got;
+    char *nd;
+    if (!vn || !vn->lazy) return 1;
+    size = vn->size;
+    if (!(nd = vfs_malloc(size + 1))) return 0;
+    if ((fd = open(vn->hostname, 0)) < 0) {
+        free(nd);
+        vn_unlazy(vn);
+        vn->size = 0;
+        return 0;
+    }
+    got = 0;
+    while (got < size && (n = read(fd, nd + got, size - got)) > 0) got = got + n;
+    close(fd);
+    nd[got] = 0;
+    vn_unlazy(vn);
+    vn->data = nd;
+    vn->cap = size + 1;
+    vn->size = got;
+    if (vn->backed) cache_in(vn);
     return 1;
+}
+
+// LEN bytes of a RAM file from POS, into BUF: from RAM, or from the host
+// where it is still there and the host reads spans. Fewer at the end;
+// -1 when they cannot be had.
+int vfs_pread(struct vnode *vn, char *buf, int pos, int len) {
+    int n;
+    if (pos < 0 || len < 0) return -1;
+    sched_lock();
+    n = vn->size - pos;
+    if (n > len) n = len;
+    if (n <= 0) { sched_unlock(); return 0; }
+    if (vn->lazy && vfs_spans) n = vfs_span_read(vn, buf, pos, n);
+    else if (vn->lazy && !vfs_fill(vn)) n = -1;
+    else {
+        if (n > vn->size - pos) n = vn->size - pos;   // a host file that went
+        if (n < 0) n = 0;
+        memcpy(buf, vn->data + pos, n);
+        cache_use(vn);
+    }
+    sched_unlock();
+    return n;
 }
 
 // What a path is, for a file browser: out[0] is 1 for a directory, 2 for
@@ -369,10 +873,17 @@ int vfs_fill(struct vnode *vn) {
 // size in bytes of a RAM file. -1 when there is no such entry.
 // Is this file a program? A loaded file by its C4R signature; a lazy
 // one by the host name behind it, so asking never fetches the file (a
-// file browser asks for a whole folder at a time).
+// file browser asks for a whole folder at a time) -- except a span of a
+// host file (the root archive's, in the tar kept on drive 1), which is
+// in the host's memory already: its first three bytes, once.
 static int vn_is_program(struct vnode *vn) {
+    char s[4];
     int n;
     if (vn->type != VN_RAMFILE) return 0;
+    if (vn->lazy && vfs_spans && vfs_span_at(vn->hostname) >= 0) {
+        if (!vn->sig) vn->sig = vn->size >= 13 && vfs_span_read(vn, s, 0, 3) == 3 && s[0] == 'C' && s[1] == '4' && s[2] == 'R' ? 2 : 1;
+        return vn->sig == 2;
+    }
     if (vn->lazy) {
         n = 0;
         while (vn->hostname[n]) ++n;
@@ -410,7 +921,8 @@ void vn_stat(struct vnode *vn, int *out, int n) {
     st[ST_NLINK] = 1 + vn->nlinks;
     st[ST_MODE] = vn->type == VN_DIR ? 16877 : vn->type == VN_RAMFILE ? (st[ST_PROG] ? 33261 : 33188)
                 : vn->type == VN_PIPE ? 4534 : 8630;   // S_IFDIR|0755, S_IFREG|0755 or 0644, S_IFIFO|0666, S_IFCHR|0666
-    st[ST_DEV] = (vn->type == VN_RAMFILE || vn->type == VN_DIR) ? 1 : vn->type == VN_HOSTFILE ? 2 : 0;
+    st[ST_DEV] = (vn->type == VN_DIR && vn->hostname) ? 3
+               : (vn->type == VN_RAMFILE || vn->type == VN_DIR) ? 1 : vn->type == VN_HOSTFILE ? 2 : 0;
     if (n <= 0) n = 4;
     if (n > ST_WORDS) n = ST_WORDS;
     i = 0;
@@ -452,7 +964,9 @@ int vfs_link(char *path, char *newpath) {
 int vfs_truncate(struct vnode *vn, int len) {
     if (!vn || vn->type != VN_RAMFILE || len < 0) return -1;
     sched_lock();
-    if (vn->lazy) vfs_fill(vn);
+    // emptied: the host's bytes are not wanted
+    if (vn->lazy && !len) { vn_unlazy(vn); vn->size = 0; }
+    if (vn->lazy && !vfs_fill(vn)) { sched_unlock(); return -1; }
     if (len > vn->size) {
         if (!vn_grow(vn, len)) { sched_unlock(); return -1; }
         memset(vn->data + vn->size, 0, len - vn->size);
@@ -492,7 +1006,7 @@ int vfs_put(char *path, char *buf, int len) {
     sched_lock();
     vn = vfs_walk(path, 1, 0);
     if (!vn || vn->type != VN_RAMFILE) { sched_unlock(); return -1; }
-    vn->lazy = 0;
+    vn_unlazy(vn);
     vn->size = 0;
     if (!vn_grow(vn, len + 1)) { sched_unlock(); return -1; }
     memcpy(vn->data, buf, len);
@@ -503,18 +1017,28 @@ int vfs_put(char *path, char *buf, int len) {
     return 0;
 }
 
-char *vfs_getdata(char *path, int *plen) {
+char *vfs_getdata(char *path, int *plen, struct vnode **hold) {
     struct vnode *vn;
     sched_lock();
     vn = vfs_walk(path, 0, 0);
     if (vn && vn->type == VN_PROC) vfs_proc(vn);
     else if (!vn || vn->type != VN_RAMFILE) { sched_unlock(); return 0; }
-    if (vn->lazy) vfs_fill(vn);
+    if (vn->lazy && !vfs_fill(vn)) { sched_unlock(); return 0; }
     if (!vn_grow(vn, vn->size + 1)) { sched_unlock(); return 0; }
     vn->data[vn->size] = 0;
     if (plen) *plen = vn->size;
+    // the caller reads them in place: not dropped while it does, or ever
+    if (hold) { ++vn->held; *hold = vn; cache_use(vn); }
+    else if (vn->backed) vn_unback(vn);
     sched_unlock();
     return vn->data;
+}
+
+void vfs_unhold(struct vnode *vn) {
+    if (!vn) return;
+    sched_lock();
+    --vn->held;
+    sched_unlock();
 }
 
 // The files (not folders) of the working directory, for COUNT and NAME.
@@ -524,6 +1048,7 @@ static int vn_isfile(struct vnode *vn) {
 
 static struct vnode *vfs_nth_file(int i) {
     struct vnode *vn;
+    vfs_dirfill(vfs_cwd());
     vn = vfs_cwd()->child;
     while (vn) {
         if (vn_isfile(vn_res(vn))) { if (!i) return vn; --i; }
@@ -536,6 +1061,7 @@ int vfs_nfiles() {
     struct vnode *vn;
     int n;
     n = 0;
+    vfs_dirfill(vfs_cwd());
     vn = vfs_cwd()->child;
     while (vn) { if (vn_isfile(vn_res(vn))) ++n; vn = vn->next; }
     return n;
@@ -559,8 +1085,10 @@ char *vfs_fname(int i) {
 // never notice.
 int vfs_unlink(char *path) {
     struct vnode *vn, *l;
+    struct task *t;
     sched_lock();
     vn = vfs_walk2(path, 0, 0);
+    if (vn && vn->type == VN_DIR) vfs_dirfill(vn);
     if (!vn || vn == rootdir || !vn->parent ||
         (vn->type == VN_DIR && vn->child) ||
         (vn->type != VN_DIR && vn->type != VN_RAMFILE && vn->type != VN_LINK)) { sched_unlock(); return -1; }
@@ -595,9 +1123,17 @@ int vfs_unlink(char *path) {
     if (vn->refs > 0) { sched_unlock(); return -1; }
     vn_detach(vn);
     if (vn->type == VN_RAMFILE) {
+        cache_out(vn);
+        vn_unlazy(vn);
         if (vn->data) free(vn->data);
         if (vn->hostname) free(vn->hostname);
         sl4b_free(vn_cache, (char *)vn);
+    } else if (vn->type == VN_DIR) {
+        // an empty directory goes too, unless a task is still in it: its cwd
+        // is a pointer, with no count (it stays, with no name, until reboot)
+        t = task_head;
+        while (t && t->cwd != vn) t = t->next;
+        if (!t) { if (vn->hostname) free(vn->hostname); vn->hostname = 0; sl4b_free(vn_cache, (char *)vn); }
     }
     sched_unlock();
     return 0;
@@ -645,6 +1181,7 @@ int vfs_direntry(struct vnode *dir, int index, char *name, int *isdir) {
     int i;
     if (!vfs_isdir(dir)) return 0;
     sched_lock();
+    vfs_dirfill(dir);
     vn = dir->child;
     i = 0;
     while (vn) {
@@ -714,12 +1251,24 @@ int vfs_read(struct file *f, char *buf, int len) {
     // RAM file: read from the description's own position. /proc/uptime
     // is one too, made again whenever it is read from the start.
     if (vn->type == VN_PROC && !f->pos) vfs_proc(vn);
-    if (vn->lazy) vfs_fill(vn);
+    // Still on the host: a small file is read in and kept, while there
+    // is room; a big one -- a game's data -- is read where it is, a span
+    // at a time, and never takes the RAM
+    if (vn->lazy && (!vfs_spans || (vn->size <= VFS_KEEP && !vfs_short()))) {
+        if (!vfs_fill(vn) && !vfs_spans) { sched_unlock(); return -1; }
+    }
+    if (vn->lazy) {
+        n = vfs_pread(vn, buf, f->pos, len);
+        if (n > 0) f->pos = f->pos + n;
+        sched_unlock();
+        return n;
+    }
     n = vn->size - f->pos;
     if (n <= 0) { sched_unlock(); return 0; }
     if (n > len) n = len;
     memcpy(buf, vn->data + f->pos, n);
     f->pos = f->pos + n;
+    cache_use(vn);
     sched_unlock();
     return n;
 }
@@ -745,13 +1294,16 @@ int vfs_write(struct file *f, char *buf, int len) {
         if (!vn_grow(vn, vn->size + len)) { sched_unlock(); return -1; }
         memcpy(vn->data + vn->size, buf, len);
         vn->size = vn->size + len;
+        sched_wake = 1;
+        sched_pipewake(vn);
         sched_unlock();
         return len;
     }
 
     // RAM file: write at the description's position, extending as
     // needed, or at the end for O_APPEND.
-    if (vn->lazy) vfs_fill(vn);
+    if (vn->lazy && !vfs_fill(vn)) { sched_unlock(); return -1; }
+    if (vn->backed) vn_unback(vn);
     if (f->flags & C4IX_O_APPEND) f->pos = vn->size;
     end = f->pos + len;
     if (!vn_grow(vn, end)) { sched_unlock(); return -1; }
@@ -794,9 +1346,9 @@ static struct file *file_alloc(struct vnode *vn, int flags) {
     f->pos = 0;
     f->refs = 1;
     ++vn->refs;
-    if (vn->type == VN_PIPE) {
-        if ((flags & 3) != C4IX_O_RDONLY) ++vn->writers;
-    }
+    // a pipe's readers see end of file once there are none; a cached
+    // file is not dropped while there are any
+    if ((flags & 3) != C4IX_O_RDONLY) ++vn->writers;
     sched_unlock();
     return f;
 }
@@ -805,8 +1357,10 @@ static void file_unref(struct file *f) {
     sched_lock();
     --f->refs;
     if (f->refs > 0) { sched_unlock(); return; }
-    if (f->vn->type == VN_PIPE) {
-        if ((f->flags & 3) != C4IX_O_RDONLY) --f->vn->writers;
+    if ((f->flags & 3) != C4IX_O_RDONLY) {
+        --f->vn->writers;
+        sched_wake = 1;
+        if (!f->vn->writers && f->vn->type == VN_PIPE) sched_pipewake(f->vn);
     }
     vn_release(f->vn);
     sl4b_free(file_cache, (char *)f);
@@ -825,7 +1379,12 @@ int fd_install(struct task *t, struct file *f) {
     sched_lock();
     fd = 0;
     while (fd < FD_MAX) {
-        if (!t->fds[fd]) { t->fds[fd] = (int)f; sched_unlock(); return fd; }
+        if (!t->fds[fd]) {
+            t->fds[fd] = (int)f;
+            if (fd >= t->fdtop) t->fdtop = fd + 1;
+            sched_unlock();
+            return fd;
+        }
         ++fd;
     }
     sched_unlock();
@@ -861,7 +1420,23 @@ int fd_dup2(struct task *t, int oldfd, int newfd) {
     if (t->fds[newfd]) fd_close(t, newfd);
     ++f->refs;
     t->fds[newfd] = (int)f;
+    if (newfd >= t->fdtop) t->fdtop = newfd + 1;
     t->fdcloexec[newfd] = 0;          // a dup is inherited unless asked otherwise
+    sched_unlock();
+    return newfd;
+}
+
+// The same across two tasks: TO's newfd is FROM's oldfd's description
+// (SYS_FDGIVE). Counted before what newfd was is closed, which may be it.
+int fd_give(struct task *from, int oldfd, struct task *to, int newfd) {
+    struct file *f;
+    sched_lock();
+    if (!(f = fd_get(from, oldfd)) || newfd < 0 || newfd >= FD_MAX) { sched_unlock(); return -1; }
+    ++f->refs;
+    if (to->fds[newfd]) fd_close(to, newfd);
+    to->fds[newfd] = (int)f;
+    if (newfd >= to->fdtop) to->fdtop = newfd + 1;
+    to->fdcloexec[newfd] = 0;
     sched_unlock();
     return newfd;
 }
@@ -887,6 +1462,7 @@ void fd_clone(struct task *dst, struct task *src) {
         if ((f = fd_get(src, fd)) && !src->fdcloexec[fd]) {
             ++f->refs;
             dst->fds[fd] = (int)f;
+            dst->fdtop = fd + 1;
         }
         ++fd;
     }
@@ -904,6 +1480,7 @@ void fd_clone_all(struct task *dst, struct task *src) {
         if ((f = fd_get(src, fd))) {
             ++f->refs;
             dst->fds[fd] = (int)f;
+            dst->fdtop = fd + 1;
             dst->fdcloexec[fd] = src->fdcloexec[fd];
         }
         ++fd;

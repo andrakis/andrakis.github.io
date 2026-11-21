@@ -1,6 +1,7 @@
 // snd-mix.js - the sound device's events made into samples: the AdLib
-// (opl.js), eight channels of 8-bit samples, and the PC speaker, mixed to
-// stereo. The page's AudioWorklet (snd-worklet.js) runs one in real time;
+// (opl.js), sixteen channels of 8-bit samples, the PC speaker, and the
+// MIDI port's General MIDI synth when there is one (opts.synth, a GmSynth
+// from snd-gm.js), mixed to stereo. The page's AudioWorklet (snd-worklet.js) runs one in real time;
 // cli.js --wav runs one over a whole session and writes the file.
 //
 // Events are snd-device.js's, [kind, t, ...] with t in microseconds of
@@ -14,9 +15,9 @@
 // sounds bunched up, and the music cannot creep away from the game.
 
 import { OplChip } from './opl.js';
-import { EVT } from './snd-device.js';
+import { EVT, MUTE } from './snd-device.js';
 
-const VOICES = 8;
+const VOICES = 16;
 const BLOCK = 1024;
 const OPL_GAIN = 4 / 32768;        // dbopl's output, scaled as Wolf4SDL scales it, to [-1, 1]
 const PCM_GAIN = 0.8 / 128;
@@ -32,6 +33,7 @@ export class SoundMixer {
     for (let i = 0; i < VOICES; i++) this.voices.push({ data: null, pos: 0, step: 0, vl: 0, vr: 0 });
     this.spkFreq = 0;
     this.spkPhase = 0;
+    this.gain = 1;                 // the card's MASTER: the whole mix, after it is clipped
     this.queue = [];
     this.head = 0;
     this.offset = 0;
@@ -40,6 +42,32 @@ export class SoundMixer {
     this.slack = Math.round((opts.slack || 0.05) * rate);
     this.synced = false;
     this.resyncs = 0;
+    // the MIDI port's synth: midi(bytes), reset(), and render(L, R, at, n),
+    // which adds n frames into L and R from at. Without one MIDI is lost,
+    // as an MPU-401 with nothing on its MIDI OUT loses it.
+    this.synth = opts.synth || null;
+    // the OPL alone, since oplState() last asked: how many writes, and how
+    // loud it played (sum of squares over frames, and the peak)
+    this.oplWrites = 0; this.oplSq = 0; this.oplFrames = 0; this.oplPeak = 0;
+  }
+
+  // What the OPL holds, and how loud it has been since the last ask: the
+  // page's stats (window.c4m.sound.stats()) and cli.js -s say it. Writes
+  // with a level of 0 is the OPL playing silence: in its OPL3 mode
+  // (opl3) a channel sounds only with its 0xC0 left/right bits (0x30), so
+  // an OPL2 program's music is silent there (snd-device.js).
+  oplState() {
+    const o = this.opl, n = this.oplFrames;
+    const s = {
+      opl3: !!o.opl3Active, reg104: o.reg104 & 0x3f, regBD: o.regBD,
+      c0: o.chan.map(c => c.regC0),
+      writes: this.oplWrites,
+      rms: n ? Math.round(Math.sqrt(this.oplSq / n) * 32767) : 0,
+      peak: Math.round(this.oplPeak * 32767),
+      seconds: +(n / this.rate).toFixed(2),
+    };
+    this.oplWrites = 0; this.oplSq = 0; this.oplFrames = 0; this.oplPeak = 0;
+    return s;
   }
 
   frameOf(t) { return Math.round(t * this.rate / 1e6 + this.offset); }
@@ -72,21 +100,25 @@ export class SoundMixer {
 
   apply(e) {
     switch (e[0]) {
-      case EVT.OPL: this.opl.write(e[2], e[3]); break;
+      case EVT.OPL: this.opl.write(e[2], e[3]); this.oplWrites++; break;
       case EVT.PCM: {
         if (this.frameOf(e[1]) < this.frame - PCM_STALE * this.rate) break;
-        const v = this.voices[e[2] & 7];
+        const v = this.voices[e[2] & (VOICES - 1)];
         v.data = e[5]; v.pos = 0; v.step = e[3] / this.rate;
         this.vol(v, e[4]);
         break;
       }
       case EVT.STOP:
         if (e[2] < 0) { for (const v of this.voices) v.data = null; }
-        else this.voices[e[2] & 7].data = null;
+        else this.voices[e[2] & (VOICES - 1)].data = null;
         break;
-      case EVT.VOL: this.vol(this.voices[e[2] & 7], e[3]); break;
+      case EVT.VOL: this.vol(this.voices[e[2] & (VOICES - 1)], e[3]); break;
       case EVT.SPK: this.spkFreq = e[2] > 0 ? 1193180 / e[2] : 0; break;
+      case EVT.MASTER: this.gain = e[2] & MUTE ? 0 : (e[2] & 0xff) / 255; break;
+      // late or not, a message is played: a dropped note off would hang
+      case EVT.MIDI: if (this.synth) this.synth.midi(e[2]); break;
       case EVT.RESET:
+        if (this.synth) this.synth.reset();
         this.opl = new OplChip(this.rate);
         for (const v of this.voices) v.data = null;
         this.spkFreq = 0;
@@ -98,8 +130,20 @@ export class SoundMixer {
   segment(L, R, at, n) {
     const ob = this.obuf, stereo = !!this.opl.opl3Active;
     this.opl.generate(n, ob);
-    if (stereo) for (let i = 0; i < n; i++) { L[at + i] = ob[i * 2] * OPL_GAIN; R[at + i] = ob[i * 2 + 1] * OPL_GAIN; }
-    else for (let i = 0; i < n; i++) L[at + i] = R[at + i] = ob[i] * OPL_GAIN;
+    let sq = 0, pk = this.oplPeak;
+    if (stereo) for (let i = 0; i < n; i++) {
+      const l = ob[i * 2] * OPL_GAIN, r = ob[i * 2 + 1] * OPL_GAIN;
+      L[at + i] = l; R[at + i] = r;
+      sq += (l * l + r * r) / 2;
+      const a = Math.max(Math.abs(l), Math.abs(r)); if (a > pk) pk = a;
+    } else for (let i = 0; i < n; i++) {
+      const s = ob[i] * OPL_GAIN;
+      L[at + i] = R[at + i] = s;
+      sq += s * s;
+      const a = Math.abs(s); if (a > pk) pk = a;
+    }
+    this.oplSq += sq; this.oplFrames += n; this.oplPeak = pk;
+    if (this.synth) this.synth.render(L, R, at, n);
     for (const v of this.voices) {
       if (!v.data) continue;
       const d = v.data, len = d.length;
@@ -124,10 +168,11 @@ export class SoundMixer {
       }
       this.spkPhase = ph;
     }
+    const g = this.gain;
     for (let i = at; i < at + n; i++) {
       const l = L[i], r = R[i];
-      L[i] = l > 1 ? 1 : l < -1 ? -1 : l;
-      R[i] = r > 1 ? 1 : r < -1 ? -1 : r;
+      L[i] = (l > 1 ? 1 : l < -1 ? -1 : l) * g;
+      R[i] = (r > 1 ? 1 : r < -1 ? -1 : r) * g;
     }
   }
 
@@ -147,9 +192,10 @@ export class SoundMixer {
 }
 
 // A session's events as a 16-bit stereo WAV file (cli.js --wav), endUs
-// long: the events in the device's clock, from 0
-export function renderWav(events, rate, endUs) {
-  const mix = new SoundMixer(rate);
+// long: the events in the device's clock, from 0. opts.synth plays MIDI;
+// opts.stats, an object, gets the session's OPL (stats.opl, oplState()).
+export function renderWav(events, rate, endUs, opts = {}) {
+  const mix = new SoundMixer(rate, { synth: opts.synth });
   mix.push(events);
   const frames = Math.max(0, Math.ceil(endUs * rate / 1e6));
   const L = new Float32Array(4096), R = new Float32Array(4096);
@@ -168,5 +214,6 @@ export function renderWav(events, rate, endUs) {
       dv.setInt16(44 + (f + i) * 4 + 2, Math.round(R[i] * 32767), true);
     }
   }
+  if (opts.stats) opts.stats.opl = mix.oplState();
   return out;
 }

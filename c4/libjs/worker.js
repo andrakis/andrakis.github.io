@@ -7,20 +7,26 @@
 //
 // Page -> worker
 //   boot    { image: ArrayBuffer, argv, disk: [[name, ArrayBuffer]], arenaMb, mhz, unpaced, gui, snd, shared }
-//           snd: true fits the sound card (snd-device.js)
+//           snd: true fits the sound card (snd-device.js); midi: true gives
+//           it a General MIDI synth on its MIDI port (page.js, opts.music)
 //           persist: { files: [[name, Uint8Array]] } fits a writable drive 1, kept by the page
 //           uploads: [[name, Uint8Array]] laid over drive 0: the disk's file of that name is hidden
+//                    (and C4IX lists them in /home: uploads.js); with uploadsHome (C4DOS),
+//                    over drive 1, B:, instead (uploads.js HomeFiles), which is there for them
+//                    even where nothing is kept
 //           cpus, quantum: that many processors, simulated (smp.js)
 //           parallel: ... each on a worker of its own (par.js), when the page is
 //           cross-origin isolated; simulated otherwise
 //           shared: { ring, fb } SharedArrayBuffers from shared.js, when the page is isolated
 //   key     { key, ctrlKey, altKey, metaKey }     a keydown on the terminal
 //   input   { bytes: Uint8Array }                 typed programmatically
+//   paste   { text }                              pasted: typed a line at a time, as the guest reads (keys.js Paste)
 //   signal  { sig }                               2 = Ctrl-C
 //   eof     {}                                    Ctrl-D
 //   gui     { kind, ... }                         a display event (gui-device.js)
 //   pause / resume / reset
 //   reset-files                                   drive 1 emptied, then reset; answered with files-reset
+//   cache   { files: [[name, hash, bytes]] }       what the page keeps of the lazy disk (lazy.js)
 //   peek    { id, addr, len }                     read guest memory
 //   poke    { id, addr, bytes }                   write guest memory
 // Worker -> page
@@ -31,48 +37,41 @@
 //   persist { name, bytes }   a file the machine closed on drive 1, for the page to keep;
 //                             bytes null: one it took off drive 1, for the page to forget
 //   files-reset {}            drive 1 is empty and the machine is booting again
-//   status  { ... }           about four times a second
+//   download { name, bytes }  a file the machine hands the person (C4IX's download:
+//                             devices.js "download:NAME"), for the page to save
+//   cache   { name, hash, bytes }  a lazy disk's file with a hash, read from the server: for the page to keep
+//   status  { ... }           about four times a second; cpuIps: each CPU's
+//                             inst/s over the last second or so (cpuIps, below);
+//                             osAccel: the OS accelerators' switch (accel.js ACC_OS)
 //   exit    { status, cycles }
 //   reply   { id, ... }       for peek and poke
 //   error   { message }
 
 import { createMachine, boot } from './boot.js';
 import { STOP } from './c4m.js';
-import { keyDown, typeBytes } from './keys.js';
+import { keyDown, typeBytes, Paste } from './keys.js';
 import { GuiDevice } from './gui-device.js';
-import { SoundDevice } from './snd-device.js';
+import { SoundDevice, EVT } from './snd-device.js';
 import { RingWriter, FbProducer } from './shared.js';
+import { layUploads, HomeFiles } from './uploads.js';
+import { LazyFiles } from './lazy.js';
+import { loadAccel, accelManifest, osAccelOn } from './accel.js';
 
-// A disk read on demand. The page sends an index of [name, size] and a
-// base URL; the first get() of a name fetches that one file with a
+// A disk read on demand (lazy.js). The page sends an index and a base
+// URL; the first get() of a name fetches that one file with a
 // synchronous XHR (allowed in a worker, and the machine's OPEN is
-// synchronous anyway) and keeps it. Names not in the index are absent,
-// as on an eager disk, and files the machine writes are kept like any
-// other. The fetch count is in stats, for the tests.
-class LazyFiles extends Map {
-  constructor(base, index) {
-    super();
-    this.base = base;
-    this.sizes = new Map(index);
-    this.fetched = 0;
-    this.fetchedBytes = 0;
-  }
-  has(name) { return super.has(name) || this.sizes.has(name); }
-  get(name) {
-    if (super.has(name)) return super.get(name);
-    if (!this.sizes.has(name)) return undefined;
-    const x = new XMLHttpRequest();
-    x.open('GET', this.base + name.split('/').map(encodeURIComponent).join('/'), false);
-    x.responseType = 'arraybuffer';
-    x.send();
-    if (x.status !== 200) { this.sizes.delete(name); return undefined; }
-    const b = new Uint8Array(x.response);
-    this.fetched++; this.fetchedBytes += b.length;
-    super.set(name, b);
-    return b;
-  }
-  *keys() { const seen = new Set(super.keys()); yield* seen; for (const k of this.sizes.keys()) if (!seen.has(k)) yield k; }
+// synchronous anyway) and keeps it.
+function fetchSync(base, name) {
+  const x = new XMLHttpRequest();
+  x.open('GET', base + name.split('/').map(encodeURIComponent).join('/'), false);
+  x.responseType = 'arraybuffer';
+  x.send();
+  return x.status === 200 ? new Uint8Array(x.response) : null;
 }
+// The files the page's cache had (a 'cache' message, after boot), and
+// those fetched since that it keeps: [[name, hash, bytes]]. Kept here for
+// the worker's life, so a reset reads none of them again.
+let cacheFiles = [];
 
 // Drive 1, when the page keeps one: made once, so a reset boots with what
 // the machine last wrote there, not what the page had at load.
@@ -110,6 +109,7 @@ function flush() {
 
 function flushDisplay() {
   if (!gui) return;
+  gui.onPresent = flushDisplay;
   const frames = gui.drain();
   if (frames) {
     if (ring) {
@@ -153,60 +153,90 @@ function start(msg) {
   bootMsg = msg;
   ring = msg.gui && msg.shared ? new RingWriter(msg.shared.ring) : null;
   if (ring && fbSab !== msg.shared.fb) { fbSab = msg.shared.fb; fbProducer = new FbProducer(fbSab); }
-  gui = msg.gui ? new GuiDevice({ ...msg.gui, fbShared: ring ? fbProducer : null }) : null;
-  snd = msg.snd ? new SoundDevice({ now: () => performance.now() * 1000 }) : null;
+  // the page's: BLIT8's pixels in its order, and frames it would only cover dropped
+  gui = msg.gui ? new GuiDevice({ ...msg.gui, fbShared: ring ? fbProducer : null, abgr: true, dropCovered: true }) : null;
+  snd = msg.snd ? new SoundDevice({ now: () => performance.now() * 1000, midi: !!msg.midi }) : null;
+  // The page's mixer outlives a reset, and with it whatever the old
+  // machine left playing: the new one starts quiet, whatever it boots
+  if (snd) snd.emit([EVT.RESET, snd.now()]);
   ringStalls = 0;
   // Files arrive as Uint8Arrays or bare ArrayBuffers; the disk
   // controller wants bytes it can index.
-  const files = msg.lazy ? new LazyFiles(msg.lazy.base, msg.lazy.index)
-    : new Map((msg.disk || []).map(([n, b]) => [n, b instanceof Uint8Array ? b : new Uint8Array(b)]));
-  for (const [n, b] of msg.uploads || []) files.set(n, b instanceof Uint8Array ? b : new Uint8Array(b));
-  // C4DOS lists a drive by its c4dos.dir, and finds a name typed in any
-  // case there: the uploads join drive 0's listing, so DIR and grin's File
-  // Manager show them and DOOM2.WAD finds doom2.wad
-  const dirFile = msg.uploads && msg.uploads.length ? files.get('c4dos.dir') : null;
-  if (dirFile) {
-    const dir = new TextDecoder().decode(dirFile);
-    const listed = new Set(dir.split(/\r?\n/).map(l => l.toLowerCase()));
-    const add = msg.uploads.map(([n]) => n).filter(n => !listed.has(n.toLowerCase()));
-    if (add.length) files.set('c4dos.dir', new TextEncoder().encode(dir.replace(/\n?$/, '\n') + add.join('\n') + '\n'));
-  }
+  // A lazy disk's files with a hash go to the page to keep, as they are read.
+  const files = msg.lazy ? new LazyFiles(msg.lazy.index, name => fetchSync(msg.lazy.base, name), (name, hash, bytes) => {
+    cacheFiles.push([name, hash, bytes]);
+    postMessage({ type: 'cache', name, hash, bytes: bytes.slice() });
+  }) : new Map((msg.disk || []).map(([n, b]) => [n, b instanceof Uint8Array ? b : new Uint8Array(b)]));
+  if (msg.lazy) files.fill(cacheFiles);
+  // the uploads over them, and in C4DOS's and C4IX's listings (uploads.js);
+  // under C4DOS on B: instead (below)
+  const home = !!msg.uploadsHome && !!(msg.uploads && msg.uploads.length);
+  layUploads(files, msg.uploads, !!msg.uploadsHome);
   const drives = [{ files, writable: false, sink: null }];
+  const keep = (name, bytes) => { const b = bytes.slice(); postMessage({ type: 'persist', name, bytes: b }, [b.buffer]); };
   if (msg.persist) {
     if (!persistDrive) persistDrive = {
       files: new Map(msg.persist.files), writable: true,
-      sink: (name, bytes) => { const b = bytes.slice(); postMessage({ type: 'persist', name, bytes: b }, [b.buffer]); },
+      sink: keep,
       // a file the machine took off the drive (DISK_UNLINK): gone from the page's store too
       remove: name => postMessage({ type: 'persist', name, bytes: null }),
     };
     drives.push(persistDrive);
   }
+  // C4DOS's uploads on B: (drive 1): over what the page keeps there, which
+  // gets only what is the person's own (HomeFiles.kept); or, where nothing
+  // is kept (?persist=0), over a B: for this boot alone
+  if (home) {
+    const base = msg.persist ? persistDrive : { files: new Map() };
+    const over = new HomeFiles(base.files, msg.uploads, msg.persist ? keep : null);
+    drives[1] = {
+      files: over, writable: true,
+      sink: msg.persist ? (name, bytes) => keep(name, over.kept(name, bytes)) : () => {},
+      remove: msg.persist ? persistDrive.remove : null,
+    };
+  }
   vm = createMachine({
-    arenaMb: msg.arenaMb || 64, drives, mhz: msg.mhz || 20, gui, snd, fpu: msg.fpu,
-    cpus: msg.cpus | 0, quantum: msg.quantum | 0,
+    arenaMb: msg.arenaMb || 64, drives, mhz: msg.mhz || 20, gui, snd, fpu: msg.fpu, accel: msg.accel, osAccel: msg.osAccel,
+    cpus: msg.cpus | 0, quantum: msg.quantum | 0, mmu: !!msg.mmu,
     parallel: !!msg.parallel, spawn: url => new Worker(url, { type: 'module' }),
     onByte: b => { out.push(b); if (out.length >= 4096) flush(); },
+    onDownload: (name, bytes) => { const b = bytes.slice(); postMessage({ type: 'download', name, bytes: b }, [b.buffer]); },
   });
   boot(vm, new Uint8Array(msg.image), msg.argv || ['image.c4r'], { mbox: msg.mbox | 0 });
   par = vm.smp && vm.smp.parallel ? vm.smp : null;
   watchPar();
   paused = false; halted = false; parked = false;
+  paste.clear();
   tRun = performance.now(); lostMs = 0; busyMs = 0;
   lastStatus = { t: tRun, cycle: 0, busy: 0 };
+  ipsLast = null;
   lastRaw = 0;
   state = 'running';
   schedule(0);
 }
 
+// A paste waiting to go in (keys.js Paste): its next line, when the guest
+// has read the last one and asked for more. True if one went in.
+const paste = new Paste();
+function feedPaste() {
+  const e = vm && paste.pending ? paste.feed(vm) : null;
+  if (e) echo(e);
+  return !!e;
+}
+
 function tick() {
   if (!vm || paused || halted) return;
   if (parWaiting()) return;
+  feedPaste();
   const now = performance.now();
   if (parked) { lostMs += now - parkedAt; parked = false; }
   const dev = vm.dev;
-  // Paced, a slice is 16 simulated milliseconds, so the machine is never
-  // more than a frame ahead of the clock. Unpaced, it is simply big.
-  const slice = bootMsg.unpaced ? 5e6 : dev.cyclesPerMs * 16;
+  // Paced, a slice is 4 simulated milliseconds, so the machine is never
+  // more than a frame ahead of the clock. And on a host slower than the MHz
+  // asked for, TIME crawls through a slice and then jumps by what it lost
+  // (realtime, below): over 16 ms at 400 MHz, 50 ms of crawl and a jump of 34,
+  // which a game paced by TIME sees as uneven frames. Unpaced, it is simply big.
+  const slice = bootMsg.unpaced ? 5e6 : dev.cyclesPerMs * 4;
   const t = performance.now();
   let r;
   try {
@@ -258,6 +288,8 @@ function tick() {
     return;
   }
   if (r === STOP.INPUT) {
+    // a paste's next line, which this read was waiting for
+    if (feedPaste()) { schedule(0); return; }
     // Waiting for a key with no timer armed: nothing happens until a
     // message arrives. With the PIT armed, come back when it is due.
     parked = true; parkedAt = performance.now(); state = 'blocked';
@@ -344,6 +376,7 @@ function postStatus(force) {
     state: paused ? 'paused' : state,
     cycle: vm.cycle,
     ips: dt > 0 ? Math.round((ran - lastStatus.cycle) / dt * 1000) : 0,
+    cpuIps: cpuIps(now),
     busy: dt > 0 ? Math.min(1, (busyMs - lastStatus.busy) / dt) : 0,
     heapUsed: vm.heap.used,
     missedTraps: vm.missedTraps,
@@ -353,32 +386,69 @@ function postStatus(force) {
     disk: lazyStats(),
     gui: gui ? { ...gui.stats(), shared: !!ring, ringStalls, handoffMs: Math.round(handoffMs) } : null,
     snd: snd ? snd.stats() : null,
+    osAccel: osAccelOn(),           // the OS accelerators' switch, which the guest may turn (accel.js)
   });
   lastStatus = { t: now, cycle: ran, busy: busyMs };
 }
 setInterval(() => postStatus(false), 250);
 
+// Each CPU's instructions per second, over the last second or so, for the
+// page's status line: one figure per CPU, CPU 0 first. The counts are the
+// ones each engine keeps anyway (smp.js's and par.js's cpuCycles; ap.js
+// publishes its own after every slice), read here as a status goes out,
+// so the instructions themselves pay nothing. They come in their low 32
+// bits, and are added up here as they move.
+let ipsLast = null, ipsTotal = null, ipsWin = [];
+function cpuIps(now) {
+  const smp = vm.smp && vm.smp.cpuCycles ? vm.smp : null, n = smp ? smp.n : 1;
+  if (!ipsLast || ipsLast.length !== n) { ipsLast = new Array(n).fill(0); ipsTotal = new Array(n).fill(0); ipsWin = []; }
+  for (let k = 0; k < n; k++) {
+    const c = smp ? smp.cpuCycles(k) : (vm.cycle - vm.skipped) | 0;
+    let d = (c - ipsLast[k]) | 0;
+    if (d < 0) d = c >>> 0;             // that CPU started again, from 0 (CPUS)
+    ipsLast[k] = c;
+    ipsTotal[k] += d;
+  }
+  // the oldest sample kept is the newest one at least a second old
+  ipsWin.push({ t: now, c: ipsTotal.slice() });
+  while (ipsWin.length > 2 && now - ipsWin[1].t >= 1000) ipsWin.shift();
+  const a = ipsWin[0], dt = now - a.t;
+  return ipsTotal.map((c, k) => dt > 0 ? Math.round((c - a.c[k]) / dt * 1000) : 0);
+}
+
 function lazyStats() {
   const f = vm && vm.dev.drives[0] && vm.dev.drives[0].files;
-  return f instanceof LazyFiles ? { lazy: true, files: f.sizes.size, fetched: f.fetched, bytes: f.fetchedBytes } : { lazy: false };
+  return f instanceof LazyFiles ? { lazy: true, files: f.sizes.size, fetched: f.fetched, bytes: f.fetchedBytes, cached: f.cached } : { lazy: false };
 }
 
 function echo(bytes) { for (const b of bytes) out.push(b); flush(); }
 
-self.onmessage = e => {
+const onMessage = e => {
   const m = e.data;
   try {
     switch (m.type) {
       case 'boot': start(m); break;
       case 'reset': if (bootMsg) start(bootMsg); break;
+      // what the page's cache had for the lazy disk
+      case 'cache': {
+        cacheFiles = cacheFiles.concat(m.files);
+        const f = vm && vm.dev.drives[0] && vm.dev.drives[0].files;
+        if (f instanceof LazyFiles) f.fill(m.files);
+        break;
+      }
       case 'reset-files':
         if (persistDrive) persistDrive.files = new Map();
         if (bootMsg) start(bootMsg);
         postMessage({ type: 'files-reset' });
         break;
-      case 'key': if (vm) { echo(keyDown(vm, m).echo); wake(); } break;
+      case 'key':
+        // Ctrl-C ends a paste too: what had not gone in yet is dropped
+        if (m.ctrlKey && (m.key === 'c' || m.key === 'C')) paste.clear();
+        if (vm) { echo(keyDown(vm, m).echo); wake(); }
+        break;
       case 'input': if (vm) { echo(typeBytes(vm, m.bytes)); wake(); } break;
-      case 'signal': if (vm) { vm.pendingSignal = m.sig | 0 || 2; wake(); } break;
+      case 'paste': if (vm && paste.add(m.text)) { feedPaste(); wake(); } break;
+      case 'signal': paste.clear(); if (vm) { vm.pendingSignal = m.sig | 0 || 2; wake(); } break;
       case 'eof': if (vm) { vm.dev.rxEof = true; wake(); } break;
       case 'gui': if (gui) { gui.event(m); wake(); } break;
       case 'pause':
@@ -402,3 +472,11 @@ self.onmessage = e => {
     postMessage({ type: 'error', message: `libjs: ${err.message}` });
   }
 };
+
+// The games' accelerators (accel.js) are loaded before the machine starts,
+// the build's list: what the page says meanwhile waits for them, in order
+const accelReady = accelManifest().then(loadAccel).catch(e => console.error('libjs: accelerators:', e));
+const waiting = [];
+let accelLoaded = false;
+accelReady.then(() => { accelLoaded = true; for (const e of waiting.splice(0)) onMessage(e); });
+self.onmessage = e => { if (accelLoaded) onMessage(e); else waiting.push(e); };

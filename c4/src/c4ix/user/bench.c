@@ -73,14 +73,28 @@ static int bench_yield() {
     return (ucycles() - t0) / YIELD_REPS;
 }
 
+// A program's malloc and free: under protected mode each is a trap, on
+// SMP the light path that takes no kernel lock (sched_light)
+static int bench_malloc() {
+    int i, t0;
+    char *p;
+    t0 = ucycles();
+    i = 0;
+    while (i < SYS_REPS) { p = malloc(64); free(p); ++i; }
+    return (ucycles() - t0) / SYS_REPS;
+}
+
 // Spawn a trivial program and wait for it: the whole round trip
 // through the loader, the scheduler and the reaper.
 static int bench_spawn(char *prog) {
     char *av[2];
-    int i, t0, pid;
+    int i, t0, pid, was, r;
 
     av[0] = prog;
     av[1] = 0;
+    // each CPU has its own count of cycles, and a parent that has waited comes back
+    // on whichever is free: on one CPU for the two readings
+    was = uaffinity(0, 1);
     t0 = ucycles();
     i = 0;
     while (i < SPAWN_REPS) {
@@ -88,11 +102,21 @@ static int bench_spawn(char *prog) {
         uwait(pid);
         ++i;
     }
-    return (ucycles() - t0) / SPAWN_REPS;
+    r = (ucycles() - t0) / SPAWN_REPS;
+    if (was >= 0) uaffinity(0, was);
+    return r;
 }
 
 int main(int argc, char **argv) {
-    int t0, d;
+    int t0, d, n, i;
+    int *kids;
+    char *av[3];
+    char *s;
+
+    // one of the tasks parked below: asleep, until it is killed
+    if (argc > 1 && !ustrcmp(argv[1], "--park")) {
+        while (1) umsleep(100000);
+    }
 
     uprintf("bench: cycles at start %d\n", ucycles());
 
@@ -110,9 +134,30 @@ int main(int argc, char **argv) {
 
     uprintf("bench: syscall %d cycles each (%d reps)\n", bench_syscall(), SYS_REPS);
     uprintf("bench: yield %d cycles each (%d reps)\n", bench_yield(), YIELD_REPS);
+    uprintf("bench: malloc+free %d cycles each (%d reps)\n", bench_malloc(), SYS_REPS);
     if (argc > 1)
         uprintf("bench: spawn+wait %d cycles each (%d reps)\n",
             bench_spawn(argv[1]), SPAWN_REPS);
+
+    // bench PROG N: the same with N tasks asleep, which what walks the
+    // task list goes through (sched_pick, smp_kick)
+    if (argc > 2) {
+        n = 0;
+        s = argv[2];
+        while (*s) { n = n * 10 + *s - '0'; ++s; }
+        kids = (int *)malloc(n * sizeof(int));
+        av[0] = argv[0];
+        av[1] = "--park";
+        av[2] = 0;
+        i = 0;
+        while (i < n) { kids[i] = spawn(argv[0], 2, av); ++i; }
+        umsleep(200);
+        uprintf("bench: with %d asleep: syscall %d cycles each\n", n, bench_syscall());
+        uprintf("bench: with %d asleep: yield %d cycles each\n", n, bench_yield());
+        uprintf("bench: with %d asleep: malloc+free %d cycles each\n", n, bench_malloc());
+        i = 0;
+        while (i < n) { ukill(kids[i], 9); uwait(kids[i]); ++i; }
+    }
 
     return 0;
 }

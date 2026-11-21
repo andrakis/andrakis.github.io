@@ -87,6 +87,9 @@ VARIABLE DESS   VARIABLE DESN
 87 CONSTANT oSTL  88 CONSTANT oPOPA
 \ F3: IEEE arithmetic (docs/c4-float.md)
 89 CONSTANT oFPU
+\ 16-bit loads and store, logical shift right (docs/c4-16bit.md)
+90 CONSTANT oLH   91 CONSTANT oLHU  92 CONSTANT oSH   93 CONSTANT oLSR
+94 CONSTANT oLCU
 
 BEGIN-STRUCTURE SYMR
    FIELD: y.name  FIELD: y.nlen  FIELD: y.type  FIELD: y.class  FIELD: y.val
@@ -373,7 +376,7 @@ VARIABLE EXTN   0 EXTN !
 : FIX-EXTERNS ( base -- ) {: b | p -- :}
    PN @ 0 ?DO
       I 3 * CELLS PATCH @ + TO p
-      p @ -1000 <= IF  b -1000 p @ - +  p !  0 p 2 CELLS + !  THEN
+      p @ -1000 <= IF  b -1000 p @ - +  p !  THEN        \ (its value: what to add, from opt.f)
       p @ -5 = p 2 CELLS + @ -1000 <= AND IF  b -1000 p 2 CELLS + @ - +  p 2 CELLS + !  THEN
    LOOP ;
 
@@ -573,7 +576,11 @@ CREATE WSCR 1 CELLS ALLOT
    \ and then four zeros. Writing one word and stopping made a header
    \ four bytes short, which nothing noticed until c4fc ran on a 32-bit
    \ machine: at 64 bits one word IS the field.
-   MEMSZ FW   8 1 CELLS - 0 ?DO 0 OUT-C LOOP
+   \ At 32 bits the four bytes after it say how much of memsz is region
+   \ 3, the BSS -- as c4lc says it, for c4rlink, which lays every
+   \ module's BSS out after all their data (load-c4r.c, C4R_HDR_BSS).
+   MEMSZ FW
+   1 CELLS 4 = IF MEMSZ DB3 @ - FW ELSE 8 1 CELLS - 0 ?DO 0 OUT-C LOOP THEN
    ENTRY @ FW   CN @ FW   dl FW   PN @ FW   SN @ FW   CONSN @ FW   DESN @ FW
    67 FMK  CN @ 0 ?DO I CELLS CODE @ + @ FW LOOP
    68 FMK  dl 0 ?DO I DBYTE OUT-C LOOP

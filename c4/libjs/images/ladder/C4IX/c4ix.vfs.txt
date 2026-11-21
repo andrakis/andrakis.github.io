@@ -7,12 +7,16 @@
 # Unlike C4KE's flat ramfs, C4IX has real directories: umkdir() is
 # called for every directory line as the manifest is parsed, so
 # "ls /bin" and "cd" both work for real, not just as string prefixes.
+# So / holds directories only: programs are in /bin, where the shell's
+# PATH finds them by name (src/c4ix/user/sh.c), the games each in their
+# own under /usr/games, and their names in /usr/games/bin, which PATH
+# names too.
 
 # vfsload itself is deliberately excluded: it's the boot-time loader
 # (built and named plainly as vfsload.c4r, not the c4ix-NAME.c4r
 # convention every other user program follows), not a typical app.
 # c4m is c4m.c built for C4IX (build-images.sh), not a src/c4ix/user program
-BIN_ALL = hello uhello echo wc cat sh ps bench cycles ls mkdir top spin pin nice fmt gui desktop tar gunzip crc32 splash b4ke cc c4m persist
+BIN_ALL = hello uhello echo wc cat sh ps bench cycles ls mkdir top spin pin nice fmt gui desktop tar gunzip crc32 splash b4ke cc c4m persist dmesg free
 # The toolchain (docs/c4ix-desktop.md, part three): C4KE programs, which
 # run here through the compatibility layer, and write what they build
 # through its OP_VFS_PUT. In /bin only, under their own names.
@@ -29,25 +33,34 @@ ARCHIVES = c4ix-root.tgz
 
 /: root
 	bin/:
+		# c4ix-hello.c4r -> /bin/hello, so "hello" works from the shell
+		# without the c4ix- prefix or .c4r suffix
+		each($BIN_ALL):
+			$1: c4ix-$1.c4r
+		# sync is persist save (src/c4ix/user/persist.c), and download is
+		# persist download: a file or folder handed to the web page
+		sync: ilink(/bin/persist)
+		download: ilink(/bin/persist)
 		each($TOOLS):
 			$1: $1.c4r
 		# exercises libc (src/c4ix/libc/tests)
 		libctest: c4ix-libctest.c4r
 		pictest: c4ix-pictest.c4r
 		unixtest: c4ix-unixtest.c4r
+	# the person's own files: the web page's Uploads, each on drive 0 as
+	# home/NAME too and listed in c4ix.sizes (libjs/uploads.js). Empty
+	# where there are none, and on a disk with no c4ix.sizes.
+	home/: hostdir(home/)
+	# what the desktop's Go menu lists besides its own tools: a line from
+	# each game on the disk that has one (src/c4bb/tests/vfs-games.py)
+	etc/:
+		desktop.apps: c4ix-desktop.apps
 	# shared libraries: what a program linked with c4rlink -l loads
 	lib/:
 		libc4ix.c4s: c4ix-libc4ix.c4s
 		libc.c4s: c4ix-libc.c4s
 		libarc.c4s: c4ix-libarc.c4s
 		libgui.c4s: c4ix-libgui.c4s
-	each($BIN_ALL):
-		# c4ix-hello.c4r -> /bin/hello, and an unqualified alias at the
-		# root so "hello" works from the shell without the c4ix- prefix
-		# or .c4r suffix
-		$1: ilink(/bin/$1)
-		bin/:
-			$1: c4ix-$1.c4r
 	# /usr is the repo itself, unpacked from the archive below: its src/
 	# at /usr/src (the programs' sources, src/c4ix/examples, c4th's
 	# Forth), its include/ at /usr/include. These two headers are here
@@ -69,17 +82,26 @@ ARCHIVES = c4ix-root.tgz
 		share/
 			splash/:
 				c4ix.c4p.gz: c4ix-splash.c4p.gz
-		# the games that are on the disk, each its own block
-		# (games/NAME/c4ix.vfs.txt, src/c4bb/tests/vfs-games.py)
-		games/
-			# Doom (games/doom): the game and id's shareware WAD
+		# the games that are on the disk, each its own block, its own
+		# directory (games/NAME/c4ix.vfs.txt, src/c4bb/tests/vfs-games.py);
+		# and each one's sources, at their paths in the repository, so the
+		# IDE's Code tab finds what a game's source map names: lazy files
+		# that only c4ix.sizes lists (docs/c4ix-desktop.md, part twenty-one)
+		games/: hostdir(games/)
+			# Doom (games/doom): the game and id's shareware WAD; and the person's
+			# own IWAD (doom.wad, doom2.wad, plutonia.wad, tnt.wad), which the page's
+			# Uploads put in /home/doom or /home (doom -home), one entry each: a
+			# missing one says so, and names those that are there
 			doom/:
 				doom.c4r: c4ix-doom.c4r
 				doom1.wad
 			# Rise of the Triad (games/rott): the game and Apogee's
-			# shareware episode, out of its package as it ships
+			# shareware episode, out of its package as it ships; and the registered
+			# game, rottreg, from the person's own DARKWAR files, which the page's
+			# Uploads put in /home/rott or /home
 			rott/:
 				rott.c4r: c4ix-rott.c4r
+				rottreg.c4r: c4ix-rottreg.c4r
 				HUNTBGIN.WAD
 				HUNTBGIN.RTL
 				HUNTBGIN.RTC
@@ -97,16 +119,10 @@ ARCHIVES = c4ix-root.tgz
 				wolf3d.c4r: c4ix-wolf3d.c4r
 				wolf3d6.c4r: c4ix-wolf3d6.c4r
 				1wolf14.zip
-	# and by name, as the programs in /bin are
-	doom: ilink(/usr/games/doom/doom.c4r)
-	rott: ilink(/usr/games/rott/rott.c4r)
-	wolf3d: ilink(/usr/games/wolf3d/wolf3d.c4r)
-	wolf3d6: ilink(/usr/games/wolf3d/wolf3d6.c4r)
-	# sync is persist save (src/c4ix/user/persist.c)
-	sync: ilink(/bin/persist)
-	bin/:
-		doom: ilink(/usr/games/doom/doom.c4r)
-		rott: ilink(/usr/games/rott/rott.c4r)
-		wolf3d: ilink(/usr/games/wolf3d/wolf3d.c4r)
-		wolf3d6: ilink(/usr/games/wolf3d/wolf3d6.c4r)
-		sync: ilink(/bin/persist)
+			# and their programs by name, where the shell's PATH looks
+			bin/:
+				doom: ilink(/usr/games/doom/doom.c4r)
+				rott: ilink(/usr/games/rott/rott.c4r)
+				rottreg: ilink(/usr/games/rott/rottreg.c4r)
+				wolf3d: ilink(/usr/games/wolf3d/wolf3d.c4r)
+				wolf3d6: ilink(/usr/games/wolf3d/wolf3d6.c4r)

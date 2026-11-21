@@ -13,11 +13,32 @@
 // Colours are 0x00RRGGBB. In an image (IMGDEF) the top byte is
 // transparency: 0 is opaque, 255 is fully transparent.
 
-import { CMD } from './gui-device.js';
+import { CMD, RGB_ABGR } from './gui-device.js';
 // GUI_PTR_* (libjs/guest/gui.h) as CSS cursors
-const POINTERS = ['default', 'text', 'nwse-resize', 'pointer', 'move', 'wait', 'crosshair', 'none', 'none'];
+const POINTERS = ['default', 'text', 'nwse-resize', 'pointer', 'move', 'wait', 'crosshair', 'none', 'none', 'col-resize'];
 const PTR_LOCK = 8;
 import { RingReader, FbConsumer } from './shared.js';
+
+// TEXT2's fonts (GUI_* in libjs/guest/gui.h): a weight and a family, each
+// family a chain that ends somewhere distinct on Windows and on Linux. A
+// scale brings a wide face down to about the first sans face's width, as
+// the window kit guesses a string's width without measuring it.
+const MONO = 'ui-monospace, Consolas, "DejaVu Sans Mono", monospace';
+const SANS = 'Tahoma, "Segoe UI", Verdana, sans-serif';
+const COURIER = '"Courier New", Courier, "Nimbus Mono PS", monospace';
+const LUCIDA = '"Lucida Console", "Lucida Sans Typewriter", Monaco, "Noto Sans Mono", "DejaVu Sans Mono", monospace';
+const VERDANA = 'Verdana, "DejaVu Sans", "Bitstream Vera Sans", sans-serif';
+const SERIF = 'Georgia, "Times New Roman", "DejaVu Serif", serif';
+const FONTS = [
+  ['', MONO, 1], ['', SANS, 1], ['bold ', SANS, 1],           // 0 mono, 1 sans, 2 sans bold
+  ['', COURIER, 1], ['', LUCIDA, 1],                           // 3, 4: two more monospaced
+  ['', VERDANA, 0.95], ['bold ', VERDANA, 0.95],               // 5, 6: a wider sans, and bold
+  ['', SERIF, 1], ['bold ', SERIF, 1],                         // 7, 8: a serif, and bold
+];
+const fontCss = (font, size) => {
+  const [weight, family, k] = FONTS[font] || FONTS[font ? 1 : 0];
+  return `${weight}${Math.max(4, size) * k}px ${family}`;
+};
 
 const css = rgb => '#' + ((rgb >>> 0) & 0xffffff).toString(16).padStart(6, '0');
 const inRect = (r, x, y) => x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h;
@@ -113,10 +134,20 @@ export class Display {
       if (!this.presentMode) this.present();
       return;
     }
-    let full = -1;
+    // ... and BLIT8's frame (RGB) over the whole display, with no clip
+    // narrower than it in force
+    let full = -1, clipped = !!this.clipRect && !this.covers(this.clipRect.x, this.clipRect.y, this.clipRect.w, this.clipRect.h);
     for (let i = 0; i < end; i += words[i]) {
       const t = words[i + 1];
       if (t === CMD.CLEAR || t === CMD.FB || t === CMD.FBREF) full = i;
+      else if (t === CMD.CLIP) clipped = !this.covers(words[i + 2], words[i + 3], words[i + 4], words[i + 5]);
+      else if (t === CMD.NOCLIP) clipped = false;
+      else if (t === CMD.RGB && !clipped) {
+        const w = words[i + 4], h = words[i + 5], dw = words[i + 6];
+        let dh = words[i + 7];
+        if ((dh & ~0xffff) === RGB_ABGR) dh &= 0xffff;
+        if (this.covers(words[i + 2], words[i + 3], dw > 0 ? dw : w, dh > 0 ? dh : h)) full = i;
+      }
     }
     if (full > 0) {
       const keep = [];
@@ -137,6 +168,9 @@ export class Display {
       this.coalescing = false;
     }
   }
+
+  // A rectangle over the whole display
+  covers(x, y, w, h) { return x <= 0 && y <= 0 && x + w >= this.width && y + h >= this.height; }
 
   // Throw away whatever is waiting in the ring (a reset).
   discard() { if (this.ring) this.ring.read(); }
@@ -254,8 +288,7 @@ export class Display {
           const n = Math.max(0, Math.min(words[p + 6], (len - 9) * 4));
           const font = words[p + 4], adv = words[p + 5];
           c.fillStyle = css(words[p + 2]);
-          c.font = `${font === 2 ? 'bold ' : ''}${Math.max(4, words[p + 3])}px ` +
-                   (font ? 'Tahoma, "Segoe UI", Verdana, sans-serif' : 'ui-monospace, Consolas, "DejaVu Sans Mono", monospace');
+          c.font = fontCss(font, words[p + 3]);
           c.textBaseline = 'top';
           let s = '';
           for (let k = 0; k < n; k++) s += String.fromCharCode((words[p + 7 + (k >> 2)] >>> ((k & 3) * 8)) & 0xff);
@@ -329,9 +362,14 @@ export class Display {
         }
         case CMD.RGB: {
           // BLIT8's pixels, made 32-bit by the device: drawn at (x, y),
-          // scaled to dw x dh without smoothing, inside any clip
+          // scaled to dw x dh without smoothing, inside any clip. The
+          // worker's device makes them in ImageData's order already
+          // (RGB_ABGR in dh), and they are copied as they are.
           const x = words[p], y = words[p + 1], w = words[p + 2], h = words[p + 3];
-          const dw = words[p + 4], dh = words[p + 5];
+          const dw = words[p + 4];
+          let dh = words[p + 5];
+          const abgr = (dh & ~0xffff) === RGB_ABGR;
+          if (abgr) dh &= 0xffff;
           if (w <= 0 || h <= 0 || w * h > len - 8) break;
           if (!this.rgbCanvas || this.rgbCanvas.width !== w || this.rgbCanvas.height !== h) {
             this.rgbCanvas = document.createElement('canvas');
@@ -339,7 +377,8 @@ export class Display {
             this.rgbImage = new ImageData(w, h);
           }
           const d = new Uint32Array(this.rgbImage.data.buffer);
-          for (let k = 0; k < w * h; k++) {
+          if (abgr) d.set(new Uint32Array(words.buffer, words.byteOffset + (p + 6) * 4, w * h));
+          else for (let k = 0; k < w * h; k++) {
             const v = words[p + 6 + k];
             d[k] = 0xff000000 | ((v & 0xff) << 16) | (v & 0xff00) | ((v >> 16) & 0xff);
           }

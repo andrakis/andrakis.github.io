@@ -5,21 +5,21 @@
 
 # WOLFENSTEIN 3D (games/wolf3d, docs/c4ix-wolf3d.md): Wolf4SDL in c4lc's C,
 # for C4IX's libc. A unit to an object, made here so that only what
-# changed is compiled again -- the whole game is minutes of c4sp32, and
+# changed is compiled again -- the whole game is minutes of compiling, and
 # -j helps -- and linked by build-images.sh against the libc it builds.
 WOLF       := games/wolf3d
 WOLF_UNITS := arc explode c4sdl c4file plat-c4ix plat-gui wolfinst id_ca id_in id_pm id_sd id_us \
               id_vh id_vl signon wl_act1 wl_act2 wl_agent wl_debug wl_draw wl_game \
               wl_inter wl_main wl_menu wl_play wl_scale wl_state wl_text wl_utils
-WOLF_HDRS  := $(wildcard $(WOLF)/*.h $(WOLF)/*.inc $(WOLF)/sdl/*.h $(WOLF)/c4inc/*.h) \
+WOLF_HDRS  := $(wildcard $(WOLF)/*.h $(WOLF)/*.inc $(WOLF)/sdl/*.h $(WOLF)/c4inc/*.h $(WOLF)/c4/*.h) \
               $(wildcard src/c4ix/libc/include/*.h src/c4ix/libc/include/sys/*.h) \
               src/c4ix/include/window.h src/c4ix/include/archive.h \
-              libjs/guest/snd.h libjs/guest/snd.c
-WOLF_CC    := ./c4sp32 -c 400000 src/c4sp/lisp/c4lc.lisp -O $(IMG_G) -mfuse -fno-builtin -c -D C4IX \
+              libjs/guest/snd.h libjs/guest/snd.c libjs/guest/accel.h
+WOLF_CC    := $(call lc32,-c 400000) -O $(IMG_G) -mfuse -fno-builtin -c -D C4IX \
               -I src/c4ix/libc/include -I src/c4ix/include -I src/c4ix/user -I libjs/guest \
               -I $(WOLF)/c4inc -I $(WOLF)/sdl -I $(WOLF)
 wolf3d-objs: $(WOLF_UNITS:%=.wolf3d/%.c4o)
-.wolf3d/%.c4o: $(WOLF)/%.c $(WOLF_HDRS) $(C4LC_LISP) .img_g | c4sp32
+.wolf3d/%.c4o: $(WOLF)/%.c $(WOLF_HDRS) $(C4LC_LISP) .img_g | $(LC32_BIN)
 	@mkdir -p .wolf3d
 	$(WOLF_CC) $< $@ > /dev/null
 # arc.c is libarc's archive.c, built against libc
@@ -30,7 +30,7 @@ PHONY += wolf3d-objs
 # the same game objects, with plat-bare.c for plat-c4ix.c, linked by
 # c4-images.sh with c4's bare libc (libc-bare-objs).
 wolf3d-bare-objs: .wolf3d-bare/plat-bare.c4o libc-bare-objs
-.wolf3d-bare/plat-bare.c4o: $(WOLF)/plat-bare.c $(WOLF_HDRS) $(C4LC_LISP) .img_g | c4sp32
+.wolf3d-bare/plat-bare.c4o: $(WOLF)/plat-bare.c $(WOLF_HDRS) $(C4LC_LISP) .img_g | $(LC32_BIN)
 	@mkdir -p .wolf3d-bare
 	$(WOLF_CC) $< $@ > /dev/null
 PHONY += wolf3d-bare-objs
@@ -41,7 +41,7 @@ PHONY += wolf3d-bare-objs
 WOLF6_UNITS := wolfinst id_ca id_in id_pm id_sd id_us id_vh id_vl signon wl_act1 wl_act2 wl_agent \
                wl_debug wl_draw wl_game wl_inter wl_main wl_menu wl_play wl_scale wl_state wl_text
 wolf3d6-objs: $(WOLF6_UNITS:%=.wolf3d6/%.c4o)
-.wolf3d6/%.c4o: $(WOLF)/%.c $(WOLF_HDRS) $(C4LC_LISP) .img_g | c4sp32
+.wolf3d6/%.c4o: $(WOLF)/%.c $(WOLF_HDRS) $(C4LC_LISP) .img_g | $(LC32_BIN)
 	@mkdir -p .wolf3d6
 	$(WOLF_CC) -D WOLF_FULL $< $@ > /dev/null
 PHONY += wolf3d6-objs
@@ -59,10 +59,21 @@ PHONY += wolf3d-data
 # the C4IX build is held to (test-wolf3d).
 WOLF_HOST_SRCS := $(filter-out $(WOLF)/plat-c4ix.c $(WOLF)/plat-gui.c $(WOLF)/wolfinst.c $(WOLF)/explode.c $(WOLF)/arc.c, \
                   $(WOLF_UNITS:%=$(WOLF)/%.c)) $(WOLF)/plat-host.c
-wolf3d-host: $(WOLF_HOST_SRCS) $(wildcard $(WOLF)/*.h $(WOLF)/sdl/*.h)
+wolf3d-host: $(WOLF_HOST_SRCS) $(wildcard $(WOLF)/*.h $(WOLF)/sdl/*.h $(WOLF)/c4/*.h)
 	gcc -O2 -std=gnu99 -w -Werror-implicit-function-declaration -I$(WOLF)/sdl -I$(WOLF) -o $@ $(WOLF_HOST_SRCS) -lm
-wolf3d6-host: $(WOLF_HOST_SRCS) $(wildcard $(WOLF)/*.h $(WOLF)/sdl/*.h)
+wolf3d6-host: $(WOLF_HOST_SRCS) $(wildcard $(WOLF)/*.h $(WOLF)/sdl/*.h $(WOLF)/c4/*.h)
 	gcc -O2 -std=gnu99 -w -Werror-implicit-function-declaration -D WOLF_FULL -I$(WOLF)/sdl -I$(WOLF) -o $@ $(WOLF_HOST_SRCS) -lm
+
+# c4sdl: the game's accelerators (c4/accel.mjs) against their loops, on
+# the bare machine, with libjs's own (cli.js loads them, docs/accel.md).
+# In a directory of its own: c4-images.sh links .wolf3d/*.c4o into the
+# game. The timedemo runs below have them, so their frames are the
+# accelerators'; the gcc build has none.
+.wolf3d/test/acceltest.c4o: $(WOLF)/c4/acceltest.c $(WOLF_HDRS) $(C4LC_LISP) .img_g | $(LC32_BIN)
+	@mkdir -p .wolf3d/test
+	$(WOLF_CC) -I $(WOLF)/c4 $< $@ > /dev/null
+.wolf3d/test/acceltest.c4r: .wolf3d/test/acceltest.c4o libc-bare-objs
+	./c4rlink32 $< .libc-bare/libc-*.c4o -o $@ > /dev/null
 
 # test-wolf3d: demo 0 in virtual time, built both ways, must show the same
 # 1214 frames. Inside C4IX the game first unpacks 1wolf14.zip from the
@@ -72,8 +83,11 @@ wolf3d6-host: $(WOLF_HOST_SRCS) $(wildcard $(WOLF)/*.h $(WOLF)/sdl/*.h)
 # they share nothing -- and C4DOS must be back at its prompt after the
 # game exits, to run VER. About six minutes, nearly all of it the runs
 # on c4m.
-test-wolf3d: wolf3d-data wolf3d-host c4bb-images
+test-wolf3d: wolf3d-data wolf3d-host c4bb-images .wolf3d/test/acceltest.c4r
 	@rm -rf .wolf3d_t && mkdir -p .wolf3d_t
+	@timeout 600 node libjs/cli.js -m 64 .wolf3d/test/acceltest.c4r > .wolf3d_t/accel.txt 2>&1; cat .wolf3d_t/accel.txt
+	@grep -q "^accel: Wolf3D's, [0-9]* cases, each as its loop has it" .wolf3d_t/accel.txt \
+	   || { echo "test-wolf3d: the accelerators do not draw as their loops"; exit 1; }
 	@python3 -I -c "import zipfile, sys; zipfile.ZipFile(sys.argv[1]).extract('W3DSW14.SHR', sys.argv[2])" $(WOLF)/data/1wolf14.zip .wolf3d_t
 	@gcc -O2 -o .wolf3d_t/unshr $(WOLF)/tools/unshr.c
 	@cd .wolf3d_t && ./unshr W3DSW14.SHR . > /dev/null

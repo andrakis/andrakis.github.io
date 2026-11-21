@@ -15,11 +15,19 @@
 
 // The game lives in /usr/games/rott, where its config and saved games go
 // too, and it starts there; and it asks to be served sooner and longer
-// than the programs beside it (nice, sched.c)
+// than the programs beside it (nice, sched.c). The registered game,
+// rottreg, whose data is the person's (rt_util.c, rott_data), keeps its
+// own in /usr/games/rott/darkwar: its saved games are not the
+// shareware's, nor its settings (as icculus.org's ~/.rott/darkwar).
 int unice(int id, int nice);            // libc4ix (c4ix_user.h)
 int chdir(char *path);
+int mkdir(char *path, int mode);
+extern int rott_registered;             // rt_main.c
 void rott_home(void) {
-	chdir("/usr/games/rott");
+	if (rott_registered) {
+		mkdir("/usr/games/rott/darkwar", 0755);
+		chdir("/usr/games/rott/darkwar");
+	} else chdir("/usr/games/rott");
 	unice(0, -5);
 }
 
@@ -34,32 +42,47 @@ void rott_close_display(void) { udisplay_give(); }
 // desktop reads the one it was given when it next draws, and says so
 // (WIN_FRAME); until then a newer frame waits in the other, and only the
 // newest is sent. Keys come back in the display's own form, for c4sdl.c.
+// Each buffer keeps its frame's size: the menus' 320x200 (c4sdl.c,
+// rott_show_small) fits in buffers made for the screen, and the desktop
+// scales either to the window.
 static char *fbuf[2];
 static int *fpal[2];
-static int fw, fh, sent, waiting, pending, closed;
+static int fw[2], fh[2], cap, sent, waiting, pending, closed;
 
 int rott_win_open(int w, int h) {
 	int i;
-	fw = w; fh = h;
+	cap = w * h;
 	for (i = 0; i < 2; i++) {
-		fbuf[i] = (char *) calloc(w * h, 1);
+		fbuf[i] = (char *) calloc(cap, 1);
 		fpal[i] = (int *) calloc(256, sizeof(int));
 		if (!fbuf[i] || !fpal[i]) return 0;
+		fw[i] = w; fh[i] = h;
 	}
 	return win_open("Rise of the Triad");
 }
 static void send_frame(int b) {
-	win_fb(fbuf[b], fw, fh, fw, fpal[b]);
+	win_fb(fbuf[b], fw[b], fh[b], fw[b], fpal[b]);
 	win_present();
 	sent = b;
 	waiting = 1;
 }
 void rott_win_draw(uint8_t *pixels, int w, int h, int pitch, uint32_t *palette) {
 	int b, y;
-	if (closed || w != fw || h != fh) return;
+	if (closed) return;
+	// a bigger resolution (RESOLUTION, rt_menu.c): bigger buffers, once
+	// the desktop has drawn what it was given from the old ones
+	if (w * h > cap) {
+		if (waiting) return;
+		for (b = 0; b < 2; b++) {
+			free(fbuf[b]);
+			if (!(fbuf[b] = (char *) calloc(w * h, 1))) { closed = 1; return; }
+		}
+		cap = w * h; pending = 0;
+	}
 	b = waiting ? 1 - sent : sent;
 	for (y = 0; y < h; y++) memcpy(fbuf[b] + y * w, pixels + y * pitch, w);
 	memcpy(fpal[b], palette, 256 * sizeof(int));
+	fw[b] = w; fh[b] = h;
 	if (waiting) pending = 1;
 	else send_frame(b);
 }

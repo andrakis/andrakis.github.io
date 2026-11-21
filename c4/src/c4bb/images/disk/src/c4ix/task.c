@@ -52,7 +52,6 @@ struct task *task_create(char *name, int entry, int argc, int argv) {
     struct task *parent;
     if (!(t = task_alloc(name))) return 0;
     t->entry = entry;
-    t->state = TS_READY;
     if (!sched_forge(t, entry, argc, argv)) {
         sl4b_free(task_cache, (char *)t);
         return 0;
@@ -70,6 +69,8 @@ struct task *task_create(char *name, int entry, int argc, int argv) {
     }
     else fd_init_console(t);
     task_append(t);
+    task_state(t, TS_READY);
+    sched_wake = 1;
     sched_unlock();
     return t;
 }
@@ -80,7 +81,6 @@ struct task *task_create(char *name, int entry, int argc, int argv) {
 struct task *task_vchild(struct task *p) {
     struct task *t;
     if (!(t = task_alloc(p->name))) return 0;
-    t->state = TS_READY;
     if (!sched_forge(t, 0, 0, 0)) {
         sl4b_free(task_cache, (char *)t);
         return 0;
@@ -90,14 +90,20 @@ struct task *task_vchild(struct task *p) {
     t->cwd = p->cwd;
     t->parent = p->id;
     t->privs = p->privs;
-    t->cpumask = p->cpumask;
-    t->nice = p->nice;
+    TF_PUT(t, TF_USER, t->privs == PRIV_USER);
+    t->cpumask = (p->tflags & TF_PINSOFT) ? 0 : p->cpumask;
+    TF_PUT(t, TF_PINNED, t->cpumask);
+    sched_setnice(t, p->nice);
     t->spawn_stack = p->spawn_stack;
     t->img_libs = p->img_libs;
     t->img_nlibs = p->img_nlibs;
     t->vfparent = p;
+    TF_SET(t, TF_VFCHILD);
     if (p->env_vec) task_strvec((char **)p->env_vec, -1, &t->env_vec, &t->env_data);
+    mmu_adopt(t);                 // its stack and environment
     task_append(t);
+    task_state(t, TS_READY);
+    sched_wake = 1;
     sched_unlock();
     return t;
 }
@@ -109,9 +115,10 @@ void task_unborrow(struct task *t) {
     struct task *p;
     if (!(p = t->vfparent)) return;
     t->vfparent = 0;
+    TF_CLR(t, TF_VFCHILD);
     t->img_libs = 0;
     t->img_nlibs = 0;
-    if (p->state == TS_VFORK && p->wait_for == t->id) p->state = TS_READY;
+    if (p->state == TS_VFORK && p->wait_for == t->id) { task_state(p, TS_READY); TF_CLR(p, TF_NOPAGE); sched_wake = 1; }
 }
 
 int task_strvec(char **v, int n, int *pvec, int *pdata) {
@@ -130,12 +137,13 @@ int task_strvec(char **v, int n, int *pvec, int *pdata) {
         else bytes = bytes + 1;
         ++i;
     }
-    if (!(vec = (char **)malloc((n + 1) * sizeof(int)))) return -1;
-    if (!(blob = (char *)malloc(bytes))) { free((int *)vec); return -1; }
+    // umalloc: they are a user task's to read (mmu.c)
+    if (!(vec = (char **)umalloc((n + 1) * sizeof(int)))) return -1;
+    if (!(blob = (char *)umalloc(bytes))) { ufree((int)vec); return -1; }
     p = blob;
     i = 0;
     while (i < n) {
-        vec[i] = p;
+        vec[i] = (char *)mmu_uva((int)p);     // user mode reads them
         if (v[i]) { k = 0; while (v[i][k]) { *p = v[i][k]; ++p; ++k; } }
         *p = 0; ++p;
         ++i;
@@ -151,7 +159,7 @@ int task_strvec(char **v, int n, int *pvec, int *pdata) {
 struct task *task_adopt(char *name) {
     struct task *t;
     if (!(t = task_alloc(name))) return 0;
-    t->state = TS_RUNNING;
+    task_state(t, TS_RUNNING);
     t->sv = SV_NONE;
     fd_init_console(t);
     task_append(t);
@@ -161,6 +169,7 @@ struct task *task_adopt(char *name) {
 void task_unlink(struct task *t) {
     struct task *p;
     sched_lock();
+    task_unqueue(t);
     if (task_head == t) task_head = t->next;
     else {
         p = task_head;
@@ -277,6 +286,7 @@ static int umem_lock[2];
 // What a task holds in blocks, headers included (sched.c's task_mem)
 int task_umem(struct task *t) {
     int b, *u;
+    if (mmu_on) return umem_bytes(t);
     b = 0;
     klock_take(umem_lock);
     u = (int *)t->ublocks;
@@ -290,9 +300,12 @@ int task_umem(struct task *t) {
 // up what it gets for both of them.
 int task_ualloc(struct task *t, int bytes) {
     int *h;
-    if (!t || t->privs != PRIV_USER) return (int)malloc(bytes);
+    // files' cached bytes give way, while memory is short and when there is none (vfs.c)
+    vfs_trim();
+    if (!t || t->privs != PRIV_USER) return (int)vfs_malloc(bytes);
+    if (mmu_on) return umem_alloc(t, bytes);
     while (t->vfparent) t = t->vfparent;
-    if (bytes < 0 || !(h = (int *)malloc(bytes + UBLOCK_WORDS * sizeof(int)))) return 0;
+    if (bytes < 0 || !(h = (int *)umem_block(bytes + UBLOCK_WORDS * sizeof(int)))) return 0;
     sched_lock();
     klock_take(umem_lock);
     h[0] = t->ublocks;
@@ -309,6 +322,7 @@ int task_ualloc(struct task *t, int bytes) {
 void task_ufree(int p) {
     int *h;
     if (!p) return;
+    if (mmu_on) { umem_free(sched_current(), p); return; }
     h = (int *)p - UBLOCK_WORDS;
     if (h[3] != UBLOCK_MAGIC) { free((int *)p); return; }
     sched_lock();
@@ -326,6 +340,7 @@ void task_ufree(int p) {
 static void task_ufree_all(struct task *t) {
     int *h, *n;
     int ring;
+    if (mmu_on) { umem_free_all(t, 0); return; }
     ring = host_has(C4IX_I_GUI) ? *(int *)C4IX_GUI_RING : 0;
     klock_take(umem_lock);
     h = (int *)t->ublocks;
@@ -348,10 +363,13 @@ static void task_ufree_all(struct task *t) {
 static void task_destroy(struct task *t) {
     ck_task_free(t);
     task_drop_image(t);
-    if (t->stack) free((int *)t->stack);
-    if (t->env_vec) free((int *)t->env_vec);
-    if (t->env_data) free((char *)t->env_data);
+    if (t->stack) ufree(t->stack);
+    if (t->env_vec) ufree(t->env_vec);
+    if (t->env_data) ufree(t->env_data);
+    umem_free_all(t, 1);
+    mmu_task_done(t);
     sl4b_free(task_cache, (char *)t);
+    mmu_gone();
 }
 
 // Its image, its libraries' code and data and its heap: what a task
@@ -362,16 +380,16 @@ void task_drop_image(struct task *t) {
     int i;
     task_unborrow(t);
     task_ufree_all(t);
-    if (t->img_code) free((int *)t->img_code);
-    if (t->img_data) free((char *)t->img_data);
+    if (t->img_code) ufree(t->img_code);
+    if (t->img_data) ufree(t->img_data);
     if (t->img_cons) free((int *)t->img_cons);
     if (t->img_des) free((int *)t->img_des);
     if (t->img_libs) {
         i = 0;
         while (i < t->img_nlibs) {
             // code is 0 for a shared (-fpic) library: the loader's cache keeps it
-            if (((int *)t->img_libs)[3 * i]) free((int *)((int *)t->img_libs)[3 * i]);
-            free((char *)((int *)t->img_libs)[3 * i + 1]);
+            if (((int *)t->img_libs)[3 * i]) ufree(((int *)t->img_libs)[3 * i]);
+            ufree(((int *)t->img_libs)[3 * i + 1]);
             ++i;
         }
         free((int *)t->img_libs);
@@ -487,16 +505,6 @@ struct task *task_get(int id) {
         t = t->next;
     }
     return 0;
-}
-
-struct task *task_first() {
-    return task_head;
-}
-
-// Round-robin successor: after the tail comes the head again.
-struct task *task_next(struct task *t) {
-    if (t && t->next) return t->next;
-    return task_head;
 }
 
 int task_count() {

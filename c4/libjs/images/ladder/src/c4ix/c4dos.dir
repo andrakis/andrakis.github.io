@@ -9,6 +9,7 @@ console.c
 host.c
 init.c
 loader.c
+mmu.c
 sched.c
 sl4b.c
 sys.c

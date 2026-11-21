@@ -32,6 +32,8 @@ rm -f "$list"
 mkdir -p "$out/src/c4bb" "$out/libjs"
 cp -r src/c4bb/images "$out/src/c4bb/"
 cp -r libjs/images "$out/libjs/"
+# the site's defaults are the tree's (libjs/web/site.js): the MMU off,
+# as the page has it everywhere now (?mmu=1 fits one)
 # the site's front door is the page
 cat > "$out/index.html" <<'EOF'
 <!DOCTYPE html>

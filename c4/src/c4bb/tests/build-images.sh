@@ -22,11 +22,48 @@ if [ ! -x ./cpp ]; then
     exit 1
 fi
 mkdir -p $OUT
+# The 32-bit c4lc, as the Makefile's $(call lc32) chooses it (C4LC32):
+# c4sc-host32, c4lc's Lisp compiled by c4sc, or with C4LC32=interp
+# c4lc.lisp under c4sp32 -- the same compiler, byte for byte, 25-30x
+# apart (docs/c4sc-design.md, "c4sc-host32").
+#   lc32 [-R] [-c CELLS] c4lc-flags... in out
+# -R and -c are c4sp32's: the evaluator, which the compiled one has no
+# use for, and where the arena starts, which it takes too.
+C4LC32=${C4LC32:-compiled}
+case $C4LC32 in
+    interp)   LC32_BIN=c4sp32 ;;
+    compiled) LC32_BIN=c4sc-host32 ;;
+    *) echo "c4bb: C4LC32 is compiled or interp, not $C4LC32" >&2; exit 1 ;;
+esac
+if [ ! -x ./$LC32_BIN ]; then
+    echo "c4bb: ./$LC32_BIN is required (make $LC32_BIN, or C4LC32=interp)" >&2
+    exit 1
+fi
+lc32 () {
+    local r= c=
+    [ "$1" = -R ] && { r=-R; shift; }
+    [ "$1" = -c ] && { c="-c $2"; shift 2; }
+    if [ $C4LC32 = interp ]; then
+        ./c4sp32 $r $c src/c4sp/lisp/c4lc.lisp "$@"
+    else
+        ./c4sc-host32 $c compile "$@"
+    fi
+}
+# ... and c4opt-run.lisp, or its twin, c4sc-host32's opt mode:
+#   c4opt32 [-mfuse] in.c4r out.c4r
+c4opt32 () {
+    if [ $C4LC32 = interp ]; then
+        ./c4sp32 src/c4sp/lisp/c4opt-run.lisp "$@"
+    else
+        ./c4sc-host32 opt "$@"
+    fi
+}
 # Progress: a line a stage, so a build says what it is doing. A long
 # loop's stage is one line, with each item named as it is done.
 say () { echo "c4bb: $*"; }
 step () { printf 'c4bb: %s' "$*"; }
 item () { printf ' %s' "$*"; }
+say "the 32-bit c4lc is ./$LC32_BIN (C4LC32=$C4LC32)"
 
 # firmware: built with c4lc (the nicer compiler; real preprocessor).
 # c4lc emits for its host's word size, so the 32-bit c4sp gives 32-bit
@@ -45,7 +82,7 @@ item () { printf ' %s' "$*"; }
 #   fw          + the loader and the retry loop -- the BIOS
 fwbuild () {                                  # fwbuild <out> <flags...>
     out=$1; shift
-    ./c4sp32 -c 64000000 src/c4sp/lisp/c4lc.lisp -O "$@" \
+    lc32 -c 64000000 -O "$@" \
         src/c4bb/fw/fw.c src/c4bb/fw/$out.c4r > /dev/null
 }
 step "the firmware:"
@@ -79,7 +116,7 @@ cp c4th32.c4r $FUSEDISK/c4th32.c4r
 # A fused image, for the lockstep and same-answers checks: identical
 # program, fewer instructions, and it must still agree with its unfused
 # twin step for step between the two engines.
-./c4sp32 src/c4sp/lisp/c4opt-run.lisp -mfuse $OUT/factorial.c4r $OUT/factorial-fused.c4r > /dev/null
+c4opt32 -mfuse $OUT/factorial.c4r $OUT/factorial-fused.c4r > /dev/null
 
 say "c4bb's trap tests, and libjs's demos"
 # c4bb's own trap-machinery tests (src/tests/test_customop predates
@@ -112,15 +149,21 @@ mkdir -p $DISK
 # kernel that rejects freshly-built images.
 # (the kernel #includes its extensions and the mailbox helpers: a change to any of
 #  them is a change to the kernel, or an edit there ships in an image built before it)
+# The compiler is a prerequisite too: c4lc itself and what runs it
+# ($LC32_BIN: c4sp32, or c4sc-host32, which make remakes from c4lc's
+# Lisp). C4IX rebuilds itself with c4sc, which make remakes after any
+# change to c4lc, so a disk compiled by the c4lc before it differs from
+# what C4IX builds (test-c4ix-rebuild, 2026-11-15).
+LC_SRCS="src/c4sp/lisp/c4lc*.lisp src/c4sp/lisp/c4r.lisp src/c4sp/lisp/c4opt.lisp $LC32_BIN"
 kernel_stale=0
 [ -f $OUT/c4ke32.c4r ] || kernel_stale=1
-for dep in src/c4ke/c4ke.c load-c4r.c include/c4bb_mbox.h src/c4ke/extensions/*.c; do
+for dep in src/c4ke/c4ke.c load-c4r.c include/c4bb_mbox.h src/c4ke/extensions/*.c $LC_SRCS; do
     [ "$dep" -nt $OUT/c4ke32.c4r ] && kernel_stale=1
 done
 if [ $kernel_stale = 1 ]; then
     say "C4KE's kernel (c4lc)"
     $PREPROC_LC src/c4ke/c4ke.c > .c4bb_klc.c
-    ./c4sp32 -c 64000000 src/c4sp/lisp/c4lc.lisp -O .c4bb_klc.c $OUT/c4ke32.c4r > /dev/null
+    lc32 -c 64000000 -O .c4bb_klc.c $OUT/c4ke32.c4r > /dev/null
     rm -f .c4bb_klc.c
 else
     say "C4KE's kernel is up to date"
@@ -148,14 +191,14 @@ say "C4KE's vfsload and raycast (c4lc)"
 # u0.h (a pre-existing issue, unrelated to word size - reproduces at
 # 64-bit too), so preprocess with gcc -E first, same as the kernel.
 $PREPROC_LC $BIN/vfsload.c > .c4bb_vfsload_pp.c
-./c4sp32 -c 16000000 src/c4sp/lisp/c4lc.lisp -O .c4bb_vfsload_pp.c $DISK/vfsload.c4r > /dev/null
+lc32 -c 16000000 -O .c4bb_vfsload_pp.c $DISK/vfsload.c4r > /dev/null
 rm -f .c4bb_vfsload_pp.c
 
 # raycast: also c4lc, also no u0, and additionally -conforming so it
 # can write ANSI escapes as "\033[" instead of poking 27 in as an
 # integer. No gcc -E here -- it includes nothing, so c4lc's own
 # preprocessor handles the one -D and the #ifdef it guards.
-./c4sp32 -c 16000000 src/c4sp/lisp/c4lc.lisp -O -conforming -D RC_KE=1 \
+lc32 -c 16000000 -O -conforming -D RC_KE=1 \
     src/tests/raycast.c $DISK/raycast.c4r > /dev/null
 
 say "c4, c4m, c4cc, c4rdump and c4rlink (c4cc32), and the benchmarks"
@@ -280,8 +323,8 @@ cp src/c4ke/include/service.h $DISK/
 # ---- C4IX and its userland ------------------------------------------
 # modules compiled by 32-bit c4lc (its own preprocessor), linked by
 # the 32-bit c4rlink; userland links against libc4ix
-C4IX_MODS="boot console va host sl4b task sched vfs sys c4ke loader init"
-C4IX_USER="hello uhello echo wc cat sh ps bench cycles ls mkdir top spin pin nice fmt gui b4ke cc"
+C4IX_MODS="boot console va host sl4b task sched vfs sys c4ke loader mmu init"
+C4IX_USER="hello uhello echo wc cat sh ps bench cycles ls mkdir top spin pin nice fmt gui b4ke cc dmesg free"
 # userland that also links libarc (gzip and tar): the root archive's unpacker
 C4IX_ARC_USER="tar gunzip crc32 splash persist"
 # c4sp arena, in cells. 8000000 was a guess with no measurement behind
@@ -305,11 +348,21 @@ say "c4mp's SMP guests"
 # c4mp's SMP guests, and the CPU-local window's, as 32-bit images for
 # libjs's processors (cli.js --cpus, docs/c4ix-smp.md); test-libjs runs them
 for g in smp0 smp1 deadlock; do
-    ./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O src/c4mp/guest/$g.c $OUT/c4mp-$g.c4r > /dev/null
+    lc32 -c $C4IX_CELLS -O src/c4mp/guest/$g.c $OUT/c4mp-$g.c4r > /dev/null
 done
-./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O libjs/tests/src/smpwin.c $OUT/libjs-smpwin.c4r > /dev/null
+lc32 -c $C4IX_CELLS -O libjs/tests/src/smpwin.c $OUT/libjs-smpwin.c4r > /dev/null
 # the same work on every CPU, for the parallel engine (cli.js --parallel)
-./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O libjs/tests/src/spinmp.c $OUT/libjs-spinmp.c4r > /dev/null
+lc32 -c $C4IX_CELLS -O libjs/tests/src/spinmp.c $OUT/libjs-spinmp.c4r > /dev/null
+# the games that ship accelerators (games/NAME/c4/accel.mjs, libjs/accel.js),
+# then C4IX's own (src/c4ix/accel.mjs, as os/c4ix): the list the machine
+# loads; and the loader's test, on the bare libc, which test-libjs runs
+{ for f in games/*/c4/accel.mjs; do [ -f "$f" ] && basename "$(dirname "$(dirname "$f")")"; done
+  for f in src/*/accel.mjs; do [ -f "$f" ] && echo "os/$(basename "$(dirname "$f")")"; done
+} | sed 's/.*/"&"/' | paste -sd, - | sed 's/^/[/; s/$/]/' > $OUT/accel.json
+lc32 -c $C4IX_CELLS -O -mfuse -fno-builtin -c -conforming -I src/c4ix/libc/include \
+    -I libjs/guest libjs/tests/src/accel.c $OUT/.libjs-accel.c4o > /dev/null
+./c4rlink32 $OUT/.libjs-accel.c4o .libc-bare/libc-*.c4o -o $OUT/libjs-accel.c4r > /dev/null
+rm -f $OUT/.libjs-accel.c4o
 # What `b4ke -C /usr` makes in /build, laid out as the
 # BUILD.B4K files lay it out: each object and image below is kept there
 # as it is built (they are the same bytes; test-c4ix-rebuild checks the
@@ -320,10 +373,10 @@ keep() { cp "$1" "$PB/$2"; }
 # Rebuilt when ANY of C4IX changed -- kernel, libc4ix, headers, user
 # programs -- or the display header its programs include, or IMG_G, or
 # the linker (it drops unreached functions, so what it writes changes
-# with it). This used to list four kernel files, so an edit to sys.c,
+# with it), or the compiler ($LC_SRCS). This used to list four kernel files, so an edit to sys.c,
 # vfs.c or a user program was silently not built.
 if [ ! -f $OUT/c4ix32.c4r ] || [ ! -f $PB/c4ix.c4r ] || \
-   [ -n "$(find src/c4ix src/winkit libjs/guest/gui.h libjs/guest/gui.c libjs/guest/snd.h libjs/guest/snd.c $(ls .img_g 2>/dev/null) c4rlink32 -newer $OUT/c4ix32.c4r -type f -print -quit)" ]; then
+   [ -n "$(find src/c4ix src/winkit libjs/guest/gui.h libjs/guest/gui.c libjs/guest/snd.h libjs/guest/snd.c $(ls .img_g 2>/dev/null) c4rlink32 $LC_SRCS -newer $OUT/c4ix32.c4r -type f -print -quit)" ]; then
     say "C4IX, compiled $G (c4lc)"
     rm -rf $PB
     mkdir -p $PB/kernel $PB/lib $PB/libc $PB/user $PB/desktop $PB/bin
@@ -331,7 +384,7 @@ if [ ! -f $OUT/c4ix32.c4r ] || [ ! -f $PB/c4ix.c4r ] || \
     step "C4IX's kernel:"
     for m in $C4IX_MODS; do
         item $m
-        ./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O $G -c -I src/c4ix src/c4ix/$m.c .c4bb_ix_$m.c4o > /dev/null
+        lc32 -c $C4IX_CELLS -O $G -c -I src/c4ix src/c4ix/$m.c .c4bb_ix_$m.c4o > /dev/null
         objs="$objs .c4bb_ix_$m.c4o"
         keep .c4bb_ix_$m.c4o kernel/$m.c4o
     done
@@ -339,7 +392,7 @@ if [ ! -f $OUT/c4ix32.c4r ] || [ ! -f $PB/c4ix.c4r ] || \
     ./c4rlink32 $objs -o $OUT/c4ix32.c4r
     keep $OUT/c4ix32.c4r c4ix.c4r
     say "C4IX's libraries: libc4ix and libarc, static and shared, and libgui"
-    ./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O $G -c -I src/c4ix/include src/c4ix/lib/libc4ix.c .c4bb_ix_lib.c4o > /dev/null
+    lc32 -c $C4IX_CELLS -O $G -c -I src/c4ix/include src/c4ix/lib/libc4ix.c .c4bb_ix_lib.c4o > /dev/null
     ./c4rlink32 -r .c4bb_ix_lib.c4o -o .c4bb_libc4ix32.c4l
     keep .c4bb_ix_lib.c4o lib/libc4ix.c4o
     keep .c4bb_libc4ix32.c4l lib/libc4ix.c4l
@@ -350,7 +403,7 @@ if [ ! -f $OUT/c4ix32.c4r ] || [ ! -f $PB/c4ix.c4r ] || \
     # libarc: inflate, CRC-32 and tar, for vfsload's root archive. -mfuse
     # like c4sp.c4r below: unpacking the archive is the one long job a
     # boot starts, and both machines that read this disk run fused code.
-    ./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O $G -mfuse -c -I src/c4ix/include src/c4ix/lib/archive.c .c4bb_ix_arc.c4o > /dev/null
+    lc32 -c $C4IX_CELLS -O $G -mfuse -c -I src/c4ix/include src/c4ix/lib/archive.c .c4bb_ix_arc.c4o > /dev/null
     ./c4rlink32 -r .c4bb_ix_arc.c4o -o .c4bb_libarc32.c4l
     keep .c4bb_ix_arc.c4o lib/libarc.c4o
     keep .c4bb_libarc32.c4l lib/libarc.c4l
@@ -360,7 +413,7 @@ if [ ! -f $OUT/c4ix32.c4r ] || [ ! -f $PB/c4ix.c4r ] || \
     # display's (gui.h) and the sound card's (snd.h), so a program built
     # -D C4IX_SHARED carries none of
     # them itself (docs/c4ix-design.md, "Code out of the headers").
-    LCPIC="./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O $G -fpic -c -D C4IX_SHARED -I src/c4ix/include"
+    LCPIC="lc32 -c $C4IX_CELLS -O $G -fpic -c -D C4IX_SHARED -I src/c4ix/include"
     $LCPIC src/c4ix/lib/libc4ix.c .c4bb_ix_s_libc4ix.c4o > /dev/null
     $LCPIC src/c4ix/include/window.c .c4bb_ix_s_window.c4o > /dev/null
     $LCPIC src/c4ix/include/cpustat.c .c4bb_ix_s_cpustat.c4o > /dev/null
@@ -384,11 +437,11 @@ if [ ! -f $OUT/c4ix32.c4r ] || [ ! -f $PB/c4ix.c4r ] || \
     step "C4IX's libc:"
     for m in string stdlib stdio unix fp math; do
         item $m
-        ./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O $G -fno-builtin -fpic -c -I src/c4ix/libc/include -I src/c4ix/libc src/c4ix/libc/$m.c .c4bb_ix_libc_$m.c4o > /dev/null
+        lc32 -c $C4IX_CELLS -O $G -fno-builtin -fpic -c -I src/c4ix/libc/include -I src/c4ix/libc src/c4ix/libc/$m.c .c4bb_ix_libc_$m.c4o > /dev/null
         keep .c4bb_ix_libc_$m.c4o libc/$m.c4o
     done
-    ./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O $G -fpic -c src/c4ix/libc/opcodes.c .c4bb_ix_libc_opcodes.c4o > /dev/null
-    ./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O $G -fpic -c -I src/c4ix/include src/c4ix/lib/libc4ix.c .c4bb_ix_libc_u.c4o > /dev/null
+    lc32 -c $C4IX_CELLS -O $G -fpic -c src/c4ix/libc/opcodes.c .c4bb_ix_libc_opcodes.c4o > /dev/null
+    lc32 -c $C4IX_CELLS -O $G -fpic -c -I src/c4ix/include src/c4ix/lib/libc4ix.c .c4bb_ix_libc_u.c4o > /dev/null
     ./c4rlink32 -r .c4bb_ix_libc_string.c4o .c4bb_ix_libc_stdlib.c4o .c4bb_ix_libc_stdio.c4o .c4bb_ix_libc_unix.c4o \
         .c4bb_ix_libc_fp.c4o .c4bb_ix_libc_math.c4o .c4bb_ix_libc_opcodes.c4o .c4bb_ix_libc_u.c4o -o .c4bb_lib/libc.c4s > /dev/null
     echo
@@ -398,24 +451,24 @@ if [ ! -f $OUT/c4ix32.c4r ] || [ ! -f $PB/c4ix.c4r ] || \
     cp .c4bb_lib/libc.c4s $DISK/c4ix-libc.c4s
     say "libc's tests: libctest, pictest, unixtest"
     # libctest exercises it (libjs/tests/test-libjs.sh compares its output)
-    ./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O $G -fno-builtin -c -I src/c4ix/libc/include src/c4ix/libc/tests/libctest.c .c4bb_ix_u.c4o > /dev/null
+    lc32 -c $C4IX_CELLS -O $G -fno-builtin -c -I src/c4ix/libc/include src/c4ix/libc/tests/libctest.c .c4bb_ix_u.c4o > /dev/null
     ./c4rlink32 .c4bb_ix_u.c4o -l .c4bb_lib/libc.c4s -o $DISK/c4ix-libctest.c4r > /dev/null
     keep .c4bb_ix_u.c4o libc/libctest.c4o
     keep $DISK/c4ix-libctest.c4r bin/c4ix-libctest.c4r
     # pictest: two at once must each keep their own libc data
-    ./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O $G -fno-builtin -c -I src/c4ix/libc/include src/c4ix/libc/tests/pictest.c .c4bb_ix_u.c4o > /dev/null
+    lc32 -c $C4IX_CELLS -O $G -fno-builtin -c -I src/c4ix/libc/include src/c4ix/libc/tests/pictest.c .c4bb_ix_u.c4o > /dev/null
     ./c4rlink32 .c4bb_ix_u.c4o -l .c4bb_lib/libc.c4s -o $DISK/c4ix-pictest.c4r > /dev/null
     keep .c4bb_ix_u.c4o libc/pictest.c4o
     keep $DISK/c4ix-pictest.c4r bin/c4ix-pictest.c4r
     # unixtest: lseek, fstat, links, waitpid, vfork and execve (M7c)
-    ./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O $G -fno-builtin -c -I src/c4ix/libc/include src/c4ix/libc/tests/unixtest.c .c4bb_ix_u.c4o > /dev/null
+    lc32 -c $C4IX_CELLS -O $G -fno-builtin -c -I src/c4ix/libc/include src/c4ix/libc/tests/unixtest.c .c4bb_ix_u.c4o > /dev/null
     ./c4rlink32 .c4bb_ix_u.c4o -l .c4bb_lib/libc.c4s -o $DISK/c4ix-unixtest.c4r > /dev/null
     keep .c4bb_ix_u.c4o libc/unixtest.c4o
     keep $DISK/c4ix-unixtest.c4r bin/c4ix-unixtest.c4r
     step "C4IX's programs:"
     for u in $C4IX_USER; do
         item $u
-        ./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O $G -c -D C4IX_SHARED -I src/c4ix/include src/c4ix/user/$u.c .c4bb_ix_u.c4o > /dev/null
+        lc32 -c $C4IX_CELLS -O $G -c -D C4IX_SHARED -I src/c4ix/include src/c4ix/user/$u.c .c4bb_ix_u.c4o > /dev/null
         # each loads libc4ix at run time; gui, the display's demo, libgui too
         if [ $u = gui ]; then
             ./c4rlink32 .c4bb_ix_u.c4o -l .c4bb_lib/libgui.c4s -l .c4bb_lib/libc4ix.c4s -o $DISK/c4ix-$u.c4r > /dev/null
@@ -430,10 +483,10 @@ if [ ! -f $OUT/c4ix32.c4r ] || [ ! -f $PB/c4ix.c4r ] || \
         # splash runs while the boot unpacks the root archive, before
         # anything else may have been: it carries its libraries itself
         if [ $u = splash ]; then
-            ./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O $G -c -I src/c4ix/include src/c4ix/user/$u.c .c4bb_ix_u.c4o > /dev/null
+            lc32 -c $C4IX_CELLS -O $G -c -I src/c4ix/include src/c4ix/user/$u.c .c4bb_ix_u.c4o > /dev/null
             ./c4rlink32 .c4bb_ix_u.c4o .c4bb_libarc32.c4l .c4bb_libc4ix32.c4l -o $DISK/c4ix-$u.c4r > /dev/null
         else
-            ./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O $G -c -D C4IX_SHARED -I src/c4ix/include src/c4ix/user/$u.c .c4bb_ix_u.c4o > /dev/null
+            lc32 -c $C4IX_CELLS -O $G -c -D C4IX_SHARED -I src/c4ix/include src/c4ix/user/$u.c .c4bb_ix_u.c4o > /dev/null
             ./c4rlink32 .c4bb_ix_u.c4o -l .c4bb_lib/libarc.c4s -l .c4bb_lib/libc4ix.c4s -o $DISK/c4ix-$u.c4r > /dev/null
         fi
         keep .c4bb_ix_u.c4o user/$u.c4o
@@ -444,17 +497,17 @@ if [ ! -f $OUT/c4ix32.c4r ] || [ ! -f $PB/c4ix.c4r ] || \
     dobjs=""
     step "C4IX's desktop:"
     # (the C4IX shell's own, then the window kit's, src/winkit, which grin shares)
-    for m in shell tools host term files taskmgr apps edit wall draw ui wmcore dialog look95 look31 textgrid savers calc notepad clock; do
+    for m in shell tools host term files taskmgr apps edit hl explore wall draw ui wmcore dialog look95 look31 textgrid savers calc notepad clock; do
         item $m
         src=src/c4ix/user/desktop/$m.c
         [ -f $src ] || src=src/winkit/$m.c
-        ./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O $G -c -D C4IX_SHARED -I src/c4ix/include -I src/c4ix/user/desktop \
+        lc32 -c $C4IX_CELLS -O $G -c -D C4IX_SHARED -I src/c4ix/include -I src/c4ix/user/desktop \
             -I src/winkit $src .c4bb_ix_d_$m.c4o > /dev/null
         dobjs="$dobjs .c4bb_ix_d_$m.c4o"
         keep .c4bb_ix_d_$m.c4o desktop/$m.c4o
     done
     # the Calculator's decimal conversions are libc's fp.c, linked in
-    ./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O $G -c src/c4ix/libc/fp.c .c4bb_ix_d_fp.c4o > /dev/null
+    lc32 -c $C4IX_CELLS -O $G -c src/c4ix/libc/fp.c .c4bb_ix_d_fp.c4o > /dev/null
     dobjs="$dobjs .c4bb_ix_d_fp.c4o"
     echo
     keep .c4bb_ix_d_fp.c4o desktop/fp.c4o
@@ -469,7 +522,7 @@ if [ ! -f $OUT/c4ix32.c4r ] || [ ! -f $PB/c4ix.c4r ] || \
     # under itself - "c4ix-" keeps it consistent with every other
     # C4IX binary here, all of which face the same shared-disk risk).
     say "C4IX's vfsload"
-    ./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O $G -c -I src/c4ix/include src/c4ix/user/vfsload.c .c4bb_ix_u.c4o > /dev/null
+    lc32 -c $C4IX_CELLS -O $G -c -I src/c4ix/include src/c4ix/user/vfsload.c .c4bb_ix_u.c4o > /dev/null
     ./c4rlink32 .c4bb_ix_u.c4o .c4bb_libc4ix32.c4l -o $DISK/c4ix-vfsload.c4r > /dev/null
     keep .c4bb_ix_u.c4o user/vfsload.c4o
     keep $DISK/c4ix-vfsload.c4r bin/c4ix-vfsload.c4r
@@ -498,7 +551,8 @@ for g in $GAMES; do . $g/c4-images.sh c4ix; done
 GAMESDISK=$OUT/games
 GAMES_ON_DISK=
 GAMEFILES=$OUT/.gamefiles
-rm -rf $OUT/wolf3d $GAMESDISK $GAMEFILES
+GAMESTAGE=$OUT/.gamestage
+rm -rf $OUT/wolf3d $GAMESDISK $GAMEFILES $GAMESTAGE
 mkdir -p $GAMEFILES
 # A bare program carries what it uses of libc and no more: c4rlink drops
 # every function nothing reaches, in every link (docs/c4dos-design.md
@@ -509,13 +563,26 @@ if [ -n "$GAMES" ] && ls .libc-bare/*.c4o > /dev/null 2>&1; then
     # The games disk stays flat (the bare machine has no directories), but
     # the page's C4DOS disks give each game a directory of its own
     # (\GAMES\DOOM), so what each one put here is noted: $GAMEFILES/NAME.
+    # Two games may not put the same name here: the second would replace the
+    # first's file, unnoticed until the first was played (The Ace of
+    # Penguins and the BSD games each have a canfield.c4r). So each game
+    # puts its files in an empty $GAMESTAGE, whose list is that game's, and
+    # they go on the disk only if no name of theirs is there already.
     for g in $GAMES; do
-        (cd $GAMESDISK && find . -type f | LC_ALL=C sort) > $GAMEFILES.before
+        gamefiles=$GAMEFILES/$(basename $g | tr a-z A-Z)
+        rm -rf $GAMESTAGE; mkdir -p $GAMESTAGE
+        GAMESDISK=$GAMESTAGE
         . $g/c4-images.sh bare
-        (cd $GAMESDISK && find . -type f | LC_ALL=C sort) | LC_ALL=C comm -13 $GAMEFILES.before - | sed 's|^\./||' \
-            > $GAMEFILES/$(basename $g | tr a-z A-Z)
+        GAMESDISK=$OUT/games
+        (cd $GAMESTAGE && find . -type f) | sed 's|^\./||' | LC_ALL=C sort > $gamefiles
+        clash=$( (cd $GAMESDISK && find . -type f) | sed 's|^\./||' | LC_ALL=C sort | LC_ALL=C comm -12 - $gamefiles)
+        if [ -n "$clash" ]; then
+            echo; echo "build-images: ${gamefiles##*/} puts on the games disk what another game put there:" $clash >&2
+            exit 1
+        fi
+        cp -pR $GAMESTAGE/. $GAMESDISK/
     done
-    rm -f $GAMEFILES.before
+    rm -rf $GAMESTAGE
     echo
 fi
 if [ -n "$GAMES_ON_DISK" ]; then
@@ -554,7 +621,7 @@ fi
 say "C4IX's sources on the disk, and c4m as a C4IX program (c4lc)"
 # with the block of each game that is on the disk (games/NAME/c4ix.vfs.txt)
 python3 -I src/c4bb/tests/vfs-games.py src/c4bb/fs/c4ix.vfs.txt $DISK/c4ix.vfs.txt \
-    $(for g in $GAMES; do if [ -f $DISK/c4ix-$(basename $g).c4r ]; then echo $g; fi; done)
+    $(for g in $GAMES; do if ls $DISK/c4ix-$(basename $g)*.c4r > /dev/null 2>&1; then echo $g; fi; done)
 # the boot logo, for splash (src/c4ix/art/mkc4p.py made it from Kiln's PNG)
 cp src/c4ix/art/c4ix.c4p.gz $DISK/c4ix-splash.c4p.gz
 for n in $C4IX_USER $C4IX_ARC_USER; do
@@ -565,14 +632,15 @@ cat src/winkit/winkit.h src/winkit/wkwin.h src/winkit/textgrid.h src/c4ix/user/d
     src/c4ix/user/desktop/*.c src/winkit/*.c > $DISK/c4ix-desktop.c
 cp src/c4ix/c4ix.h $DISK/c4ix.h
 cp src/c4ix/include/c4ix_user.h $DISK/c4ix_user.h
+cp src/c4ix/include/c4ix_accel.h $DISK/c4ix_accel.h
 # c4m as a C4IX program: c4m.c built the way cc builds it inside the
 # machine (a C4KE program, run through C4IX's compatibility layer). It
 # runs an image as c4m always has -- c4m load-c4r.c -- /usr/lib/c4ke.c4r --
 # and lends its guest the FLT of the machine under it.
-./c4sp32 -c $C4IX_CELLS src/c4sp/lisp/c4lc.lisp -O $G -P -I src/c4ix/include -I include -I . -D C4CC=1 -D __c4cc__=1 c4m.c $DISK/c4ix-c4m.c4r > /dev/null
+lc32 -c $C4IX_CELLS -O $G -P -I src/c4ix/include -I include -I . -D C4CC=1 -D __c4cc__=1 c4m.c $DISK/c4ix-c4m.c4r > /dev/null
 # what C4IX's own compilers are for (docs/c4ix-desktop.md, part three)
 cp src/c4ix/include/window.h $DISK/c4ix-window.h
-for f in README.txt hello.c bounce.c; do cp src/c4ix/examples/$f $DISK/c4ix-examples-$f; done
+for f in README.txt hello.c bounce.c mouselock.c; do cp src/c4ix/examples/$f $DISK/c4ix-examples-$f; done
 # c4th, the Forth that compiles images to stdout (the C4IX shell's
 # redirection is its file write), with the sources it reads.
 cp c4th32.c4r $DISK/c4th.c4r
@@ -610,7 +678,7 @@ cp $OUT/c4ix32.c4r $DISK/c4ix.c4r
 # against 51.84s. The image is smaller too, 124,361 -> 105,864 bytes.
 # docs/fused-opcodes.md F7.
 $PREPROC -DC4SP_DOS=1 src/c4sp/c4sp.c > .c4bb_c4sp_pp.c
-./c4sp32 -R src/c4sp/lisp/c4lc.lisp -O -mfuse .c4bb_c4sp_pp.c $DISK/c4sp.c4r > /dev/null
+lc32 -R -O -mfuse .c4bb_c4sp_pp.c $DISK/c4sp.c4r > /dev/null
 rm -f .c4bb_c4sp_pp.c
 $CC -o $DISK/cpp.c4r include/c4dos.h src/c4dos/cpp.c > /dev/null
 
@@ -635,6 +703,7 @@ cp src/c4ix/user/vfsload.c      $DISK/src/c4ix/user/vfsload.c
 for m in $C4IX_MODS; do cp src/c4ix/$m.c $DISK/src/c4ix/$m.c; done
 cp src/c4ix/c4ix.h              $DISK/src/c4ix/c4ix.h
 cp src/c4ix/include/c4ix_user.h $DISK/src/c4ix/include/c4ix_user.h
+cp src/c4ix/include/c4ix_accel.h $DISK/src/c4ix/include/c4ix_accel.h
 cp src/c4ix/lib/libc4ix.c       $DISK/src/c4ix/lib/libc4ix.c
 
 # The build kit: one archive of every source a kernel build reaches
@@ -731,7 +800,7 @@ if ls .grin/*.c4o > /dev/null 2>&1 && ls .libc-bare/*.c4o > /dev/null 2>&1 && [ 
     $CC -o $LJDOS/BIN/dosfilt.c4r include/c4dos.h src/tests/dosfilt.c > /dev/null
     cp $OUT/hello32.c4r $LJDOS/BIN/hello.c4r
     cp $OUT/c4dos32.c4r $LJDOS/
-    if [ -d $GAMESDISK ]; then games_put $LJDOS; fi
+    if [ -d $GAMESDISK ]; then games_put $LJDOS; uploads_readme $LJDOS B; fi
     sed 's/SIZE=[0-9]*/SIZE=16777216/' src/c4dos/fs/CONFIG.SYS > $LJDOS/config.sys
     printf 'DEVICE=CONSOLE.SYS FLUSH\nDEVICE=DRIVES.SYS HOME=B:\nDEVICE=HEAP.SYS\nDEVICE=REDIR.SYS TAP\n' >> $LJDOS/config.sys
     list=$(echo $GAMES_ON_DISK | sed 's/ /, /g')
@@ -779,6 +848,9 @@ fi
 # `#include <u0.h>` and a C4IX program's <c4ix_user.h> both just work --
 # and its docs, Makefile and BUILD.B4K are /usr's. The C4IX libraries
 # are in /usr/lib. Reproducible: fixed order, owner and times, gzip -n.
+# Not libjs/vendor: SpessaSynth's 1.3 MB of JavaScript is the page's,
+# and in the RAM filesystem it left too little for C4KE's 256 KB stacks
+# when innerbench boots C4KE inside C4IX (test-c4ix-innerbench).
 #
 # At its end, /build: what `b4ke -C /usr` makes, already made
 # (PB above), so a build inside C4IX -- the IDE's, or b4ke's -- starts
@@ -794,7 +866,7 @@ rm -rf $ROOT
 mkdir -p $ROOT/usr/lib $ROOT/usr/include
 if git rev-parse --git-dir > /dev/null 2>&1; then
     git ls-files -- src docs include libjs README.md LICENSE Makefile BUILD.B4K INSTALL.B4K c4.c c4m.c c4m_float.c c4l.c load-c4r.c |
-        grep -v '^src/c4bb/images/\|^src/c4or1k/images/' |
+        grep -v '^src/c4bb/images/\|^src/c4or1k/images/\|^libjs/vendor/' |
         while read -r f; do
             [ -f "$f" ] && grep -Iq . "$f" 2>/dev/null || continue
             mkdir -p "$ROOT/usr/$(dirname "$f")"
@@ -829,11 +901,40 @@ tar --format=ustar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
 sha256sum $DISK/c4ix-root.tgz | cut -c1-16 > $DISK/c4ix-root.tgz.id
 rm -rf $ROOT
 
+say "the games' sources, for the IDE's Code tab"
+# Each game on the disk brings its repository's text files (not data/),
+# at their paths in this tree: the source maps of its images name
+# games/doom/am_map.c, and C4IX has it at /usr/games/doom/am_map.c
+# (c4ix.vfs.txt's games/: hostdir(games/)), where the IDE's Code tab
+# looks (explore.c xp_where). Megabytes nobody should download to boot,
+# so they are lazy files in c4ix.sizes and index.json and in no
+# manifest.json; index.json gives each a hash, by which the page keeps
+# what it has read (docs/c4ix-desktop.md, part twenty-one).
+rm -rf $DISK/games
+for g in $GAMES; do
+    ls $DISK/c4ix-$(basename $g)*.c4r > /dev/null 2>&1 || continue
+    git -C $g ls-files 2> /dev/null | grep -v '^data/\|^\.\|/\.' |
+        while read -r f; do
+            [ -f "$g/$f" ] && grep -Iq . "$g/$f" 2>/dev/null || continue
+            mkdir -p "$DISK/$g/$(dirname "$f")"
+            cp "$g/$f" "$DISK/$g/$f"
+        done
+done
+
+# The hostdir(PREFIX) directories of C4IX's manifest, listed: each
+# directory under PREFIX gets a .c4ix-dir, from which the kernel makes its
+# entries when something first looks in it (vfs.c, vfs_lazydir). The
+# boot makes one entry for each hostdir, not one for each of the games'
+# thousands of sources and data files, which took seconds.
+HOSTDIRS=$(grep -o 'hostdir([^)]*)' $DISK/c4ix.vfs.txt | sed 's/^hostdir(//; s/)$//' | sort -u)
+find $DISK -name .c4ix-dir -delete
+python3 -I src/c4bb/tests/host-dirs.py $DISK $HOSTDIRS > /dev/null
+
 say "the disk's manifest, sizes and index"
 # manifest for the web app's disk loader (recursive: some entries,
 # like src/c4ke/c4ke.c, are real subdirectories on purpose - see the
-# innerbench comment above)
-(cd $DISK && find . -type f -not -name manifest.json | sed 's|^\./||') | \
+# innerbench comment above); not the games' sources, which are lazy only
+(cd $DISK && find . -type f -not -name manifest.json -not -path './games/*' | sed 's|^\./||') | \
     awk 'BEGIN{printf "["} NR>1{printf ","} {printf "\"%s\"", $0} END{print "]"}' > $DISK/manifest.json
 
 # LAZY LOADING (docs/c4ix-desktop.md, part three). c4ix.sizes is a
@@ -841,17 +942,27 @@ say "the disk's manifest, sizes and index"
 # entry a lazy RAM file that the kernel reads from the host only when
 # something first uses it. index.json is the same table for the web
 # page, whose worker then fetches a file on first read instead of all
-# of them before boot. Written last, after every copy above.
-(cd $DISK && find . -type f -not -name manifest.json -not -name c4ix.sizes -not -name index.json -not -name c4ix.sizes.tmp \
-    -printf '%s %P\n' | sort -k2) > $DISK/c4ix.sizes.tmp
+# of them before boot. Written last, after every copy above. The games'
+# sources come after the rest: only hostdir(games/) looks for them, and
+# vfsload's lookup of a manifest entry finds it before their ~580 lines.
+# Every file on the disk is in $OUT/.disk-sizes, for index.json; those in
+# the host directories are left out of c4ix.sizes, where vfsload has no
+# use for them (their listings name them), but for each one's own
+# PREFIX.c4ix-dir: vfsload looks there to know a listing is on the disk.
+(cd $DISK && { find . -type f -not -name manifest.json -not -name c4ix.sizes -not -name index.json -not -name c4ix.sizes.tmp \
+    -not -path './games/*' -printf '%s %P\n' | sort -k2
+    if [ -d games ]; then find games -type f -printf '%s %p\n' | sort -k2; fi; }) > $OUT/.disk-sizes
+awk -v pfx="$HOSTDIRS" 'BEGIN { n = split(pfx, p, " ") }
+    { name = substr($0, index($0, " ") + 1)
+      for (i = 1; i <= n; i++) if (index(name, p[i]) == 1 && name != p[i] ".c4ix-dir") next; print }' \
+    $OUT/.disk-sizes > $DISK/c4ix.sizes.tmp
 mv $DISK/c4ix.sizes.tmp $DISK/c4ix.sizes
-# index.json lists c4ix.sizes too -- a lazy disk serves only what its
-# index names, and without the table vfsload falls back to copying all.
-(cat $DISK/c4ix.sizes; echo "$(stat -c %s $DISK/c4ix.sizes) c4ix.sizes") | \
-    awk 'BEGIN{printf "["} NR>1{printf ","} {n=$0; sub(/^[0-9]+ /,"",n); printf "[\"%s\",%s]", n, $1} END{print "]"}' \
-    > $DISK/index.json
+# index.json lists every file, and c4ix.sizes -- a lazy disk serves only
+# what its index names, and without the table vfsload falls back to
+# copying all. The games' sources have their hashes in it.
+python3 -I src/c4bb/tests/lazy-index.py $DISK $OUT/.disk-sizes games/
 # and the manifest again, so the eager loader sees c4ix.sizes too
-(cd $DISK && find . -type f -not -name manifest.json | sed 's|^\./||') | \
+(cd $DISK && find . -type f -not -name manifest.json -not -path './games/*' | sed 's|^\./||') | \
     awk 'BEGIN{printf "["} NR>1{printf ","} {printf "\"%s\"", $0} END{print "]"}' > $DISK/manifest.json
 
 # ---- per-system disks -----------------------------------------------
@@ -928,7 +1039,8 @@ rm -f $ROOTDISK/c4ke-src.tar $ROOTDISK/dostar.c4r $ROOTDISK/dosload.c4r
 # C4IX's binaries go; C4IX's SOURCES stay, because building them is
 # what this disk is for.
 rm -f $ROOTDISK/c4ix.c4r $ROOTDISK/c4ix-*.c4r $ROOTDISK/c4ix.vfs.txt
-rm -f $ROOTDISK/c4ix-*.c $ROOTDISK/c4ix.h $ROOTDISK/c4ix_user.h
+rm -f $ROOTDISK/c4ix-*.c $ROOTDISK/c4ix.h $ROOTDISK/c4ix_user.h $ROOTDISK/c4ix_accel.h
+rm -rf $ROOTDISK/games
 # The build tools, so C4KE can build C4IX the way it is meant to:
 # b4ke drives it, c4sc is the compiled c4lc, c4rlink joins the objects.
 # docs/c4sc-design.md and src/c4ke/bin/c4ix.b4k.

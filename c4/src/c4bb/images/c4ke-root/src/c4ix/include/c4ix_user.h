@@ -24,7 +24,8 @@ enum {
     SYS_STACK = 228, SYS_CPUSTAT = 229, SYS_EVWAIT = 230, SYS_DISCARD = 231,
     SYS_VFORK = 232, SYS_EXECVE = 233, SYS_WAITPID = 234, SYS_LSEEK = 235,
     SYS_FSTAT = 236, SYS_LINK = 237, SYS_FTRUNCATE = 238, SYS_ENVIRON = 239,
-    SYS_DISPLAY = 240, SYS_AFFINITY = 242, SYS_NICE = 243
+    SYS_DISPLAY = 240, SYS_AFFINITY = 242, SYS_NICE = 243, SYS_IOPERM = 244, SYS_MAPFROM = 245, SYS_RELAZY = 246,
+    SYS_FDGIVE = 247
 };
 // libjs's display, taken from the desktop and given back (include/display.h)
 #ifndef __C4IX_DISPLAY_H
@@ -76,6 +77,10 @@ int  uclose(int fd);
 int  uexit(int code);
 int  uyield();
 int  spawn(char *path, int argc, char **argv);
+// spawn's failures: PATH is not there, there was not the memory to load
+// or start it, or it is there and will not load (the kernel's log says
+// why: not a .c4r, a library it needs missing, ...). The same in c4ix.h.
+enum { SPAWN_NOENT = -1, SPAWN_NOMEM = -2, SPAWN_BAD = -3 };
 int  uwait(int id);
 int  udup(int fd);
 int  udup2(int oldfd, int newfd);
@@ -91,6 +96,21 @@ int  uaffinity(int id, int mask);
 // no such task. Wolf3D, Doom and Tyrian ask for -5.
 enum { UNICE_ASK = 99, UNICE_NONE = -100 };
 int  unice(int id, int nice);
+// c4bb's device registers (UIOPERM_DEV), which under the MMU a task does
+// not have unless it asks: persist does, to write drive 1. 0, or -1.
+enum { UIOPERM_DEV = 2 };
+int  uioperm(int bits);
+// N bytes at ADDR, a program's this task started (or one they started),
+// readable here too, at the same address: under the MMU each task's memory
+// is its own, and the desktop draws a window's framebuffer from the
+// program's (umapfrom, docs/c4ix-mmu.md 9). 0, or -1 if it is not one's.
+// Without the MMU there is nothing to do, and it says 0.
+int  umapfrom(int addr, int n);
+// Give task pid -- one this task started, or one they started -- this
+// task's descriptor fd as its descriptor to, as udup2 would there: what to
+// was is closed. The desktop gives a program run in the background from a
+// Terminal the pipes of a window of its own so (window.h). to, or -1.
+int  ufdgive(int pid, int fd, int to);
 // Sleep ms milliseconds, or less: until an event lands in the GUI ring at
 // ring (0: none), or, with pipes set, data or end of file on a pipe this
 // task reads. 1 if one already had.
@@ -110,6 +130,10 @@ int  ustat(char *path, int *out); // out[0] 1 dir, 2 file, 3 other; out[1] bytes
 int  uunlink(char *path);         // remove a file, or an empty directory
 int  urename(char *path, char *newname);  // a new name in the same directory
 int  ulazyfile(char *path, char *host, int size); // a RAM file read from the host on first use
+// PATH, unchanged since STAMP (ustat out[3]), is the host's again at HOST
+// (persist save): read from there when wanted, its RAM the kernel's to
+// take back. Its stamp stays. 0, or -1: changed, or not a file
+int  urelazy(char *path, char *host, int stamp);
 int  ustack(int bytes);           // stack size for tasks this one spawns from now on; 0 the default
 // The POSIX process and file calls (docs/busybox-port.md §4). vfork's
 // child shares this task's memory and must leave by uexecve or uexit,

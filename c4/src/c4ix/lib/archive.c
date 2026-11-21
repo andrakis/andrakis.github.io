@@ -8,6 +8,13 @@
 // That matters here: the root archive is megabytes and every
 // instruction is interpreted.
 //
+// Where the machine has C4IX's accelerators (c4ix_accel.h, src/c4ix/
+// accel.mjs) and they are on, the CRC and the inflater's literal/match
+// loop are the host's, one instruction each: the same bytes, the same
+// state left behind, the C seeing to every edge (a window to flush, the
+// input running low, a bad code) as before. At boot that is most of the
+// time the machine spends: 85% of its instructions were these two loops.
+//
 // Word size. Nothing below may depend on whether int is 32 or 64 bits,
 // and this VM has no unsigned type. The bit buffer never holds more
 // than 23 bits, so its shifts are safe either way. The CRC keeps its
@@ -18,6 +25,7 @@
 
 #include "c4ix_user.h"
 #include "archive.h"
+#include "c4ix_accel.h"
 
 char *arc_error;
 
@@ -28,7 +36,10 @@ enum {
     FIXLCODES = 288,        // literal/length codes in the fixed table
     FASTBITS = 9,           // lookup-table width
     FASTSIZE = 512,         // 1 << FASTBITS
-    TARBLOCK = 512
+    TARBLOCK = 512,
+    WINDOW = 32768,         // how far back a match reaches
+    INCAP = 131072,         // arc_gunzip_file's input: a stored block's 64 KB, and room
+    WINCAP = 262144         // arc_gunzip_to's window: WINDOW, a stored block's 64 KB, and room
 };
 
 // ---- CRC-32 ----
@@ -55,8 +66,9 @@ static void crc_init() {
 }
 
 int arc_crc32(int crc, char *buf, int len) {
-    int *t;
+    int *t, b;
     char *e;
+    if (len > 0 && (b = cx_find())) return cx_crc32(b, crc, buf, len);
     if (!crc_table) crc_init();
     t = crc_table;
     e = buf + len;
@@ -71,6 +83,13 @@ char *in_buf;  int in_len;  int in_pos;
 char *out_buf; int out_cap; int out_pos;
 int bitbuf; int bitcnt;
 int in_short;              // set when the input ran out mid-stream
+// Streaming in (arc_gunzip_file): IN_BUF holds IN_CAP bytes of the file
+// IN_FD at a time, and in_more reads on when they are used; -1 where the
+// whole input is in memory
+int in_fd; int in_cap;
+// Streaming (arc_gunzip_to): OUT_BUF is a window, and what goes out of it
+// goes to OUT_SINK, a function; OUT_DONE bytes have, their CRC OUT_CRC
+int out_sink; int out_done; int out_crc;
 
 // The lengths and distances: base values and extra bits, RFC 1951 3.2.5.
 int lbase[29] = { 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31,
@@ -114,11 +133,52 @@ static int arc_fail(char *why) {
     return 0 - 1;
 }
 
+// More input, read from IN_FD: what is left moves to the buffer's start,
+// with the 4 bytes before it, which the bit buffer may have read ahead and
+// stored() and the trailer hand back. 0 if there is no more.
+static int in_more() {
+    int start, n;
+    if (in_fd < 0) return 0;
+    start = in_pos - 4;
+    if (start < 0) start = 0;
+    if (start > 0) {
+        // down the buffer, overlapping, as out_flush moves its window
+        memcpy(in_buf, in_buf + start, in_len - start);
+        in_pos = in_pos - start;
+        in_len = in_len - start;
+    }
+    if (in_len >= in_cap) return 0;
+    n = uread(in_fd, in_buf + in_len, in_cap - in_len);
+    if (n <= 0) return 0;
+    in_len = in_len + n;
+    return 1;
+}
+
+// At least N bytes from IN_POS on, where the input has them
+static int in_need(int n) {
+    while (in_len - in_pos < n) if (!in_more()) return 0;
+    return 1;
+}
+
+// The window is full: all but the last 32 KB, which a match may still
+// reach back into, go to the sink, and those 32 KB to the window's start
+static int out_flush() {
+    int n, put;
+    if (!(put = out_sink)) return arc_fail("output overflows its size");
+    n = out_pos - WINDOW;
+    out_crc = arc_crc32(out_crc, out_buf, n);
+    if (put(out_buf, n) != n) return arc_fail("the inflated data could not be written");
+    out_done = out_done + n;
+    memcpy(out_buf, out_buf + n, WINDOW);
+    out_pos = WINDOW;
+    return 0;
+}
+
 // The next NEED bits, low bit first. NEED is at most 16.
 static int bits(int need) {
     int v;
     while (bitcnt < need) {
-        if (in_pos >= in_len) { in_short = 1; return 0; }
+        if (in_pos >= in_len && !in_more()) { in_short = 1; return 0; }
         bitbuf = bitbuf | ((in_buf[in_pos++] & 255) << bitcnt);
         bitcnt = bitcnt + 8;
     }
@@ -226,15 +286,34 @@ static int decode(struct huff *h) {
 // back only around the slow path and on the way out. A literal costs
 // a table read and a store. A match that does not overlap itself is
 // one memcpy, which the host does.
+//
+// With C4IX's accelerators, the host runs this loop (CX_INFLATE) for as
+// long as a whole turn of it cannot reach the window's end (a match is at
+// most 258 bytes) or the input's (a turn reads fewer than 16 bytes), from
+// the state in CX_ST and back into it; then a turn of the C here, which
+// sees to the edge, and the host again. A bad code stops it before the
+// turn that has it, so the C finds it and says so as it always did.
+static int cx_st[14];
+
 static int codes(struct huff *lc, struct huff *dc) {
-    int sym, len, dist, e, l, bb, bc, ip, il, op, oc;
-    int *lfast, *dfast;
+    int sym, len, dist, e, l, bb, bc, ip, il, op, oc, cxb;
+    int *lfast, *dfast, *st;
     char *ib, *ob, *from;
 
     lfast = lc->fast; dfast = dc->fast;
     ib = in_buf; il = in_len; ob = out_buf; oc = out_cap;
     bb = bitbuf; bc = bitcnt; ip = in_pos; op = out_pos;
+    cxb = cx_find();
+    st = cx_st;
     while (1) {
+        if (cxb && op + 258 <= oc && il - ip >= 16) {
+            st[0] = bb; st[1] = bc; st[2] = ip; st[3] = il; st[4] = op; st[5] = oc;
+            st[6] = (int)ib; st[7] = (int)ob; st[8] = (int)lfast; st[9] = (int)dfast;
+            st[10] = (int)lc->count; st[11] = (int)lc->symbol; st[12] = (int)dc->count; st[13] = (int)dc->symbol;
+            e = cx_inflate(cxb, st);
+            bb = st[0]; bc = st[1]; ip = st[2]; op = st[4];
+            if (e == 1) break;              // the end of the block
+        }
         // a literal/length symbol
         if (bc < 16 && ip + 2 <= il) {
             bb = bb | ((ib[ip] & 255) << bc) | ((ib[ip + 1] & 255) << (bc + 8));
@@ -247,11 +326,15 @@ static int codes(struct huff *lc, struct huff *dc) {
         } else {
             bitbuf = bb; bitcnt = bc; in_pos = ip;
             sym = decode(lc);
-            bb = bitbuf; bc = bitcnt; ip = in_pos;
+            bb = bitbuf; bc = bitcnt; ip = in_pos; il = in_len;
             if (sym < 0) return arc_fail("bad literal/length code");
         }
         if (sym < 256) {
-            if (op >= oc) return arc_fail("output overflows its size");
+            if (op >= oc) {
+                out_pos = op;
+                if (out_flush() < 0) return 0 - 1;
+                op = out_pos;
+            }
             ob[op++] = sym;
             continue;
         }
@@ -263,7 +346,7 @@ static int codes(struct huff *lc, struct huff *dc) {
         if ((l = lext[sym])) {
             bitbuf = bb; bitcnt = bc; in_pos = ip;
             len = len + bits(l);
-            bb = bitbuf; bc = bitcnt; ip = in_pos;
+            bb = bitbuf; bc = bitcnt; ip = in_pos; il = in_len;
         }
 
         // its distance
@@ -278,18 +361,22 @@ static int codes(struct huff *lc, struct huff *dc) {
         } else {
             bitbuf = bb; bitcnt = bc; in_pos = ip;
             sym = decode(dc);
-            bb = bitbuf; bc = bitcnt; ip = in_pos;
+            bb = bitbuf; bc = bitcnt; ip = in_pos; il = in_len;
         }
         if (sym < 0 || sym >= 30) return arc_fail("bad distance symbol");
         dist = dbase[sym];
         if ((l = dext[sym])) {
             bitbuf = bb; bitcnt = bc; in_pos = ip;
             dist = dist + bits(l);
-            bb = bitbuf; bc = bitcnt; ip = in_pos;
+            bb = bitbuf; bc = bitcnt; ip = in_pos; il = in_len;
         }
         if (in_short) return arc_fail("input ends mid-block");
         if (dist > op) return arc_fail("distance reaches before the start");
-        if (op + len > oc) return arc_fail("output overflows its size");
+        if (op + len > oc) {
+            out_pos = op;
+            if (out_flush() < 0) return 0 - 1;
+            op = out_pos;
+        }
         from = ob + op - dist;
         if (dist >= len) {
             memcpy(ob + op, from, len);
@@ -310,13 +397,13 @@ static int stored() {
     bitbuf = 0;
     in_pos = in_pos - (bitcnt >> 3);
     bitcnt = 0;
-    if (in_pos + 4 > in_len) return arc_fail("input ends in a stored header");
+    if (!in_need(4)) return arc_fail("input ends in a stored header");
     len = (in_buf[in_pos] & 255) | ((in_buf[in_pos + 1] & 255) << 8);
     nlen = (in_buf[in_pos + 2] & 255) | ((in_buf[in_pos + 3] & 255) << 8);
     in_pos = in_pos + 4;
     if (len != (0xFFFF ^ nlen)) return arc_fail("stored block length check");
-    if (in_pos + len > in_len) return arc_fail("input ends in a stored block");
-    if (out_pos + len > out_cap) return arc_fail("output overflows its size");
+    if (!in_need(len)) return arc_fail("input ends in a stored block");
+    if (out_pos + len > out_cap && out_flush() < 0) return 0 - 1;
     memcpy(out_buf + out_pos, in_buf + in_pos, len);
     out_pos = out_pos + len;
     in_pos = in_pos + len;
@@ -382,7 +469,15 @@ static int dynamic() {
     return codes(lencode, distcode);
 }
 
+static int inflate_from(char *out, int outcap, int *used);
+
 int arc_inflate(char *in, int inlen, char *out, int outcap, int *used) {
+    in_buf = in; in_len = inlen; in_pos = 0; in_fd = 0 - 1;
+    return inflate_from(out, outcap, used);
+}
+
+// arc_inflate, its input set up already (IN_BUF from IN_POS)
+static int inflate_from(char *out, int outcap, int *used) {
     int last, type, err;
 
     if (!lengths) {
@@ -390,7 +485,6 @@ int arc_inflate(char *in, int inlen, char *out, int outcap, int *used) {
         lencode = huff_new(MAXLCODES);
         distcode = huff_new(MAXDCODES);
     }
-    in_buf = in; in_len = inlen; in_pos = 0;
     out_buf = out; out_cap = outcap; out_pos = 0;
     bitbuf = 0; bitcnt = 0; in_short = 0;
     arc_error = 0;
@@ -417,10 +511,9 @@ static int le32(char *p) {
     return ((p[0] & 255) | ((p[1] & 255) << 8) | ((p[2] & 255) << 16) | ((p[3] & 255) << 24)) & 0xFFFFFFFF;
 }
 
-int arc_gunzip(char *in, int inlen, char **out, int *outlen) {
-    int flags, pos, size, n, used, crc;
-    char *buf;
-
+// Where a gzip member's deflate data starts, or -1
+static int gz_start(char *in, int inlen) {
+    int flags, pos;
     if (inlen < 18 || (in[0] & 255) != 0x1F || (in[1] & 255) != 0x8B) return arc_fail("not gzip");
     if (in[2] != 8) return arc_fail("gzip, but not deflate");
     flags = in[3] & 255;
@@ -430,7 +523,14 @@ int arc_gunzip(char *in, int inlen, char **out, int *outlen) {
     if (flags & 16) { while (pos < inlen && in[pos]) ++pos; ++pos; }                 // FCOMMENT
     if (flags & 2) pos = pos + 2;                                                    // FHCRC
     if (pos >= inlen - 8) return arc_fail("gzip header runs off the end");
+    return pos;
+}
 
+int arc_gunzip(char *in, int inlen, char **out, int *outlen) {
+    int pos, size, n, used, crc;
+    char *buf;
+
+    if ((pos = gz_start(in, inlen)) < 0) return 0 - 1;
     // ISIZE is the size mod 2^32; nothing here is that big
     size = le32(in + inlen - 4);
     if (size < 0) return arc_fail("gzip member too large");
@@ -446,25 +546,123 @@ int arc_gunzip(char *in, int inlen, char **out, int *outlen) {
     return 0;
 }
 
+int arc_gunzip_to(char *in, int inlen, int put) {
+    int pos, n, used;
+    char *buf;
+
+    if ((pos = gz_start(in, inlen)) < 0) return 0 - 1;
+    if (le32(in + inlen - 4) < 0) return arc_fail("gzip member too large");
+    if (!(buf = (char *)ualloc(WINCAP))) return arc_fail("out of memory for the inflater's window");
+    out_sink = put; out_done = 0; out_crc = 0;
+    n = arc_inflate(in + pos, inlen - pos - 8, buf, WINCAP, &used);
+    out_sink = 0;
+    if (n >= 0) {
+        out_crc = arc_crc32(out_crc, buf, n);
+        if (put(buf, n) != n) n = arc_fail("the inflated data could not be written");
+    }
+    free(buf);
+    if (n < 0) return n;
+    n = out_done + n;
+    if (n != le32(in + inlen - 4)) return arc_fail("inflated size differs from the trailer");
+    if (out_crc != le32(in + inlen - 8)) return arc_fail("CRC mismatch: the archive is damaged");
+    return n;
+}
+
+// arc_gunzip_to, the archive read from PATH as it is inflated, INCAP
+// bytes at a time, instead of all of it into memory first: a first boot
+// without the MMU held the 4.3 MB root archive and the desktop at once.
+// ARC_NOTGZ if PATH is not gzip, and nothing went to PUT.
+int arc_gunzip_file(char *path, int put) {
+    int fd, pos, n, used, crc, size;
+    char *buf, *in;
+
+    if ((fd = uopen(path, O_RD)) < 0) return arc_fail("cannot open");
+    if (!(in = (char *)ualloc(INCAP))) { uclose(fd); return arc_fail("out of memory for the inflater's input"); }
+    in_buf = in; in_cap = INCAP; in_len = 0; in_pos = 0; in_fd = fd;
+    in_more();
+    if (in_len < 2 || (in[0] & 255) != 0x1F || (in[1] & 255) != 0x8B) {
+        in_fd = 0 - 1; uclose(fd); free(in);
+        arc_fail("not gzip");
+        return ARC_NOTGZ;
+    }
+    n = 0 - 1;
+    if ((pos = gz_start(in, in_len)) >= 0) {
+        if (!(buf = (char *)ualloc(WINCAP))) n = arc_fail("out of memory for the inflater's window");
+        else {
+            in_pos = pos;
+            out_sink = put; out_done = 0; out_crc = 0;
+            n = inflate_from(buf, WINCAP, &used);
+            out_sink = 0;
+            if (n >= 0) {
+                out_crc = arc_crc32(out_crc, buf, n);
+                if (put(buf, n) != n) n = arc_fail("the inflated data could not be written");
+            }
+            free(buf);
+            if (n >= 0) {
+                // the trailer: CRC and size, after what the inflater used
+                n = out_done + n;
+                in_pos = used;
+                if (!in_need(8)) n = arc_fail("gzip trailer missing");
+                else {
+                    crc = le32(in_buf + in_pos);
+                    size = le32(in_buf + in_pos + 4);
+                    if (n != size) n = arc_fail("inflated size differs from the trailer");
+                    else if (out_crc != crc) n = arc_fail("CRC mismatch: the archive is damaged");
+                }
+            }
+        }
+    }
+    in_fd = 0 - 1;
+    uclose(fd);
+    free(in);
+    return n;
+}
+
 // ---- files ----
 
+// How many bytes reading PATH gives, read through once; -1 if it will
+// not open or there is no memory to read it with
+static int arc_count(char *path) {
+    char *b;
+    int fd, n, total;
+    if ((fd = uopen(path, O_RD)) < 0) return 0 - 1;
+    if (!(b = (char *)ualloc(65536))) { uclose(fd); return 0 - 1; }
+    total = 0;
+    while ((n = uread(fd, b, 65536)) > 0) total = total + n;
+    free(b);
+    uclose(fd);
+    return total;
+}
+
+// PATH's bytes, read into one buffer of their size (and a 0 after
+// them); its length in *PLEN. A file the VFS does not have -- the host's,
+// which uopen falls back to, as the root archive is -- has no size to
+// stat, and the host none to tell: it is read through once to count it
+// first. Grown as it was read, doubling, a 4.3 MB archive took an 8 MB
+// buffer with the 4 MB one still held to copy from, 12 MB at once, and a
+// first boot without the MMU needed 20 MB where 12 had done.
 char *arc_readfile(char *path, int *plen) {
     int st[4], fd, got, n;
     char *buf;
     if (ustat(path, st) < 0 || st[0] != 2) {
         // not in the VFS: the host may still have it (uopen falls back)
-        st[1] = 0;
+        st[1] = arc_count(path);
     }
     fd = uopen(path, O_RD);
     if (fd < 0) { arc_error = "cannot open"; return 0; }
     if (st[1] <= 0) st[1] = 65536;
-    buf = (char *)ualloc(st[1] + 1);
+    if (!(buf = (char *)ualloc(st[1] + 1))) { uclose(fd); arc_error = "out of memory reading it"; return 0; }
     got = 0;
     while (1) {
         if (got == st[1]) {
-            // bigger than stat said (a host file): grow
+            // full: one byte more, into the room for the 0 after, says
+            // whether there is more. Grown at once, every file the size
+            // stat said took a buffer twice that at its end.
             char *nb;
-            nb = (char *)ualloc(st[1] * 2 + 1);
+            if ((n = uread(fd, buf + got, 1)) <= 0) break;
+            got = got + n;
+            // bigger than stat said (a host file): grow
+            if (!(nb = (char *)ualloc(st[1] * 2 + 1))) { uclose(fd); free(buf); arc_error = "out of memory reading it"; return 0; }
             memcpy(nb, buf, got);
             free(buf);
             buf = nb;

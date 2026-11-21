@@ -4869,7 +4869,7 @@ int main (int argc, char **argv) {
 #include "src/c4ke/extensions/c4ke_boot.c"
 
 #endif // ifndef C4KE
-load-c4r.c 45238
+load-c4r.c 46368
 //
 // Executable loader: .c4r format
 //
@@ -4908,6 +4908,12 @@ enum {
 // actually stored -- the excess is BSS (zero-initialized, occupies no
 // image bytes). Version 2 images have no such field; for them MEMSZ is
 // taken to equal DATALEN. Both versions load.
+//
+// At 32 bits the field's eight bytes hold MEMSZ and four more, which a
+// v3 object from c4lc or c4fc uses for the size of its BSS (see
+// C4R_HDR_BSS): the zero-filled part at the END of MEMSZ, which begins at
+// MEMSZ - BSS. Zero there (or v2's 'p' filler) says nothing; c4rlink then
+// keeps that module's whole MEMSZ together, as it always did.
 enum { C4R__Supported_Version = 3 };
 
 enum {
@@ -4943,6 +4949,9 @@ enum {
 	C4R_HDR_DESTRUCTLEN, // int
 	C4R_HDR_MEMSZ,       // int -- data segment total in-memory size (v3+);
 	                     //        >= DATALEN, the excess is zero-filled BSS.
+	C4R_HDR_BSS,         // int -- of MEMSZ, how much at its end is BSS: the
+	                     //        uninitialized globals, no part of an
+	                     //        initialized one (v3, 32 bits); 0 for unknown
 	C4R_HDR__Sz
 };
 
@@ -5331,6 +5340,10 @@ int *c4r_load_opt_real (char *file, int options) {
 			x = (5 + i) & ~i;
 			c4r_src_read(fd, buffer, x); // padding word: MEMSZ (v3+)
 			header[C4R_HDR_MEMSZ] = *(int *)buffer;
+			// and at 32 bits, the BSS size beside it ('pppp' in v2)
+			header[C4R_HDR_BSS] = 0;
+			if (x == 8 && sizeof(int) == 4 && *(int *)(buffer + 4) != 1886417008)
+				header[C4R_HDR_BSS] = *(int *)(buffer + 4);
 			wordbytes = header[C4R_HDR_WORDBITS] / 8;
 			c4r_src_read(fd, buffer, wordbytes); header[C4R_HDR_ENTRY] = *(int *)buffer;
 			c4r_src_read(fd, buffer, wordbytes); header[C4R_HDR_CODELEN] = *(int *)buffer;
@@ -5363,6 +5376,10 @@ int *c4r_load_opt_real (char *file, int options) {
 			// actually stored.
 			if (header[C4R_HDR_MEMSZ] < header[C4R_HDR_DATALEN])
 				header[C4R_HDR_MEMSZ] = header[C4R_HDR_DATALEN];
+			// nor a BSS that would start before the stored bytes end
+			if (header[C4R_HDR_VERSION] < C4R__Supported_Version || header[C4R_HDR_BSS] < 0 ||
+			    header[C4R_HDR_MEMSZ] - header[C4R_HDR_BSS] < header[C4R_HDR_DATALEN])
+				header[C4R_HDR_BSS] = 0;
 
 			if (c4r_verbose) c4r_dump_info(c4r);
 
@@ -5758,6 +5775,8 @@ enum {
 	LDL ,LDG ,PSHL,PSHG,LEAP,IMMP,LIP ,ADDL,STL ,POPA,
 	// F3: IEEE arithmetic (docs/c4-float.md)
 	FPU ,
+	// 16-bit loads and store, logical shift right (docs/c4-16bit.md)
+	LH  ,LHU ,SH  ,LSR ,LCU ,
 	// End of instructions
 	INS_SIZE,
 };
@@ -9654,7 +9673,7 @@ static int dos_entsize (int i) { (void)i; return -1; }
 static char *dos_entdata (int i) { (void)i; return 0; }
 static int dos_trim () { return 0; }
 static int dos_release () { return 0; }
-include/c4_float.h 14084
+include/c4_float.h 15927
 //
 // C4 Standard Library: c4_float.h
 //
@@ -9685,6 +9704,12 @@ include/c4_float.h 14084
 // product (48 bits) fits with room for guard bits and no unsigned type is
 // needed. binary64 would need 106-bit intermediates, i.e. 128-bit multiply
 // emulation -- doable, but not a prototype.
+//
+// A 32-bit word works too (c4sp32, c4lc's and c4cc32's 32-bit images): the
+// product and the quotient's scaled numerator are the two values that do not
+// fit in one, and f32_mul and f32_div build them in pieces there instead,
+// with the same bits as a result. src/tests/test_float.c holds both widths to
+// the same hardware answers (make test-c4bb runs the 32-bit one).
 //
 
 #ifndef __C4_FLOAT_H
@@ -9859,6 +9884,7 @@ static int f32_sub (int a, int b) { return f32_add(a, f32_neg(b)); }
 static int f32_mul (int a, int b) {
 	int sa, ea, ma, sb, eb, mb;
 	int sr, er, mr;
+	int ah, al, bh, bl, mid, hi, lo;
 
 	if (f32_is_nan(a) || f32_is_nan(b)) return F32_NAN;
 
@@ -9876,19 +9902,41 @@ static int f32_mul (int a, int b) {
 	ma = ma | F32_HIDDEN;
 	mb = mb | F32_HIDDEN;
 
-	// 24 x 24 = 48 bits, comfortably inside a 64-bit word.
-	mr = ma * mb;
 	er = ea + eb - F32_BIAS;
 
 	// Two 24-bit significands give a product in [2^46, 2^48). Reduce it to the
-	// 27-bit working form, whose leading bit sits at 26. The 1 is cast
-	// because a native build widens the int TYPE to 64 bits but a bare
-	// literal stays C's 32-bit int, making 1 << 47 undefined.
-	if (mr >= ((int)1 << 47)) {
-		mr = f32_shr_sticky(mr, 21);
-		++er;
+	// 27-bit working form, whose leading bit sits at 26: down by 21 bits when
+	// the product reaches 2^47 (and the exponent goes up), by 20 when it does
+	// not, with what falls off kept as the sticky bit.
+	if (sizeof(int) >= 8) {
+		// 24 x 24 = 48 bits, comfortably inside a 64-bit word. mr >> 24 is
+		// compared rather than mr with 2^47, which a 32-bit build of this
+		// file cannot write.
+		mr = ma * mb;
+		if ((mr >> 24) >= F32_HIDDEN) {
+			mr = f32_shr_sticky(mr, 21);
+			++er;
+		} else {
+			mr = f32_shr_sticky(mr, 20);
+		}
 	} else {
-		mr = f32_shr_sticky(mr, 20);
+		// A 32-bit word: the product as hi * 2^24 + lo, from 12-bit pieces
+		// of each significand, every partial product below 2^25.
+		ah = ma >> 12; al = ma & 4095;
+		bh = mb >> 12; bl = mb & 4095;
+		mid = ah * bl + al * bh;
+		lo  = al * bl + ((mid & 4095) << 12);
+		hi  = ah * bh + (mid >> 12) + (lo >> 24);
+		lo  = lo & 16777215;
+		// the product reaches 2^47 exactly when hi reaches 2^23
+		if (hi >= F32_HIDDEN) {
+			mr = (hi << 3) | (lo >> 21);
+			if (lo & 2097151) mr = mr | 1;
+			++er;
+		} else {
+			mr = (hi << 4) | (lo >> 20);
+			if (lo & 1048575) mr = mr | 1;
+		}
 	}
 
 	if (er >= F32_EXPMAX) return f32_inf_signed(sr);
@@ -9903,7 +9951,7 @@ static int f32_mul (int a, int b) {
 
 static int f32_div (int a, int b) {
 	int sa, ea, ma, sb, eb, mb;
-	int sr, er, mr, rem;
+	int sr, er, mr, rem, i;
 
 	if (f32_is_nan(a) || f32_is_nan(b)) return F32_NAN;
 
@@ -9924,9 +9972,23 @@ static int f32_div (int a, int b) {
 	mb = mb | F32_HIDDEN;
 
 	// ma/mb lies in (0.5, 2), so scaling the numerator by 2^27 puts the
-	// quotient in (2^26, 2^28). ma < 2^24, so ma << 27 < 2^51 -- no overflow.
-	mr  = (ma << 27) / mb;
-	rem = (ma << 27) % mb;
+	// quotient in (2^26, 2^28). ma < 2^24, so ma << 27 < 2^51 -- no overflow
+	// in a 64-bit word. A 32-bit one divides a bit at a time instead, the
+	// remainder staying below mb < 2^24: the same quotient and remainder.
+	if (sizeof(int) >= 8) {
+		mr  = (ma << 27) / mb;
+		rem = (ma << 27) % mb;
+	} else {
+		mr  = ma / mb;
+		rem = ma % mb;
+		i = 0;
+		while (i < 27) {
+			rem = rem << 1;
+			mr  = mr << 1;
+			if (rem >= mb) { rem = rem - mb; mr = mr | 1; }
+			++i;
+		}
+	}
 
 	er = ea - eb + F32_BIAS;
 
@@ -9981,6 +10043,13 @@ static int f32_ge (int a, int b) { int c; c = f32_cmp(a, b); return c == 1 || c 
 /// Conversion
 ///
 
+// The largest int, at whatever width the word is: 2^63 - 1, or 2^31 - 1 in a
+// 32-bit build. Made without overflowing, and without a literal one width
+// cannot hold.
+static int f32_intmax () {
+	return ((((int)1 << (sizeof(int) * 8 - 2)) - 1) << 1) + 1;
+}
+
 static int f32_from_int (int v) {
 	int sign, exp, m, sticky, bits;
 
@@ -9990,14 +10059,15 @@ static int f32_from_int (int v) {
 	if (v < 0) {
 		sign = 1;
 		// Do not negate the most negative value; handle it directly.
-		if (v == (0 - 0x7FFFFFFFFFFFFFFF) - 1) return f32_pack(1, F32_BIAS + 63, 0);
+		if (v == 0 - f32_intmax() - 1) return f32_pack(1, F32_BIAS + sizeof(int) * 8 - 1, 0);
 		v = 0 - v;
 	}
 
-	// Find the position of the top set bit.
+	// Find the position of the top set bit. v is positive here, so the
+	// shift brings in zeros.
 	bits = 0;
 	m = v;
-	while (m != 0) { m = (m >> 1) & 0x7FFFFFFFFFFFFFFF; ++bits; }
+	while (m != 0) { m = m >> 1; ++bits; }
 	exp = F32_BIAS + bits - 1;
 
 	// Reduce to 27 bits (24 value + guard/round/sticky).
@@ -10018,12 +10088,13 @@ static int f32_to_int (int x) {
 
 	sign = f32_sign(x);
 	exp  = f32_exp_field(x);
-	if (f32_is_inf(x)) return sign ? (0 - 0x7FFFFFFFFFFFFFFF) - 1 : 0x7FFFFFFFFFFFFFFF;
+	if (f32_is_inf(x)) return sign ? 0 - f32_intmax() - 1 : f32_intmax();
 	if (exp == 0) return 0;                     // subnormal
 
 	exp = exp - F32_BIAS;
 	if (exp < 0) return 0;                      // |x| < 1
-	if (exp > 62) return sign ? (0 - 0x7FFFFFFFFFFFFFFF) - 1 : 0x7FFFFFFFFFFFFFFF;
+	// out of range saturates, as the hardware's conversion does
+	if (exp > sizeof(int) * 8 - 2) return sign ? 0 - f32_intmax() - 1 : f32_intmax();
 
 	m = f32_man_field(x) | F32_HIDDEN;          // 24 bits, binary point after bit 23
 	shift = exp - 23;
@@ -10166,7 +10237,7 @@ static int f32_print_buf (int x, char *buf, int prec) {
 }
 
 #endif /* ifndef __C4_FLOAT_H */
-include/c4.h 3453
+include/c4.h 3648
 #ifndef __C4_H
 #define __C4_H 1
 
@@ -10192,6 +10263,11 @@ include/c4.h 3453
 #include <string.h>
 #include <memory.h>
 #include <fcntl.h>
+// A native build opens with the host's own flags, and on Windows
+// (docs/windows.md) asks for bytes, not text: Linux has no O_BINARY.
+#if NATIVE && !defined(O_BINARY)
+#define O_BINARY 0
+#endif
 
 #ifdef __GNUC__
 #include <unistd.h>
@@ -11090,7 +11166,7 @@ int *c4m_guest_signal (int sig, int *handler) {
 }
 
 #endif
-include/c4m_util.h 3053
+include/c4m_util.h 4406
 #ifndef C4CC
 #ifndef __C4M_UTIL_C
 #define __C4M_UTIL_C 1
@@ -11123,6 +11199,11 @@ include/c4m_util.h 3053
 //  CLOCK_MONOTONIC_RAW
 //#define CLOCK_MODE      CLOCK_REALTIME
 #define CLOCK_MODE      CLOCK_MONOTONIC_RAW
+
+// MSYS2 and Cygwin have CLOCK_MONOTONIC, and no _RAW
+#if !defined(CLOCK_MONOTONIC_RAW) && defined(CLOCK_MONOTONIC)
+#define CLOCK_MONOTONIC_RAW CLOCK_MONOTONIC
+#endif
 
 // On MSVC, clock_gettime doesn't exist, nor do the various monotonic / realtime options
 #ifndef CLOCK_MONOTONIC_RAW
@@ -11162,6 +11243,32 @@ static uint64_t nanos()
 }
 
 static int c4m_time () { return millis(); }
+
+// open()'s flags, as this host numbers them, for c4m_oflags() in c4m.c:
+// every guest is compiled with Linux's numbers (include/fcntl.h), and
+// the VM's OPEN hands them to the host. Windows numbers them otherwise,
+// under MSYS2 or Cygwin as under MinGW, and MinGW opens in text mode
+// unless asked for O_BINARY. Set only here, a header plain c4 never
+// reads; without C4M_OHOST, c4m.c declares them itself, zero, which is
+// "Linux, as they are". Static: several of c4mp's modules include this.
+#include <fcntl.h>
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
+#ifndef O_NONBLOCK
+#define O_NONBLOCK 0
+#endif
+#if O_CREAT != 0100 || O_BINARY
+#define C4M_OHOST 1
+static int c4m_ohost = 1;
+static int c4m_o_creat = O_CREAT, c4m_o_excl = O_EXCL, c4m_o_trunc = O_TRUNC,
+    c4m_o_append = O_APPEND, c4m_o_nonblock = O_NONBLOCK, c4m_o_binary = O_BINARY;
+// and a file the guest creates gets a mode: the VM's OPEN passes none,
+// and what is left where the third argument would be is, on Windows, a
+// mode that can leave the file unreadable. A third argument already
+// there is the one open() reads; this one then goes unread.
+#define open(path, ...) open(path, __VA_ARGS__, 0666)
+#endif
 
 // NB: for all 3 timestamp functions above: gcc defines the type of the internal
 // `tv_sec` seconds value inside the `struct timespec`, which is used
@@ -11215,7 +11322,7 @@ char toupper (char c) { return c & '_'; }
 #endif /* ifndef __c4cc__ */
 
 #endif /* ifndef __CTYPE_H */
-include/fcntl.h 136
+include/fcntl.h 240
 //
 // C4PRE override file: fcntl.h
 //
@@ -11224,11 +11331,15 @@ include/fcntl.h 136
 #define __FCNTL_H
 
 #ifndef C4CC
+#ifdef __MINGW32__
+#include_next <fcntl.h>  // MinGW (docs/windows.md) has no /usr/include
+#else
 #include </usr/include/fcntl.h>
+#endif
 #endif
 
 #endif
-include/memory.h 149
+include/memory.h 254
 //
 // C4 Standard Library header: memory.h
 //
@@ -11237,11 +11348,15 @@ include/memory.h 149
 #define __MEMORY_H 1
 
 #ifndef C4CC
+#ifdef __MINGW32__
+#include_next <memory.h>  // MinGW (docs/windows.md) has no /usr/include
+#else
 #include </usr/include/memory.h>
+#endif
 #endif
 
 #endif
-include/signal.h 1947
+include/signal.h 2052
 //
 // C4KE Standard Library header: signal.h
 //
@@ -11250,7 +11365,11 @@ include/signal.h 1947
 #define __SIGNAL_H 1
 
 #ifndef C4CC
+#ifdef __MINGW32__
+#include_next <signal.h>  // MinGW (docs/windows.md) has no /usr/include
+#else
 #include </usr/include/signal.h>
+#endif
 #else
 
 #define SIGHANDLER(name, signame) \
@@ -11416,17 +11535,19 @@ static void __attribute__((destructor)) __c4cc_va_destructor () {
 
 #endif // ifndef C4CC
 #endif // ifndef __STDARG_H
-include/stddef.h 808
+include/stddef.h 1025
 //
 // C4KE Standard Library: stddef.h
 // Provides standard definitions.
 
-#ifndef __STDDEF_H
-#define __STDDEF_H
-
 #ifndef __c4cc__
+// The host's, and through no guard of ours: a host header that wants one
+// type from it says so first (#define __need_wint_t, as MSYS2's and
+// Cygwin's do) and includes it again, and it has to get there every time.
 #include_next <stddef.h>
 #else  /* ifndef __c4cc__ */
+#ifndef __STDDEF_H
+#define __STDDEF_H
 
 // Everything is an int
 #define size_t    int
@@ -11446,12 +11567,12 @@ include/stddef.h 808
 #define unsigned
 #endif /* ifndef __c4_inttypes__ */
 
-#endif /* ifndef __c4cc__ */
-
 #endif /* ifndef __STDDEF_H */
 
+#endif /* ifndef __c4cc__ */
 
-include/stdint.h 140
+
+include/stdint.h 245
 // C4KE override header: stdint.h
 //
 
@@ -11459,11 +11580,15 @@ include/stdint.h 140
 #define __STDINT_H 1
 
 #ifndef C4CC
+#ifdef __MINGW32__
+#include_next <stdint.h>  // MinGW (docs/windows.md) has no /usr/include
+#else
 #include </usr/include/stdint.h>
+#endif
 #endif
 
 #endif
-include/stdio.h 13923
+include/stdio.h 14098
 //
 // C4KE Standard Library: stdio.h
 //
@@ -11493,7 +11618,13 @@ include/stdio.h 13923
 #define __STDIO_H 1
 
 #ifndef __c4cc__
+#ifdef __MINGW32__
+// MinGW, for the 32-bit host builds on Windows (docs/windows.md), has no
+// /usr/include: the next stdio.h is its own
+#include_next <stdio.h>
+#else
 #include_next </usr/include/stdio.h>
+#endif
 #else /* ifndef __c4cc__ */
 #ifndef C4KE
 
@@ -12034,7 +12165,7 @@ static void *memmove (void *source, void *dest, int length) {
 
 #endif /* ifndef __c4cc__ */
 #endif /* ifndef __STDSTRING_H */
-include/time.h 133
+include/time.h 236
 // C4KE override header: time.h
 //
 
@@ -12042,7 +12173,11 @@ include/time.h 133
 #define __TIME_H 1
 
 #ifndef C4CC
+#ifdef __MINGW32__
+#include_next <time.h>  // MinGW (docs/windows.md) has no /usr/include
+#else
 #include </usr/include/time.h>
+#endif
 #endif
 
 #endif

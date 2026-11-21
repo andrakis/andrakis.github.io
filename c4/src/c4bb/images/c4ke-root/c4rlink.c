@@ -37,10 +37,29 @@
 //    only if it defines a symbol something linked still lacks, as ld does an
 //    archive's (lib_select). Off unless given: an object named plainly is
 //    always linked, as with ld.
-//  - Static symbols are never merged: each module keeps its own copy.
+//  - Static symbols are never merged: each module keeps its own copy, and
+//    its name is never found by another module's (master_symfind). Before
+//    2026-11-13 it was: a global or an extern of the same name in a later
+//    module met the static, warned "duplicate definition" and took it.
+//  - The code c4lc splices into each object without a symbol -- its
+//    <udiv>, <ld16s> and the like, its soft-float and long long routines
+//    -- is kept once: copies that are the same code are folded into the
+//    first (gc_fold), and gc drops the rest. --no-fold keeps them all.
 //  - Non-static symbols are merged by name. An extern symbol that another
-//    module defines resolves to that definition; two non-static definitions
-//    keep the first and warn.
+//    module defines resolves to that definition.
+//  - A global defined in several modules is one object, as gcc -fcommon
+//    and ld make it (common_plan). A global with no initializer -- a
+//    tentative definition, whose symbol c4lc and c4fc mark ATTR_COMMON --
+//    gives way to the one that has an initializer, or, when none has, to
+//    the biggest (the first of equals); every reference of the modules
+//    that gave way, code or data, is moved to it (ref_at). Two globals
+//    that both have initializers stop the link ("multiple definition").
+//    --warn-common names each one merged. Before 2026-11-13 every module
+//    kept its own storage and only the symbol was merged, with a warning:
+//    Duke Nukem 3D's headers define 177 globals, and its Keys Setup read
+//    a copy of KeyMapping no one had written.
+//  - Two non-static definitions of a function, or of a function and a
+//    global, keep the first and warn.
 //  - Symbol-typed patches (JSR to an extern function) are rewritten to CODE
 //    patches once the symbol is resolved. Any still unresolved at the end are
 //    an error, unless -r (library mode) is given.
@@ -60,7 +79,8 @@
 //     - take the entry point from the first module that has one (rebased).
 //  4: Resolve: every symbol-typed patch whose master symbol is now defined
 //     becomes a CODE patch pointing at the definition.
-//  5: Drop the functions nothing reaches (unless --no-gc), move the rest down.
+//  5: Fold the copies of c4lc's helpers into one (unless --no-fold), drop
+//     the functions nothing reaches (unless --no-gc), move the rest down.
 //  6: Write the master image out.
 //
 // Shared libraries (-l LIB): LIB is a library (a -r image, named .c4s by
@@ -99,10 +119,20 @@ enum {
 	CL_REMAP,        // int *, module symbol id -> master symbol table index
 	CL_REMAP_MAX,    // int, entries in CL_REMAP
 	CL_MEMBER,       // int, 1: a library member (--start-lib), linked only if wanted
+	CL_BSS_BASE,     // int, where in the module's data its BSS begins (MEMSZ for none)
+	CL_OFFSET_BSS,   // int, byte offset of this module's BSS in the master image
+	CL_ALIAS,        // int *, the module's globals merged into another's (common_plan):
+	                 //   (offset, bytes, where the one kept is in the master) each
+	CL_NALIAS,       // int, entries in CL_ALIAS
 	CL__Sz
 };
 
 int cl_verbose, cl_debug, cl_libmode, cl_strip, cl_striptool, cl_nomap;
+
+// A symbol attribute beside c4cc.c's ATTR_* (whose bits stop at 0x40): a
+// global with no initializer, a tentative definition, which c4lc and c4fc
+// mark in an object (common_plan)
+enum { ATTR_COMMON = 0x80 };
 
 // A data word holding a symbol's address (M7b): ADDRESS is a byte offset
 // into data, VALUE the symbol's id. Only objects and libraries carry it --
@@ -117,6 +147,38 @@ enum { C4R_PTYPE_DSYM = -5 };
 enum { CL_LIBMAX = 8, CLL_STRUCT = 0, CLL_PATH, CLL_USED, CLL__Sz };
 int *cl_libs;
 int  cl_nlibs;
+int  cl_needed_at;    // where add_needed puts the next library's name
+
+// A module's data offset OFF, in the merged image. Every module's
+// initialized data comes first, each at its CL_OFFSET_DATA; then the
+// libraries' names (add_needed); then every module's BSS, each at its
+// CL_OFFSET_BSS. The image stores data up to its last non-zero byte, so
+// with the BSS all at the end none of it is stored, where before each
+// module's BSS was a run of zeros between the next one's data and its own
+// (Duke Nukem 3D's were 3.3 MB of a 5.7 MB image). A module from c4lc or
+// c4fc says how much of its MEMSZ is BSS (C4R_HDR_BSS, load-c4r.c); one
+// that does not keeps its MEMSZ together, as every module used to.
+static int data_at (int *cl, int off) {
+	if (off < cl[CL_BSS_BASE]) return cl[CL_OFFSET_DATA] + off;
+	return cl[CL_OFFSET_BSS] + (off - cl[CL_BSS_BASE]);
+}
+
+// Where in the merged image a reference of module CL to its data offset
+// OFF lands: data_at, unless OFF is in a global of the module that gave
+// way to another module's (common_plan), when it is the same place in
+// that one. Only what a reference names goes through here -- a DATA or
+// DDATA patch's value, a global symbol's -- never where a patch or the
+// module's own bytes lie.
+static int ref_at (int *cl, int off) {
+	int *a, i;
+	a = (int *)cl[CL_ALIAS];
+	i = 0;
+	while (i < cl[CL_NALIAS]) {
+		if (off >= a[0] && off < a[0] + a[1]) return a[2] + (off - a[0]);
+		a = a + 3; ++i;
+	}
+	return data_at(cl, off);
+}
 
 static void show_help (char *spec) {
 	if (cl_striptool)
@@ -128,7 +190,7 @@ static void show_help (char *spec) {
 	else
 	printf("%s: Link multiple .c4r files into one\n"
 	       "%s: [-dvrs] [-g0] [-l lib.c4s] [-o outfile] [--] file1.c4r [...fileN.c4r]\n"
-	       "         [--no-gc] [--start-lib member.c4o ... [--end-lib]]\n"
+	       "         [--no-gc] [--no-fold] [--warn-common] [--start-lib member.c4o ... [--end-lib]]\n"
 	       "     -d            Turn on debug mode\n"
 	       "     -v            Turn on verbose mode\n"
 	       "     -r            Library mode: allow unresolved symbols\n"
@@ -140,13 +202,17 @@ static void show_help (char *spec) {
 	       "                   linked only if it defines a symbol still undefined\n"
 	       "     --end-lib     The inputs after it are linked whole again\n"
 	       "     --no-gc       Keep the functions nothing reaches (dropped by default)\n"
+	       "     --no-fold     Keep every object's copy of c4lc's helpers (one by default)\n"
+	       "     --warn-common Name each global defined in several inputs, made one\n"
 	       "     --            End arguments\n", spec, spec);
 }
 
 static int my_strcmp (char *s1, char *s2) { while(*s1 && (*s1 == *s2)) { ++s1; ++s2; } return *s1 - *s2; }
 static int my_strncmp (char *s1, char *s2, int n) { while(n > 1 && *s1 && (*s1 == *s2)) { ++s1; ++s2; --n; } return n ? *s1 - *s2 : 0; }
 
-// Find a symbol in the master table by name; returns table index or -1.
+// Find a non-static symbol in the master table by name; returns table
+// index or -1. A static is its module's alone: no other module's name,
+// global or extern, may find it.
 static int master_symfind (int *master, char *name, int len) {
 	int *hdr, *sym, i, count;
 	hdr = (int *)master[C4R_HEADER];
@@ -154,7 +220,7 @@ static int master_symfind (int *master, char *name, int len) {
 	sym = (int *)master[C4R_SYMBOLS];
 	i = 0;
 	while (i < count) {
-		if (sym[C4R_SYMB_NAMELEN] == len &&
+		if (sym[C4R_SYMB_NAMELEN] == len && !(sym[C4R_SYMB_ATTRS] & ATTR_STATIC) &&
 		    !memcmp((char *)sym[C4R_SYMB_NAME], name, len))
 			return i;
 		++i;
@@ -225,7 +291,8 @@ static int import_symbols (int *master, int *cl) {
 				if (defined) msym[C4R_SYMB_VALUE] = sym[C4R_SYMB_VALUE] + offsetCode;
 				else         msym[C4R_SYMB_VALUE] = 0;
 			} else if (sym[C4R_SYMB_CLASS] == C4R_SCLASS_Glo) {
-				if (defined) msym[C4R_SYMB_VALUE] = sym[C4R_SYMB_VALUE] + offsetData;
+				// (a global that gave way names the one kept, ref_at)
+				if (defined) msym[C4R_SYMB_VALUE] = ref_at(cl, sym[C4R_SYMB_VALUE]);
 				else         msym[C4R_SYMB_VALUE] = 0;
 			}
 			mhdr[C4R_HDR_SYMBOLSLEN] = m + 1;
@@ -241,10 +308,20 @@ static int import_symbols (int *master, int *cl) {
 				if (sym[C4R_SYMB_CLASS] == C4R_SCLASS_Fun)
 					msym[C4R_SYMB_VALUE] = sym[C4R_SYMB_VALUE] + offsetCode;
 				else if (sym[C4R_SYMB_CLASS] == C4R_SCLASS_Glo)
-					msym[C4R_SYMB_VALUE] = sym[C4R_SYMB_VALUE] + offsetData;
+					msym[C4R_SYMB_VALUE] = ref_at(cl, sym[C4R_SYMB_VALUE]);
 				if (cl_verbose)
 					printf("c4rlink: '%.*s' resolved by '%s'\n",
 					       sym[C4R_SYMB_NAMELEN], name, (char *)cl[CL_FILE]);
+			} else if (defined && mdefined &&
+			           sym[C4R_SYMB_CLASS] == C4R_SCLASS_Glo && msym[C4R_SYMB_CLASS] == C4R_SCLASS_Glo) {
+				// one object (common_plan): every definition's value is
+				// already the one kept. If this one has the initializer,
+				// the entry is no longer tentative (in a -r library, it
+				// must not give way to another initialized one later)
+				if (!(sym[C4R_SYMB_ATTRS] & ATTR_COMMON)) {
+					msym[C4R_SYMB_ATTRS] = sym[C4R_SYMB_ATTRS];
+					msym[C4R_SYMB_TYPE]  = sym[C4R_SYMB_TYPE];
+				}
 			} else if (defined && mdefined) {
 				printf("c4rlink: warning: duplicate definition of '%.*s' in '%s', keeping first\n",
 				       sym[C4R_SYMB_NAMELEN], name, (char *)cl[CL_FILE]);
@@ -333,7 +410,7 @@ static int merge_c4rs (int *master, int *c4rs, int count) {
 			// (words); data-resident ones (-3/-4) by the data offset
 			// (bytes)
 			if (pid == C4R_PTYPE_DCODE || pid == C4R_PTYPE_DDATA || pid == C4R_PTYPE_DSYM)
-				dstPatch[C4R_PAT_ADDRESS] = offsetData + srcPatch[C4R_PAT_ADDRESS];
+				dstPatch[C4R_PAT_ADDRESS] = data_at(cl, srcPatch[C4R_PAT_ADDRESS]);
 			else
 				dstPatch[C4R_PAT_ADDRESS] = offsetCode + srcPatch[C4R_PAT_ADDRESS];
 			if (pid == C4R_PTYPE_CODE) {
@@ -341,13 +418,13 @@ static int merge_c4rs (int *master, int *c4rs, int count) {
 				dstPatch[C4R_PAT_VALUE] = offsetCode + srcPatch[C4R_PAT_VALUE];
 			} else if (pid == C4R_PTYPE_DATA) {
 				dstPatch[C4R_PAT_TYPE]  = pid;
-				dstPatch[C4R_PAT_VALUE] = offsetData + srcPatch[C4R_PAT_VALUE];
+				dstPatch[C4R_PAT_VALUE] = ref_at(cl, srcPatch[C4R_PAT_VALUE]);
 			} else if (pid == C4R_PTYPE_DCODE) {
 				dstPatch[C4R_PAT_TYPE]  = pid;
 				dstPatch[C4R_PAT_VALUE] = offsetCode + srcPatch[C4R_PAT_VALUE];
 			} else if (pid == C4R_PTYPE_DDATA) {
 				dstPatch[C4R_PAT_TYPE]  = pid;
-				dstPatch[C4R_PAT_VALUE] = offsetData + srcPatch[C4R_PAT_VALUE];
+				dstPatch[C4R_PAT_VALUE] = ref_at(cl, srcPatch[C4R_PAT_VALUE]);
 			} else if (pid == C4R_PTYPE_DSYM) {
 				// the symbol id is in VALUE: remap it as a symbol type is
 				if (srcPatch[C4R_PAT_VALUE] < 0 || srcPatch[C4R_PAT_VALUE] >= cl[CL_REMAP_MAX] ||
@@ -366,8 +443,9 @@ static int merge_c4rs (int *master, int *c4rs, int count) {
 					       (char *)cl[CL_FILE], i, pid);
 					return 1;
 				}
+				// (its value: what to add to the symbol, from c4opt)
 				dstPatch[C4R_PAT_TYPE]  = ((int *)cl[CL_REMAP])[pid];
-				dstPatch[C4R_PAT_VALUE] = 0;
+				dstPatch[C4R_PAT_VALUE] = srcPatch[C4R_PAT_VALUE];
 			}
 			mhdr[C4R_HDR_PATCHLEN] = mhdr[C4R_HDR_PATCHLEN] + 1;
 			srcPatch = srcPatch + C4R_PAT__Sz;
@@ -495,24 +573,20 @@ static int lib_defines (char *name, int len) {
 }
 
 // Record each library something was resolved against: its run-time path
-// appended to the data, and a static __c4_needed symbol pointing at it.
+// in the data, and a static __c4_needed symbol pointing at it. The layout
+// (main) left room for every library's name before the BSS; nothing in the
+// code refers to them, so they need not have been placed any sooner.
 // The symbol table has room: main allocates CL_LIBMAX spare entries.
 static int add_needed (int *master) {
-	int *mhdr, *sym, k, n, len, memsz;
-	char *path, *ndata;
+	int *mhdr, *sym, k, n, len;
+	char *path;
 	mhdr = (int *)master[C4R_HEADER];
 	k = 0;
 	while (k < cl_nlibs) {
 		if (cl_libs[k * CLL__Sz + CLL_USED]) {
 			path = (char *)cl_libs[k * CLL__Sz + CLL_PATH];
 			len = 0; while (path[len]) ++len;
-			memsz = mhdr[C4R_HDR_MEMSZ];
-			if (!(ndata = malloc(memsz + len + 1))) return 1;
-			if (memsz) memcpy(ndata, (char *)master[C4R_DATA], memsz);
-			memcpy(ndata + memsz, path, len + 1);
-			if (master[C4R_DATA]) free((char *)master[C4R_DATA]);
-			master[C4R_DATA] = (int)ndata;
-			mhdr[C4R_HDR_MEMSZ] = memsz + len + 1;
+			memcpy((char *)master[C4R_DATA] + cl_needed_at, path, len + 1);
 			n = mhdr[C4R_HDR_SYMBOLSLEN];
 			sym = (int *)master[C4R_SYMBOLS] + (n * C4R_SYMB__Sz);
 			sym[C4R_SYMB_ID]      = n;
@@ -521,7 +595,8 @@ static int add_needed (int *master) {
 			sym[C4R_SYMB_ATTRS]   = ATTR_STATIC;
 			sym[C4R_SYMB_NAMELEN] = 11;
 			sym[C4R_SYMB_NAME]    = (int)c4r_strcpy_alloc("__c4_needed");
-			sym[C4R_SYMB_VALUE]   = memsz;
+			sym[C4R_SYMB_VALUE]   = cl_needed_at;
+			cl_needed_at = cl_needed_at + len + 1;
 			mhdr[C4R_HDR_SYMBOLSLEN] = n + 1;
 			if (cl_verbose) printf("c4rlink: needs %s\n", path);
 		}
@@ -570,11 +645,13 @@ static int resolve_patches (int *master) {
 			sym = (int *)master[C4R_SYMBOLS] + (t * C4R_SYMB__Sz);
 			if (!(sym[C4R_SYMB_ATTRS] & ATTR_EXTERN)) {
 				if (sym[C4R_SYMB_CLASS] == C4R_SCLASS_Fun) {
+					// (code is in words; what a compiler added is in bytes)
 					patch[C4R_PAT_TYPE]  = C4R_PTYPE_CODE;
-					patch[C4R_PAT_VALUE] = sym[C4R_SYMB_VALUE];
+					patch[C4R_PAT_VALUE] = sym[C4R_SYMB_VALUE] + patch[C4R_PAT_VALUE] / (int)sizeof(int);
 				} else if (sym[C4R_SYMB_CLASS] == C4R_SCLASS_Glo) {
+					// e.g. &vid.colormap: a member's offset, from c4opt
 					patch[C4R_PAT_TYPE]  = C4R_PTYPE_DATA;
-					patch[C4R_PAT_VALUE] = sym[C4R_SYMB_VALUE];
+					patch[C4R_PAT_VALUE] = sym[C4R_SYMB_VALUE] + patch[C4R_PAT_VALUE];
 				} else {
 					printf("c4rlink: symbol '%.*s' is not a function or global, cannot resolve\n",
 					       sym[C4R_SYMB_NAMELEN], (char *)sym[C4R_SYMB_NAME]);
@@ -1003,6 +1080,199 @@ static int gc_srcmap (int *master, int *rs, int *newpos, int nreg) {
 	return 0;
 }
 
+// ---- Folding c4lc's helpers (unless --no-fold) ----
+//
+// c4lc splices the routines it calls where the machine has no
+// instruction -- <udiv>, <umod>, the soft-float __c4d_ and __c4f_ ones,
+// the long long __c4ll_ ones, and until they were opcodes <ld16s>,
+// <ld16u>, <st16> and <lsr> -- into every object that uses them, as code
+// with no symbol. An image linked from twenty objects carried twenty
+// copies of <ld16u>. Those are the
+// regions (gc's, above) no function symbol lies in: code nothing can
+// name, so nothing can tell one copy from another. Two of them are the
+// same when their code words are and their code-resident patches are:
+// the same type at the same place, a CODE patch into the region itself
+// at the same place in it, and any other the same value. Every code
+// address into a region the same as one before it -- CODE and DCODE
+// patches, the entry point, constructors and destructors -- moves to
+// that one, and gc drops it, as nothing reaches it any more. A copy
+// that calls its own object's copy of another helper is the same as
+// the next object's only once those callees are folded, so it goes
+// round until nothing more folds (helpers that call each other in a
+// cycle are left as they are). Not the source map: an image is the
+// same code whether its objects were compiled with -g or not.
+int cl_fold;
+
+// fd_reg: per candidate, its region; fd_to: the candidate it folded
+// into (itself while it has not); fd_cand: per region, its candidate or -1
+int *fd_reg, *fd_to, *fd_cand;
+
+// A code-resident patch: the word it fills is in code
+static int fd_incode (int t) {
+	return t != C4R_PTYPE_DCODE && t != C4R_PTYPE_DDATA && t != C4R_PTYPE_DSYM;
+}
+
+// Are candidates A and B the same code? PN/PL list each one's patches
+static int fd_same (int *master, int *rs, int *pn, int *pl, int a, int b) {
+	int *code, *patch, *p, *q;
+	int  i, n, ra, rb, len, va, vb, sa, sb;
+	code = (int *)master[C4R_CODE];
+	patch = (int *)master[C4R_PATCHES];
+	ra = rs[fd_reg[a]]; rb = rs[fd_reg[b]];
+	len = rs[fd_reg[a] + 1] - ra;
+	if (rs[fd_reg[b] + 1] - rb != len) return 0;
+	n = pn[a + 1] - pn[a];
+	if (pn[b + 1] - pn[b] != n) return 0;
+	i = 0;
+	while (i < len) { if (code[ra + i] != code[rb + i]) return 0; ++i; }
+	i = 0;
+	while (i < n) {
+		p = patch + pl[pn[a] + i] * C4R_PAT__Sz;
+		q = patch + pl[pn[b] + i] * C4R_PAT__Sz;
+		if (p[C4R_PAT_TYPE] != q[C4R_PAT_TYPE] || p[C4R_PAT_ADDRESS] - ra != q[C4R_PAT_ADDRESS] - rb) return 0;
+		va = p[C4R_PAT_VALUE]; vb = q[C4R_PAT_VALUE];
+		sa = p[C4R_PAT_TYPE] == C4R_PTYPE_CODE && va >= ra && va < ra + len;
+		sb = q[C4R_PAT_TYPE] == C4R_PTYPE_CODE && vb >= rb && vb < rb + len;
+		if (sa != sb) return 0;
+		if (sa ? (va - ra != vb - rb) : (va != vb)) return 0;
+		++i;
+	}
+	return 1;
+}
+
+// Where code address A goes: into the region its own folded into
+static int fd_move (int *rs, int nreg, int a, int codelen) {
+	int r, c;
+	if (a < 0 || a >= codelen) return a;
+	r = gc_region(rs, nreg, a);
+	c = fd_cand[r];
+	if (c < 0 || fd_to[c] == c) return a;
+	return rs[fd_reg[fd_to[c]]] + a - rs[r];
+}
+
+// Fold the helpers' copies. Returns 0, or 1 when out of memory.
+static int gc_fold (int *master, int *rs, int nreg) {
+	int *mhdr, *code, *sym, *patch, *q, *pn, *pl, *hash, *bnext, *bhead, *cd;
+	int  codelen, n, np, nc, i, c, r, a, h, b, folded, rounds, copies, words;
+
+	mhdr = (int *)master[C4R_HEADER];
+	code = (int *)master[C4R_CODE];
+	codelen = mhdr[C4R_HDR_CODELEN];
+	patch = (int *)master[C4R_PATCHES];
+	np = mhdr[C4R_HDR_PATCHLEN];
+	if (!(fd_cand = malloc(sizeof(int) * (nreg + 1)))) return 1;
+	// the candidates: the regions no defined function lies in
+	memset(fd_cand, 0, sizeof(int) * (nreg + 1));
+	sym = (int *)master[C4R_SYMBOLS];
+	n = mhdr[C4R_HDR_SYMBOLSLEN];
+	i = 0;
+	while (i < n) {
+		if (sym[C4R_SYMB_CLASS] == C4R_SCLASS_Fun && !(sym[C4R_SYMB_ATTRS] & ATTR_EXTERN) &&
+		    sym[C4R_SYMB_VALUE] >= 0 && sym[C4R_SYMB_VALUE] < codelen)
+			fd_cand[gc_region(rs, nreg, sym[C4R_SYMB_VALUE])] = -1;
+		sym = sym + C4R_SYMB__Sz; ++i;
+	}
+	nc = 0;
+	r = 0;
+	while (r < nreg) { if (fd_cand[r] == 0) fd_cand[r] = nc++; else fd_cand[r] = -1; ++r; }
+	fd_reg = malloc(sizeof(int) * (nc + 1));
+	fd_to = malloc(sizeof(int) * (nc + 1));
+	hash = malloc(sizeof(int) * (nc + 1));
+	bnext = malloc(sizeof(int) * (nc + 1));
+	bhead = malloc(sizeof(int) * (nc + 1));
+	pn = malloc(sizeof(int) * (nc + 2));
+	if (!fd_reg || !fd_to || !hash || !bnext || !bhead || !pn) return 1;
+	r = 0;
+	while (r < nreg) { if (fd_cand[r] >= 0) fd_reg[fd_cand[r]] = r; ++r; }
+
+	// Each candidate's patches, in table order: what the blanked words held.
+	// The words are blanked here, as blank_patch_targets does after.
+	memset(pn, 0, sizeof(int) * (nc + 2));
+	i = 0; q = patch;
+	while (i < np) {
+		if (fd_incode(q[C4R_PAT_TYPE])) {
+			code[q[C4R_PAT_ADDRESS]] = 0;
+			c = fd_cand[gc_region(rs, nreg, q[C4R_PAT_ADDRESS])];
+			if (c >= 0) pn[c + 1] = pn[c + 1] + 1;
+		}
+		q = q + C4R_PAT__Sz; ++i;
+	}
+	c = 0;
+	while (c < nc) { pn[c + 1] = pn[c + 1] + pn[c]; ++c; }
+	if (!(pl = malloc(sizeof(int) * (pn[nc] + 1)))) return 1;
+	memcpy(bhead, pn, sizeof(int) * nc);           // the fill cursor for now
+	i = 0; q = patch;
+	while (i < np) {
+		if (fd_incode(q[C4R_PAT_TYPE])) {
+			c = fd_cand[gc_region(rs, nreg, q[C4R_PAT_ADDRESS])];
+			if (c >= 0) { pl[bhead[c]] = i; bhead[c] = bhead[c] + 1; }
+		}
+		q = q + C4R_PAT__Sz; ++i;
+	}
+
+	// A hash of each one's length and code words; same-hash chains, each
+	// candidate's leading to the ones before it
+	c = 0;
+	while (c < nc) { bhead[c] = -1; ++c; }
+	c = 0;
+	while (c < nc) {
+		a = rs[fd_reg[c]];
+		h = (rs[fd_reg[c] + 1] - a) % 65521;
+		while (a < rs[fd_reg[c] + 1]) { h = (h * 31 + (code[a] & 65535)) % 65521; ++a; }
+		hash[c] = h;
+		fd_to[c] = c;
+		b = h % nc;
+		bnext[c] = bhead[b];
+		bhead[b] = c;
+		++c;
+	}
+
+	// Fold, round after round. A candidate the same as two before it would
+	// make those two the same, so the first one found is the only one.
+	copies = 0; words = 0; rounds = 0;
+	folded = 1;
+	while (folded) {
+		folded = 0;
+		c = 0;
+		while (c < nc) {
+			if (fd_to[c] == c) {
+				b = bnext[c];
+				while (b >= 0) {
+					if (fd_to[b] == b && hash[b] == hash[c] && fd_same(master, rs, pn, pl, b, c)) {
+						fd_to[c] = b;
+						++folded;
+						words = words + rs[fd_reg[c] + 1] - rs[fd_reg[c]];
+						b = -1;
+					} else b = bnext[b];
+				}
+			}
+			++c;
+		}
+		if (folded) {
+			i = 0; q = patch;
+			while (i < np) {
+				if (q[C4R_PAT_TYPE] == C4R_PTYPE_CODE || q[C4R_PAT_TYPE] == C4R_PTYPE_DCODE)
+					q[C4R_PAT_VALUE] = fd_move(rs, nreg, q[C4R_PAT_VALUE], codelen);
+				q = q + C4R_PAT__Sz; ++i;
+			}
+			mhdr[C4R_HDR_ENTRY] = fd_move(rs, nreg, mhdr[C4R_HDR_ENTRY], codelen);
+			cd = (int *)master[C4R_CONSTRUCTORS];
+			i = 0;
+			while (i < mhdr[C4R_HDR_CONSTRUCTLEN]) { cd[C4R_CNDE_Value] = fd_move(rs, nreg, cd[C4R_CNDE_Value], codelen); cd = cd + C4R_CNDE__Sz; ++i; }
+			cd = (int *)master[C4R_DESTRUCTORS];
+			i = 0;
+			while (i < mhdr[C4R_HDR_DESTRUCTLEN]) { cd[C4R_CNDE_Value] = fd_move(rs, nreg, cd[C4R_CNDE_Value], codelen); cd = cd + C4R_CNDE__Sz; ++i; }
+			copies = copies + folded;
+			++rounds;
+		}
+	}
+	if (cl_verbose)
+		printf("c4rlink: fold: %d copies of %d words folded, of %d regions with no symbol, in %d rounds\n",
+		       copies, words, nc, rounds);
+	free(fd_reg); free(fd_to); free(fd_cand); free(hash); free(bnext); free(bhead); free(pn); free(pl);
+	return 0;
+}
+
 // Drop the regions nothing reaches. Returns 0, or 1 when out of memory.
 static int gc_functions (int *master, int *c4rs, int count) {
 	int *mhdr, *code, *sym, *patch, *q, *rs, *newpos, *adjn, *adj, *idmap, *cd;
@@ -1075,6 +1345,7 @@ static int gc_functions (int *master, int *c4rs, int count) {
 	while (i < codelen) { if (mark[i]) rs[j++] = i; ++i; }
 	rs[nreg] = codelen;
 	free(mark);
+	if (cl_fold && gc_fold(master, rs, nreg)) return 1;
 
 	// What uses what: per region, the regions its CODE patches name
 	patch = (int *)master[C4R_PATCHES];
@@ -1289,6 +1560,9 @@ static int c4r_write (int *c4r, char *file) {
 	tmp = (5 + i) & ~i;
 	writechecked(fd, &hdr[C4R_HDR_MEMSZ], sizeof(int));
 	tmp = tmp - sizeof(int);
+	// at 32 bits, how much of MEMSZ is BSS (load-c4r.c), so that a
+	// library made with -r is laid out as its modules were
+	if (tmp == 4) { writechecked(fd, &hdr[C4R_HDR_BSS], sizeof(int)); tmp = 0; }
 	while (tmp-- > 0) writechecked(fd, "p", 1);
 	tmp = hdr[C4R_HDR_ENTRY];        writechecked(fd, &tmp, sizeof(int));
 	tmp = hdr[C4R_HDR_CODELEN];      writechecked(fd, &tmp, sizeof(int));
@@ -1607,6 +1881,177 @@ static int lib_select (int *c4rs, int count, int nsym) {
 	return left;
 }
 
+// ---- One object for a global several modules define (common_plan) ----
+//
+// C lets a unit write `int x;` at file scope with no initializer: a
+// tentative definition. Headers do it (Duke Nukem 3D's control.h defines
+// KeyMapping), and gcc -fcommon and ld make every unit's x one object.
+// In an object, c4lc and c4fc mark such a global's symbol ATTR_COMMON
+// (g:tattrs, COMMON?). An object from before 2026-11-13 has no such mark;
+// at 32 bits its tentative globals are still known, as the non-static
+// ones in its BSS (C4R_HDR_BSS, CL_BSS_BASE): c4lc and c4fc put a global
+// there only when it has no initializer -- even `= 0` puts it in the
+// initialized data, and so does an initializer __c4lc_init computes at
+// start-up (`int *p = &t[4];`). Per name defined more than once:
+//   - two with initializers: an error, the link fails;
+//   - one with an initializer: it is kept;
+//   - none: the biggest is kept, the first of equals;
+// and each other definition gives way: its bytes in its module become an
+// alias of the one kept (CL_ALIAS), so the module's references -- code
+// patches, data words, its symbol -- name the one kept (ref_at). Its own
+// storage stays where it is, unused. A function among them leaves the
+// name as it always was: the first is kept, with a warning (import_symbols).
+//
+// How big a global is, the object does not say: it is the bytes to the
+// next global of the module, static or not, or to the end of its region
+// (glo_extent). Every byte of c4lc's and c4fc's BSS is some global's, and
+// each of them leaves a word after a non-static global in the BSS, so the
+// address just past such a global -- `&a[N]`, which a compiler may fold
+// into one constant -- falls inside the extent, never on the next global,
+// and moves with it. An initialized global's extent may take in strings
+// after it: it is an upper bound, and a tentative definition bigger than
+// that is warned about (the one kept is too small for that module's use).
+// c4cc's objects (asm-c4r's) mark nothing and say nothing of a BSS:
+// nothing of them is tentative.
+
+enum { DF_CL, DF_SYM, DF_KIND, DF_SIZE, DF_NEXT, DF__Sz };
+enum { DK_TENT, DK_INIT, DK_FUN };
+int cl_warncommon;
+
+// The bytes from module CL's global at OFF to the module's next global,
+// static or not, or to the end of OFF's region (the data, or the BSS)
+static int glo_extent (int *cl, int off) {
+	int *c4r, *hdr, *sym, i, n, end, v;
+	c4r = (int *)cl[CL_STRUCT];
+	hdr = (int *)cl[CL_HEADER];
+	end = off < cl[CL_BSS_BASE] ? cl[CL_BSS_BASE] : hdr[C4R_HDR_MEMSZ];
+	n = hdr[C4R_HDR_SYMBOLSLEN];
+	sym = (int *)c4r[C4R_SYMBOLS];
+	i = 0;
+	while (i < n) {
+		v = sym[C4R_SYMB_VALUE];
+		if (sym[C4R_SYMB_CLASS] == C4R_SCLASS_Glo && !(sym[C4R_SYMB_ATTRS] & ATTR_EXTERN) &&
+		    v > off && v < end)
+			end = v;
+		sym = sym + C4R_SYMB__Sz; ++i;
+	}
+	return end - off;
+}
+
+// Module CL's global at OFF, EXTENT bytes, is the one at master offset TO
+static int add_alias (int *cl, int off, int extent, int to) {
+	int *a;
+	if (!cl[CL_ALIAS]) {
+		if (!(cl[CL_ALIAS] = (int)malloc(sizeof(int) * 3 * ((int *)cl[CL_HEADER])[C4R_HDR_SYMBOLSLEN])))
+			return 1;
+		cl[CL_NALIAS] = 0;
+	}
+	a = (int *)cl[CL_ALIAS] + 3 * cl[CL_NALIAS];
+	a[0] = off; a[1] = extent; a[2] = to;
+	cl[CL_NALIAS] = cl[CL_NALIAS] + 1;
+	return 0;
+}
+
+// Decide, for every global more than one of the COUNT modules defines,
+// which is kept, and alias the others to it. Run once every module's
+// place in the merged image is known. NSYM bounds the names. Returns 0,
+// 1 when two definitions both have initializers (each pair is printed),
+// or -1 when out of memory.
+static int common_plan (int *c4rs, int count, int nsym) {
+	int *defs, *cl, *c4r, *hdr, *sym, *e, *d, *w, *wcl, *wsym;
+	int  k, i, n, nd, x, ninit, nfun, ndef, failed;
+	cl_nemax = nsym; cl_nen = 0;
+	if (!(cl_nh = malloc(sizeof(int) * NH_BUCKETS))) return -1;
+	memset(cl_nh, -1, sizeof(int) * NH_BUCKETS);
+	if (!(cl_ne = malloc(sizeof(int) * NE__Sz * (nsym + 1)))) { free(cl_nh); return -1; }
+	if (!(defs = malloc(sizeof(int) * DF__Sz * (nsym + 1)))) { free(cl_nh); free(cl_ne); return -1; }
+	// every definition a module offers the others, listed by name (an
+	// entry's NE_FLAGS is its last definition's index + 1; DF_NEXT
+	// goes back to the one before, -1 at the first)
+	nd = 0;
+	k = 0;
+	while (k < count) {
+		cl = c4rs + k * CL__Sz;
+		c4r = (int *)cl[CL_STRUCT];
+		hdr = (int *)cl[CL_HEADER];
+		n = hdr[C4R_HDR_SYMBOLSLEN];
+		sym = (int *)c4r[C4R_SYMBOLS];
+		i = 0;
+		while (i < n) {
+			if (lib_def(sym)) {
+				if (!(e = nh_find((char *)sym[C4R_SYMB_NAME], sym[C4R_SYMB_NAMELEN], 1))) {
+					free(cl_nh); free(cl_ne); free(defs); return -1;
+				}
+				d = defs + nd * DF__Sz;
+				d[DF_CL] = (int)cl; d[DF_SYM] = (int)sym;
+				if (sym[C4R_SYMB_CLASS] == C4R_SCLASS_Fun) { d[DF_KIND] = DK_FUN; d[DF_SIZE] = 0; }
+				else {
+					d[DF_KIND] = (sym[C4R_SYMB_ATTRS] & ATTR_COMMON) ||
+					             sym[C4R_SYMB_VALUE] >= cl[CL_BSS_BASE] ? DK_TENT : DK_INIT;
+					d[DF_SIZE] = glo_extent(cl, sym[C4R_SYMB_VALUE]);
+				}
+				d[DF_NEXT] = e[NE_FLAGS] - 1;
+				e[NE_FLAGS] = nd + 1;
+				++nd;
+			}
+			sym = sym + C4R_SYMB__Sz; ++i;
+		}
+		++k;
+	}
+	failed = 0;
+	k = 0;
+	while (k < cl_nen) {
+		e = cl_ne + k * NE__Sz;
+		++k;
+		ninit = 0; nfun = 0; ndef = 0; w = 0;
+		x = e[NE_FLAGS] - 1;
+		while (x >= 0) {
+			d = defs + x * DF__Sz;
+			++ndef;
+			if (d[DF_KIND] == DK_FUN) ++nfun;
+			else if (d[DF_KIND] == DK_INIT) {
+				++ninit;
+				// (the list runs backwards: the earlier is met later)
+				if (w && w[DF_KIND] == DK_INIT) {
+					wsym = (int *)w[DF_SYM];
+					printf("c4rlink: multiple definition of '%.*s': in '%s' and in '%s'\n",
+					       wsym[C4R_SYMB_NAMELEN], (char *)wsym[C4R_SYMB_NAME],
+					       (char *)((int *)d[DF_CL])[CL_FILE], (char *)((int *)w[DF_CL])[CL_FILE]);
+				}
+				w = d;
+			} else if (!ninit && (!w || d[DF_SIZE] >= w[DF_SIZE]))
+				w = d;               // the biggest; >= : the first of equals
+			x = d[DF_NEXT];
+		}
+		if (ndef < 2 || nfun) continue;
+		if (ninit > 1) { failed = 1; continue; }
+		wcl = (int *)w[DF_CL];
+		wsym = (int *)w[DF_SYM];
+		x = e[NE_FLAGS] - 1;
+		while (x >= 0) {
+			d = defs + x * DF__Sz;
+			x = d[DF_NEXT];
+			if (d == w) continue;
+			cl = (int *)d[DF_CL];
+			sym = (int *)d[DF_SYM];
+			// (its extent less the word after it, against an upper bound)
+			if (w[DF_KIND] == DK_INIT && d[DF_SIZE] - (int)sizeof(int) > w[DF_SIZE])
+				printf("c4rlink: warning: '%.*s' is %d bytes in '%s', but %d where it is initialized, in '%s'\n",
+				       sym[C4R_SYMB_NAMELEN], (char *)sym[C4R_SYMB_NAME], d[DF_SIZE] - (int)sizeof(int),
+				       (char *)cl[CL_FILE], w[DF_SIZE], (char *)wcl[CL_FILE]);
+			if (cl_warncommon || cl_verbose)
+				printf("c4rlink: common '%.*s': '%s' uses the one in '%s'\n",
+				       sym[C4R_SYMB_NAMELEN], (char *)sym[C4R_SYMB_NAME],
+				       (char *)cl[CL_FILE], (char *)wcl[CL_FILE]);
+			if (add_alias(cl, sym[C4R_SYMB_VALUE], d[DF_SIZE], data_at(wcl, wsym[C4R_SYMB_VALUE]))) {
+				free(cl_nh); free(cl_ne); free(defs); return -1;
+			}
+		}
+	}
+	free(cl_nh); free(cl_ne); free(defs);
+	return failed;
+}
+
 int main (int argc, char **argv) {
 	int   i, endargs, endopt, failed, unresolved, inlib;
 	int  *master, *loaded;
@@ -1614,6 +2059,7 @@ int main (int argc, char **argv) {
 	char *spec, *arg, *outfile;
 	int  *hdr;
 	int   count_code, count_data, count_patch, count_con, count_des, count_sym;
+	int   count_bss, bss_at, len;
 	int   dstored, k;
 	char *dbytes;
 
@@ -1628,6 +2074,8 @@ int main (int argc, char **argv) {
 	c4r_pos = 0;
 	cl_debug = cl_verbose = cl_libmode = cl_strip = cl_nomap = 0;
 	cl_gc = 1;
+	cl_fold = 1;
+	cl_warncommon = 0;
 	// The strip tool is this program under another name (argv[0] ends in
 	// "c4rstrip", with or without .c4r): one input, strip on.
 	cl_striptool = 0;
@@ -1635,6 +2083,7 @@ int main (int argc, char **argv) {
 	while (arg > spec && *(arg - 1) != '/') --arg;
 	if (!my_strncmp(arg, "c4rstrip", 8)) { cl_striptool = 1; cl_strip = 1; cl_gc = 0; }
 	count_code = count_data = count_patch = count_con = count_des = count_sym = 0;
+	count_bss = 0;
 	cl_nlibs = 0;
 	if (!(cl_libs = malloc(CL_LIBMAX * CLL__Sz * sizeof(int)))) return 1;
 	endargs = 0;
@@ -1674,6 +2123,10 @@ int main (int argc, char **argv) {
 			cl_gc = 1;                          // the default; still accepted
 		} else if (endargs == 0 && !my_strcmp(*argv, "--no-gc")) {
 			cl_gc = 0;
+		} else if (endargs == 0 && !my_strcmp(*argv, "--no-fold")) {
+			cl_fold = 0;
+		} else if (endargs == 0 && !my_strcmp(*argv, "--warn-common")) {
+			cl_warncommon = 1;
 		} else if (endargs == 0 && **argv == '-') {
 			arg = *argv + 1; // skip dash
 			endopt = 0;
@@ -1769,26 +2222,53 @@ int main (int argc, char **argv) {
 		return 4;
 	}
 
-	// Each module's position in the merged image, and the totals
+	// Each module's position in the merged image, and the totals. The
+	// data cursor advances by each module's data before its BSS
+	// (CL_BSS_BASE: all of its MEMSZ for a module that does not say), and
+	// the BSS goes after everything (data_at). Only DATALEN bytes of a
+	// module are copied in (below); the rest stays zero because the
+	// master data buffer is zeroed.
 	count_sym = 0;
 	c4rs_it = c4rs; i = 0;
 	while (i < c4r_pos) {
 		c4rs_it[CL_OFFSET_CODE] = count_code;
 		c4rs_it[CL_OFFSET_DATA] = count_data;
 		hdr = (int *)c4rs_it[CL_HEADER];
-		// The data cursor advances by each module's MEMSZ (its data
-		// image PLUS its BSS), so the next module -- and every
-		// relocated data reference in this one -- sits past this
-		// module's BSS, and that BSS becomes a zero gap in the merged
-		// image. Only DATALEN bytes are copied in (below); the gap
-		// stays zero because the master data buffer is zeroed.
+		c4rs_it[CL_BSS_BASE] = hdr[C4R_HDR_MEMSZ] - hdr[C4R_HDR_BSS];
 		count_code  = count_code  + hdr[C4R_HDR_CODELEN];
-		count_data  = count_data  + hdr[C4R_HDR_MEMSZ];
+		count_data  = count_data  + c4rs_it[CL_BSS_BASE];
+		count_bss   = count_bss   + hdr[C4R_HDR_BSS];
 		count_patch = count_patch + hdr[C4R_HDR_PATCHLEN];
 		count_con   = count_con   + hdr[C4R_HDR_CONSTRUCTLEN];
 		count_des   = count_des   + hdr[C4R_HDR_DESTRUCTLEN];
 		count_sym   = count_sym   + hdr[C4R_HDR_SYMBOLSLEN];
 		c4rs_it = c4rs_it + CL__Sz; ++i;
+	}
+	// room for the libraries' names (add_needed), then a word boundary
+	cl_needed_at = count_data;
+	k = 0;
+	while (k < cl_nlibs) {
+		arg = (char *)cl_libs[k * CLL__Sz + CLL_PATH];
+		len = 0; while (arg[len]) ++len;
+		count_data = count_data + len + 1;
+		++k;
+	}
+	count_data = (count_data + sizeof(int) - 1) & ~(sizeof(int) - 1);
+	// then every module's BSS
+	bss_at = count_data;
+	c4rs_it = c4rs; i = 0;
+	while (i < c4r_pos) {
+		c4rs_it[CL_OFFSET_BSS] = bss_at;
+		bss_at = bss_at + ((int *)c4rs_it[CL_HEADER])[C4R_HDR_BSS];
+		c4rs_it = c4rs_it + CL__Sz; ++i;
+	}
+	count_data = count_data + count_bss;
+
+	// A global several modules define is one object (common_plan)
+	if ((k = common_plan(c4rs, c4r_pos, count_sym))) {
+		if (k < 0) printf("%s: out of memory merging the globals\n", spec);
+		printf("%s: link failure\n", spec);
+		return 1;
 	}
 
 	if (cl_verbose) {
@@ -1820,6 +2300,7 @@ int main (int argc, char **argv) {
 	// stored/trimmed length) is computed after the merge, below.
 	hdr[C4R_HDR_MEMSZ]   = count_data;
 	hdr[C4R_HDR_DATALEN] = count_data;
+	hdr[C4R_HDR_BSS]     = count_bss;
 	if (count_patch && !(master[C4R_PATCHES] = (int)malloc((i = sizeof(int) * C4R_PAT__Sz * count_patch)))) {
 		printf("%s: failed to allocate %d bytes for master patches\n", spec, i);
 		return 6;
@@ -1896,6 +2377,9 @@ int main (int argc, char **argv) {
 			c4r_free((int *)c4rs_it[CL_STRUCT]);
 		if (c4rs_it[CL_REMAP])
 			free((int *)c4rs_it[CL_REMAP]);
+		if (c4rs_it[CL_ALIAS])
+			free((int *)c4rs_it[CL_ALIAS]);
+		c4rs_it[CL_ALIAS] = 0;
 		c4rs_it[CL_ID] = c4rs_it[CL_STRUCT] = c4rs_it[CL_HEADER] = c4rs_it[CL_REMAP] = 0;
 		c4rs_it = c4rs_it + CL__Sz;
 	}

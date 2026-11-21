@@ -11,12 +11,19 @@ In a Terminal:
   c4cc -o /tmp/hello.c4r /usr/src/c4ix/examples/hello.c
   /tmp/hello.c4r one two
 
-  c4cc -o /tmp/bounce.c4r /usr/include/window.h /usr/src/c4ix/examples/bounce.c
+  c4cc -o /tmp/bounce.c4r /usr/include/window.h /usr/include/window.c /usr/src/c4ix/examples/bounce.c
   /tmp/bounce.c4r
 
 bounce makes its Terminal into a window of its own: see
 /usr/include/window.h for the calls. q or Esc ends it, and so does
 Ctrl-C.
+
+  c4cc -o /tmp/mouselock.c4r /usr/include/window.h /usr/include/window.c /usr/src/c4ix/examples/mouselock.c
+  /tmp/mouselock.c4r
+
+mouselock asks for the mouse locked to its window (win_lock), as a game
+in a window steered by the mouse does: a click captures it, Esc lets it
+go, and its motion and buttons are counted. q ends it.
 
 c4th is a Forth that compiles images to its standard output, so the
 shell's redirection is where they are written:
@@ -42,7 +49,7 @@ so the userland's programs build the same way:
   cc -O -conforming -I /usr/src/c4tui -o /tmp/demo.c4r /usr/src/c4tui/demo.c
   /tmp/demo.c4r
 
-The repos own programs build as they are: cc also searches the repos
+The repo's own programs build as they are: cc also searches the repo's
 headers (/usr/include: u0.h, and C versions of stdio.h and the
 rest), so
 

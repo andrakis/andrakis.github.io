@@ -22,7 +22,16 @@ void snd_wait (int n) { *(int *)SND_WAIT = n; }
 
 int snd_ahead () { return *(int *)SND_AHEAD; }
 
+// One write where the card can take one (SND_HAS_START): the latches
+// below are the card's, and another program's snd_play can set them
+// between these writes (snd.h)
 void snd_play (int ch, char *data, int len, int rate, int vol) {
+	int b[5];
+	if (*(int *)SND_CAPS & SND_HAS_START) {
+		b[0] = ch; b[1] = (int)data; b[2] = len; b[3] = rate; b[4] = vol;
+		*(int *)SND_PCM_START = (int)b;
+		return;
+	}
 	*(int *)SND_PCM_ADDR = (int)data;
 	*(int *)SND_PCM_LEN = len;
 	*(int *)SND_PCM_RATE = rate;
@@ -33,6 +42,10 @@ void snd_play (int ch, char *data, int len, int rate, int vol) {
 void snd_stop (int ch) { *(int *)SND_PCM_STOP = ch; }
 
 void snd_volume (int ch, int vol) {
+	if (*(int *)SND_CAPS & SND_HAS_START) {
+		*(int *)SND_PCM_CHVOL = (ch & 255) | ((vol & 0xffff) << 8);
+		return;
+	}
 	*(int *)SND_PCM_VOL = vol;
 	*(int *)SND_PCM_SETVOL = ch;
 }
@@ -40,3 +53,18 @@ void snd_volume (int ch, int vol) {
 int snd_busy () { return *(int *)SND_PCM_BUSY; }
 
 void snd_speaker (int divisor) { *(int *)SND_SPK = divisor; }
+
+void snd_master (int vol) { *(int *)SND_MASTER = vol; }
+
+int snd_master_get () { return *(int *)SND_MASTER; }
+
+void snd_midi (int status, int data1, int data2) {
+	*(int *)SND_MIDI = (status & 255) | ((data1 & 127) << 8) | ((data2 & 127) << 16);
+}
+
+void snd_midi_byte (int b) { *(int *)SND_MIDI_DATA = b & 255; }
+
+void snd_midi_bytes (char *p, int n) {
+	int i;
+	for (i = 0; i < n; i++) *(int *)SND_MIDI_DATA = p[i] & 255;
+}

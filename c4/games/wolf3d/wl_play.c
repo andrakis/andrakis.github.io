@@ -34,6 +34,7 @@ objtype objlist[MAXACTORS];
 objtype *player,*lastobj,*objfreelist;
 
 boolean singlestep,godmode,noclip,ammocheat,mapreveal;
+static int amaptab;             // c4sdl: 1 while Tab is down alone with the debug keys on, 2 once it was a debug key's
 int     extravbls;
 
 tiletype tilemap[MAPSIZE][MAPSIZE]; // wall values only
@@ -710,18 +711,44 @@ void CheckKeys (void)
 #ifdef DEBUGKEYS
     if (Keyboard[sc_Tab] && DebugOk)
     {
+        if (!amaptab)
+            amaptab = 1;
         fontnumber = 0;
         SETFONTCOLOR (0, 15);
-        if (DebugKeys () && viewsize < 20)
+        if (DebugKeys ())
         {
-            DrawPlayBorder ();       // dont let the blue borders flash
-            IN_CenterMouse ();
+            amaptab = 2;             // c4sdl: this Tab was a debug key's
+            if (viewsize < 20)
+            {
+                DrawPlayBorder ();       // dont let the blue borders flash
+                IN_CenterMouse ();
 
-            lasttimecount = GetTimeCount();
+                lasttimecount = GetTimeCount();
+            }
         }
         return;
     }
 #endif
+
+//
+// c4sdl: Tab, the automap (wl_draw.c). With the debug keys on, Tab and
+// a key is one of those, so there the map is a Tab let go alone.
+//
+    if (amaptab)
+    {
+        if (amaptab == 1)
+        {
+            amaptab = 0;
+            AutoMap ();
+            return;
+        }
+        amaptab = 0;
+    }
+    if (Keyboard[sc_Tab] && !DebugOk)
+    {
+        AutoMap ();
+        return;
+    }
 
 #ifdef VIEWMAP
     if (Keyboard[sc_O])

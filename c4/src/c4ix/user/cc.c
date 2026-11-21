@@ -2,7 +2,7 @@
 // compiler, compiled to an image -- where `c4sp c4lc.lisp` runs the same
 // compiler interpreted, many times slower (docs/c4sc-design.md).
 //
-//   cc [-O] [-c] [-conforming] [-fno-builtin] [-fpic] [-mfuse] [-v]
+//   cc [-O] [-c] [-g] [-conforming] [-fno-builtin] [-fpic] [-mfuse] [-v]
 //      [-stack bytes] [-I dir] [-D name] [-l lib] [-o out] file.c...
 //
 // c4lc's own preprocessor is always on (-P). After any -I given it
@@ -24,6 +24,8 @@
 //   -l /lib/libc.c4s a shared library, loaded when the program starts
 //                    (its callers are built -fno-builtin)
 //
+// -g gives each image a source map (c4sc's -g): which file and line each
+// run of code came from, which the IDE's Code pane reads.
 // -v prints each command before running it. The tools run on a task's
 // default stack, 256 KB, and -stack gives more. c4sc needs a few KB of
 // it: C4KE's kernel, src/c4ke/c4ke.c, peaks at 3.4 KB (2026-10-25). It
@@ -34,13 +36,13 @@
 //
 // When the kernel stops a tool -- a stack overrun, a bad opcode -- it
 // says why on the console, and a Terminal is not the console: cc
-// finds that line in /log/kernel and says it too, rather than only that
+// finds that line in /var/log/kernel and says it too, rather than only that
 // the source did not compile.
 #include "c4ix_user.h"
 
 enum { MAXA = 64 };
 
-static char *KLOG = "/log/kernel";
+static char *KLOG = "/var/log/kernel";
 
 static char *flags[MAXA];        // passed to c4sc as they are
 static int   nflags;
@@ -87,7 +89,7 @@ static int prefix(char *s, char *p) {
     return !*p;
 }
 
-// What the kernel said about task pid in /log/kernel past its first
+// What the kernel said about task pid in /var/log/kernel past its first
 // `from` bytes ("c4ix: task 8 (c4sc) overran its 1048576-byte stack;
 // killing it"), said again here: 0 if it said nothing, 2 if it was a
 // stack overrun, 1 for anything else. Only what was logged after the
@@ -134,9 +136,11 @@ static int run(char *prog, int argc, char **argv) {
         uprintf("\n");
     }
     pid = spawn(cat3("/bin/", prog, ""), argc, argv);
-    if (pid < 0) pid = spawn(cat3(prog, ".c4r", ""), argc, argv);
-    if (pid < 0) pid = spawn(cat3("c4ix-", prog, ".c4r"), argc, argv);
-    if (pid < 0) { ufprintf(STDERR, "cc: cannot run %s\n", prog); return 1; }
+    if (pid == SPAWN_NOENT) pid = spawn(cat3(prog, ".c4r", ""), argc, argv);
+    if (pid == SPAWN_NOENT) pid = spawn(cat3("c4ix-", prog, ".c4r"), argc, argv);
+    if (pid == SPAWN_NOMEM) { ufprintf(STDERR, "cc: out of memory starting %s\n", prog); return 1; }
+    if (pid == SPAWN_NOENT) { ufprintf(STDERR, "cc: cannot find %s\n", prog); return 1; }
+    if (pid < 0) { ufprintf(STDERR, "cc: cannot load %s\n", prog); return 1; }
     code = uwait(pid);
     // a tool the kernel stopped: say what it said
     if (code < 0 && why(pid, from) == 2)
@@ -171,7 +175,7 @@ static int compile(char *src, char *out, int obj) {
 }
 
 static int usage() {
-    ufprintf(STDERR, "usage: cc [-O] [-c] [-conforming] [-fno-builtin] [-fpic] [-mfuse] [-v]\n");
+    ufprintf(STDERR, "usage: cc [-O] [-c] [-g] [-conforming] [-fno-builtin] [-fpic] [-mfuse] [-v]\n");
     ufprintf(STDERR, "          [-stack bytes] [-I dir] [-D name] [-l lib] [-o out] file.c...\n");
     return 2;
 }

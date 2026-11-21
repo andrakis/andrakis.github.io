@@ -16,6 +16,7 @@ struct grin_ini {
     int scheme;                       // the kit's colour scheme
     int pattern;                      // the desktop's (pattern_name), 0 none
     int saver, wait;                  // the screen saver (savers.c, 0 none), after how many minutes
+    int chime;                        // the startup chime (1, the default; 0 none)
 };
 extern struct grin_ini ini;
 void ini_save();
@@ -28,6 +29,7 @@ void  grin_set_pattern(int pattern);
 void  grin_set_screen(int sw, int sh);
 void  grin_saver_test(int which);     // the saver now, past the click that asked
 void  grin_quit();                    // the session ends: the loop stops
+void  grin_chime();                   // the startup chime, on the OPL (where there is a sound card)
 
 // the built-in windows
 int  progman_open();                  // progman.c: Program Manager
@@ -54,11 +56,13 @@ void apps_publish(int on);            // the table in slot 25 (1), or out of it 
 int  grin_fwin_open(char *title, int w, int h, int flags);
 void grin_fwin_frame(char *pixels, int w, int h, int pitch, int *pal);
 int  grin_fwin_poll(int *ev);
+int  grin_fwin_ctl(int op, int n, char *s);
 void fwin_init();                     // at the start: grin's image (C4DOS v8)
 int  fwin_event(int *ev);             // an event from the display: 1 if it was the game's
 int  fwin_fresh();                    // a game's frame waits to be drawn
 void fwin_run(char *cmdline);         // from the top of the loop: the program, windowed
 void fwin_end();                      // from the top of the loop: a game's window left, closed
+void fwin_name(char *title);          // the next game's window titled so (a Program Manager item's), 0 the game's own
 
 // DOS programs (docs/grin-plan.md 3.6, 3.7): one at a time, run from the
 // top of the loop, full screen (grin.c) or in a DOS Prompt (dosprmpt.c)
@@ -69,8 +73,15 @@ int  dos_refuse();                    // one is running or waiting: a message bo
 int  grin_full(char *cmdline);        // full screen, at the top of the loop: 0, or -1 (refused)
 int  grin_full_waiting();
 int  grin_window(char *cmdline);      // in a window of its own (fwin.c), at the top of the loop: 0, or -1
-int  grin_dos(char *cmdline);         // progman.c: in a window if a Program Manager item runs it in one, else full screen
+int  grin_dos(char *cmdline);         // progman.c: as a Program Manager item that runs it says, else full screen
+// how a Program Manager item runs a program (progman.c, PROGMAN.INI's modes)
+enum { RUN_APP = 0, RUN_FULL = 1, RUN_WINDOW = 2, RUN_PROMPT = 3 };
+int  progman_mode(char *cmdline);     // ... the first that runs the same program: RUN_*, or -1 for none
 int  dosprompt_open(char *cmd);       // a DOS Prompt window; cmd (or 0) typed at its first prompt
+int  dosprompt_run(char *cmdline);    // a DOS Prompt in the program's directory, running it: the window, or -1
+void grin_where(char *cmdline, char *dir, int n);   // "A:\GAMES\DOOM" for "\GAMES\DOOM\DOOM -warp 2", "" for a bare word
+void grin_display_give();             // a DOS program is to have the display (full screen) ...
+int  grin_display_take(char *name, int st);   // ... and grin has it back after name ended with status st, everything drawn: 1, or 0 when a message box says it failed
 void dosprompt_top();                 // the top of the loop: a DOS Prompt's line runs
 void grin_pump();                     // one pass of the loop, for a DOS program waiting in grin
 void grin_pump_game();                // ... for a game's poll: no nap, its frame drawn at once
@@ -81,8 +92,9 @@ void grin_draw_now();                 // the damage drawn now (a DOS Prompt's ou
 enum { ITEM_W = 76, ITEM_H = 60 };
 void grin_item(int cx, int y, int pic, char *label, int sel);
 int  grin_item_hit(int px, int py, int cx, int y);
+void grin_label(int cx, int y, char *label, int sel, int colour);   // the label alone, under y: on two lines when it is long
 enum { PIC_CONTROL = 1, PIC_DISPLAY = 2, PIC_COLORS = 3, PIC_DESKTOP = 4, PIC_CLOCK = 5, PIC_CALC = 6,
-       PIC_FILES = 7, PIC_DOS = 8, PIC_NOTEPAD = 9, PIC_GAME = 10, PIC_APP = 11, N_PICS = 12 };
+       PIC_FILES = 7, PIC_DOS = 8, PIC_NOTEPAD = 9, PIC_GAME = 10, PIC_APP = 11, PIC_SOUND = 12, N_PICS = 13 };
 void grin_item_dim(int cx, int y, int pic, char *label, int sel, int dim);   // dim: greyed, not available
 void grin_picture(int pic, int x, int y);
 

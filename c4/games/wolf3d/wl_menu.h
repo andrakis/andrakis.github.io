@@ -76,7 +76,7 @@
 #define CTL_Y   86
 #endif
 #define CTL_W   284
-#define CTL_H   60
+#define CTL_H   73      // c4sdl: 60, and a line for Accelerated
 
 #define LSM_X   85
 #define LSM_Y   55

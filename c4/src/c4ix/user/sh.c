@@ -18,9 +18,11 @@
 //                      the shell's own state), ls is a program.
 //   cmd < in > out  -- redirection
 //   a | b | c       -- pipelines of any length
-//   cmd &           -- background, reported by `jobs`, reaped by `wait`
+//   cmd &           -- background, reported by `jobs`, reaped by `wait`;
+//                      its input has ended unless it says otherwise
 //   *.c, a?.txt     -- wildcards in a word's last component (sh_glob)
 //   builtins        -- exit, jobs, wait, cd, pwd, rm [-r] [-f], mv, help
+//   PATH=/bin:...   -- where a bare name is looked for (sh_candidate)
 //
 
 #include "c4ix_user.h"
@@ -252,17 +254,21 @@ static void sh_rm(char **argv, int argc) {
 
 // ---- command resolution ----
 //
-// A bare name is tried as /bin/NAME first, then c4ix-NAME.c4r, then as
-// written, then with .c4r appended. The order matters in both directions: C4IX's
-// own programs win, because this tree also contains C4KE binaries
-// with the same names (ps.c4r, cat.c4r, echo.c4r) which are built
-// against a different kernel's ABI and die on an illegal opcode
-// here; and anything else -- innerbench.c4r, c4m.c4r, whatever c4cc
-// produced -- still runs by name. A name containing '/' or '.' is a
-// path and is used exactly as written. Programs live on the host
+// A bare name is looked for in each directory PATH names, in order --
+// /bin, /usr/bin and /usr/games/bin, where each game has a link to the
+// program in its own directory -- then tried as c4ix-NAME.c4r, then as
+// written, then with .c4r appended. The order matters in both
+// directions: C4IX's own programs win, because this tree also contains
+// C4KE binaries with the same names (ps.c4r, cat.c4r, echo.c4r) which
+// are built against a different kernel's ABI and die on an illegal
+// opcode here; and anything else -- innerbench.c4r, c4m.c4r, whatever
+// c4cc produced -- still runs by name. A name containing '/' or '.' is
+// a path and is used exactly as written. Programs live on the host
 // filesystem, but the kernel checks its RAM files first, so a
-// generated program is found the same way.
-static char resolved[80];
+// generated program is found the same way. PATH=DIR:DIR... on a line of
+// its own changes the list, for this shell.
+static char *sh_path = "/bin:/usr/bin:/usr/games/bin";
+static char resolved[PATHW];
 
 // append src at dst, returning the position of the new terminator
 static char *sh_cat(char *dst, char *src) {
@@ -271,14 +277,15 @@ static char *sh_cat(char *dst, char *src) {
     return dst;
 }
 
-// Build candidate FORM for NAME: 0 /bin/NAME, 1 with the c4ix- prefix
-// and .c4r, 2 as written, 3 with .c4r. Returns 0 when there are no
-// more. /bin comes first so that a program rebuilt inside the machine
-// and installed there (b4ke -f INSTALL.B4K) is the one that runs; until
-// then /bin holds the same images the host names do.
+// Build candidate FORM for NAME: 0 DIR/NAME for the first DIR in PATH
+// that has it, 1 with the c4ix- prefix and .c4r, 2 as written, 3 with
+// .c4r. Returns 0 when there are no more. PATH comes first so that a
+// program rebuilt inside the machine and installed in /bin (b4ke -f
+// INSTALL.B4K) is the one that runs; until then /bin holds the same
+// images the host names do.
 static char *sh_candidate(char *name, int form) {
-    char *p;
-    int i, hasdot, st[4];
+    char *p, *d;
+    int i, n, hasdot, st[4];
 
     hasdot = 0;
     i = 0;
@@ -289,12 +296,23 @@ static char *sh_candidate(char *name, int form) {
     }
     if (hasdot) return (form == 0) ? name : 0;   // a path stands for itself
     if (form == 0) {
-        // only C4IX's own /bin: on a native host, an absent /bin/NAME
+        // only a file C4IX has: on a native host, an absent /bin/NAME
         // would fall through to the HOST's /bin (/bin/echo is an ELF)
-        p = sh_cat(resolved, "/bin/");
-        sh_cat(p, name);
-        if (ustat(resolved, st) < 0 || st[0] != 2) return 0;
-        return resolved;
+        d = sh_path;
+        while (*d) {
+            n = 0;
+            while (d[n] && d[n] != ':') ++n;
+            if (n && n + ustrlen(name) + 2 <= PATHW) {
+                i = 0;
+                while (i < n) { resolved[i] = d[i]; ++i; }
+                resolved[n] = '/';
+                sh_cat(resolved + n + 1, name);
+                if (ustat(resolved, st) == 0 && st[0] == 2) return resolved;
+            }
+            d = d + n;
+            if (*d == ':') ++d;
+        }
+        return 0;
     }
     if (form == 1) {
         p = sh_cat(resolved, "c4ix-");
@@ -376,6 +394,47 @@ static void sh_jobs() {
 // printed it, so "%1" is the natural handle; a bare number is a pid,
 // for anything this shell did not start. The default is 15 (TERM),
 // which for a program with no handler simply cancels it.
+// Why a program would not load is the kernel's to say, and it says so on the machine's
+// console, which from a Terminal in the desktop is somewhere else: the last thing the
+// loader logged about NAME, from /proc/kmsg, here as well.
+enum { WHY_BUF = 2048, WHY_LINE = 200 };
+static int sh_has(char *s, char *what) {
+    int i, k;
+    i = 0;
+    while (s[i]) {
+        k = 0;
+        while (what[k] && s[i + k] == what[k]) ++k;
+        if (!what[k]) return i + 1;
+        ++i;
+    }
+    return 0;
+}
+static void sh_why(char *name) {
+    char *buf, *line, *keep;
+    int fd, n, i, len, at;
+    if ((fd = uopen("/proc/kmsg", O_RD)) < 0) return;
+    if (!(buf = (char *)malloc(WHY_BUF + 2 * WHY_LINE))) { uclose(fd); return; }
+    line = buf + WHY_BUF;
+    keep = line + WHY_LINE;
+    keep[0] = 0;
+    len = 0;
+    while ((n = uread(fd, buf, WHY_BUF)) > 0) {
+        i = 0;
+        while (i < n) {
+            if (buf[i] != 10) { if (len < WHY_LINE - 1) { line[len] = buf[i]; ++len; } }
+            else {
+                line[len] = 0;
+                if ((at = sh_has(line, "loader: ")) && sh_has(line, name)) ustrcpy(keep, line + at + 7);
+                len = 0;
+            }
+            ++i;
+        }
+    }
+    uclose(fd);
+    if (keep[0]) uprintf("sh: the kernel says: %s\n", keep);
+    free(buf);
+}
+
 static void sh_kill(char **argv, int argc) {
     int i, sig, pid, n;
 
@@ -411,8 +470,15 @@ static void sh_waitall() {
 // Returns 1 if the word was a builtin and has been handled.
 static int sh_exiting;
 static int sh_status;
+static int sh_path_owned;   // sh_path is a PATH= line's copy, to free
+
+static int sh_prefix(char *s, char *p) {
+    while (*p) { if (*s != *p) return 0; ++s; ++p; }
+    return 1;
+}
 
 static int sh_builtin(char **argv, int argc) {
+    char *p;
     if (!ustrcmp(argv[0], "exit")) {
         sh_exiting = 1;
         if (argc > 1) sh_status = sh_atoi(argv[1]);
@@ -438,7 +504,19 @@ static int sh_builtin(char **argv, int argc) {
         uprintf("  kill [-SIG] %%JOB | PID   default signal 15 (TERM)\n");
         uprintf("  wait [PID]                every job, or task PID\n");
         uprintf("  rm [-r] [-f] PATH...      -r: a directory and all in it\n");
+        uprintf("  PATH=DIR:DIR...           where a command is looked for\n");
         uprintf("wildcards: * and ? in a word's last part, as in rm /build/bin/*\n");
+        uprintf("PATH=%s\n", sh_path);
+        return 1;
+    }
+    if (argc == 1 && sh_prefix(argv[0], "PATH=")) {
+        // out of the line, which the next one reuses
+        if ((p = (char *)ualloc(ustrlen(argv[0]) - 4))) {
+            ustrcpy(p, argv[0] + 5);
+            if (sh_path_owned) free(sh_path);
+            sh_path = p;
+            sh_path_owned = 1;
+        }
         return 1;
     }
     if (!ustrcmp(argv[0], "cd")) {
@@ -470,9 +548,9 @@ static int sh_runline(char **w, int nw) {
     char **spawned;
     char *infile, *outfile;
     char *cand;
-    int i, k, argc, background, hasnext, pid, fd, st, form;
+    int i, k, argc, background, hasnext, pid, fd, st, form, err;
     int prev_read, saved0, saved1;
-    int p[2];
+    int p[2], q[2];
     int pids[ARG_MAX];
     int npids;
 
@@ -525,6 +603,17 @@ static int sh_runline(char **w, int nw) {
             if ((fd = uopen(infile, O_RD)) < 0) uprintf("sh: cannot open %s\n", infile);
             else { udup2(fd, STDIN); uclose(fd); }
         }
+        // A background job does not read this shell's input, as POSIX's
+        // shell has it (an asynchronous list's is /dev/null): that is the
+        // shell's, and its foreground jobs'. Its input is a pipe with no
+        // writer, at its end at once. In the desktop's Terminal that is
+        // also what tells a program wanting a canvas that the Terminal's
+        // is not its own (window.c, win_open).
+        else if (background && upipe(q) == 0) {
+            uclose(q[1]);
+            udup2(q[0], STDIN);
+            uclose(q[0]);
+        }
         if (hasnext) udup2(p[1], STDOUT);
         else if (outfile) {
             if ((fd = uopen(outfile, O_WR + O_CREATE + O_TRUNCATE)) < 0)
@@ -533,11 +622,14 @@ static int sh_runline(char **w, int nw) {
         }
 
         spawned = sh_dup_argv(argv, argc);
-        pid = -1;
+        // the first candidate that is there is the program: a later one
+        // is not tried when it would not load or there was no memory
+        pid = SPAWN_NOENT;
+        err = SPAWN_NOENT;
         form = 0;
-        while (form < 4 && pid < 0) {
+        while (form < 4 && pid < 0 && err == SPAWN_NOENT) {
             cand = sh_candidate(argv[0], form);
-            if (cand) pid = spawn(cand, argc, spawned);
+            if (cand) { pid = spawn(cand, argc, spawned); if (pid < 0) err = pid; }
             ++form;
         }
 
@@ -547,7 +639,13 @@ static int sh_runline(char **w, int nw) {
         if (hasnext) { uclose(p[1]); prev_read = p[0]; }
         else prev_read = -1;
 
-        if (pid < 0) { uprintf("sh: cannot run %s\n", argv[0]); free(spawned); return 1; }
+        if (pid < 0) {
+            if (err == SPAWN_NOMEM) uprintf("sh: out of memory starting %s\n", argv[0]);
+            else if (err == SPAWN_NOENT) uprintf("sh: cannot find %s\n", argv[0]);
+            else { uprintf("sh: cannot load %s\n", argv[0]); sh_why(argv[0]); }
+            free(spawned);
+            return 1;
+        }
         if (background) sh_addjob(pid, spawned);
         else { pids[npids] = pid; ++npids; free(spawned); }
     }
@@ -619,6 +717,9 @@ int main(int argc, char **argv) {
             break;
         }
         if (!len) continue;
+        // ESC E: an event the desktop's Terminal sent a program drawing in
+        // it (window.h) that ended before reading it. Not a command.
+        if (len >= 2 && line[0] == 27 && line[1] == 'E') continue;
         nw = sh_split(line, words, WORD_MAX);
         if (!nw) continue;
         sh_runline(words, nw);

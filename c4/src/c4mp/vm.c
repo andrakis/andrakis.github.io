@@ -39,6 +39,24 @@
 int c4mp_debug;
 int c4mp_fpu;
 
+// A guest's open() flags are Linux's numbers (include/fcntl.h). On a host
+// that numbers them otherwise -- Windows, docs/windows.md -- c4m_util.h
+// says so with C4M_OHOST, and they are renumbered as c4m.c's
+// c4m_oflags() does; anywhere else they are the host's already.
+#ifdef C4M_OHOST
+static int c4mp_oflags (int f) {
+    int h = f & 3;
+    if (f & 64)   h |= c4m_o_creat;
+    if (f & 128)  h |= c4m_o_excl;
+    if (f & 512)  h |= c4m_o_trunc;
+    if (f & 1024) h |= c4m_o_append;
+    if (f & 2048) h |= c4m_o_nonblock;
+    return h | c4m_o_binary;
+}
+#else
+#define c4mp_oflags(f) (f)
+#endif
+
 // ---- raw terminal mode (TRAW opcode, M18) ---------------------------
 // c4or1k needs fd 0 in raw mode so a typed Ctrl+C is delivered to the
 // guest as a byte (its tty line discipline then signals the guest's
@@ -122,7 +140,8 @@ void c4_vm_init() {
         "CAS ,XCHG,FADD,CWAI,CWAK,IPI ,"
         "LXI ,SXI ,TRAW,"
         "LDL ,LDG ,PSHL,PSHG,LEAP,IMMP,LIP ,ADDL,STL ,POPA,"
-        "FPU ,";
+        "FPU ,"
+        "LH  ,LHU ,SH  ,LSR ,LCU ,";
 }
 
 // One place decides which opcodes carry an operand word, the same rule
@@ -434,6 +453,16 @@ int c4_run(struct c4_cpu * RESTRICT c, int quantum) {
         case SI:   *(int *)*sp++ = a; break;
         case SC:   a = *(char *)*sp++ = a; break;
         case PSH:  *--sp = a; break;
+        // 16 bits, two bytes, low first, at any address; SH leaves a
+        // alone. LSR: SHR with the copies of the sign bit masked off,
+        // the count taken modulo the word's bits (docs/c4-16bit.md).
+        case LH:   a = (*(char *)a & 255) | (*(char *)(a + 1) << 8); break;
+        case LHU:  a = (*(char *)a & 255) | ((*(char *)(a + 1) & 255) << 8); break;
+        case LCU:  a = *(char *)a & 255; break;
+        case SH:   t = (int *)*sp++; *(char *)t = a; *((char *)t + 1) = a >> 8; break;
+        case LSR:  r = a & (sizeof(int) * 8 - 1); a = *sp++;
+                   if (r) a = (a >> r) & ~((int)-1 << (sizeof(int) * 8 - r));
+                   break;
 
         case OR:   a = *sp++ |  a; break;
         case XOR:  a = *sp++ ^  a; break;
@@ -454,7 +483,7 @@ int c4_run(struct c4_cpu * RESTRICT c, int quantum) {
 
         // Opcodes that reach the host are the protected-mode boundary.
         case OPEN:
-            if (mode == MODE_UNPROTECTED) a = open((char *)sp[1], *sp);
+            if (mode == MODE_UNPROTECTED) a = open((char *)sp[1], c4mp_oflags(*sp));
             else PM_TRAP(OPEN);
             break;
         case READ:
@@ -754,8 +783,8 @@ int c4_run(struct c4_cpu * RESTRICT c, int quantum) {
         default:
             // Everything unknown becomes a trap, which is the whole
             // custom-opcode mechanism: a kernel claims a number and
-            // implements it here. RALC lands here too, matching c4m,
-            // where realloc has never been implemented.
+            // implements it here. RALC lands here too: c4mp has no
+            // realloc, though c4m has run it since 63e274a.
             c4_trap(TRAP_ILLOP, i, traph, &sp, &bp, &pc, a, mode, ival);
             // A handler is kernel code and must run privileged, or its
             // own first syscall raises a second trap on top of this one.

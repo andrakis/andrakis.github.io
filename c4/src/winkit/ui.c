@@ -57,10 +57,11 @@ int ui_ends(char *s, char *suffix) {
 char *ui_num(char *buf, int v) {
     char t[24];
     int n, neg, k;
+    // digits from the remainders, kept positive: INT_MIN has no positive
+    // twin to negate into
     neg = v < 0;
-    if (neg) v = 0 - v;
     n = 0;
-    while (1) { t[n] = '0' + v % 10; ++n; v = v / 10; if (!v) break; }
+    while (1) { k = v % 10; if (k < 0) k = 0 - k; t[n] = '0' + k; ++n; v = v / 10; if (!v) break; }
     k = 0;
     if (neg) { buf[k] = '-'; ++k; }
     while (n) { --n; buf[k] = t[n]; ++k; }
@@ -137,7 +138,13 @@ void ui_scrollbar(int x, int y, int h, int total, int visible, int top) {
 // desktop ends it when the button comes up. The thumb keeps its place
 // under the pointer: a pixel of travel is (total - visible) / (track -
 // thumb) lines.
-static int sd_on, sd_x, sd_y, sd_y0, sd_top0, sd_range, sd_span;
+//
+// A press on an arrow or on the track either side of the thumb is said
+// to repeat (ui_scroll_repeat): the desktop presses it again while the
+// button is held (wmcore.c), so a held arrow keeps scrolling, as a held
+// track pages until the thumb reaches the pointer.
+static int sd_on, sd_x, sd_y, sd_y0, sd_top0, sd_range, sd_span, sr_on;
+static int sp_on, sp_x0, sp_pos0;     // a splitter's drag (below)
 
 int ui_scroll_drag(int x, int y, int py) {
     int top;
@@ -148,8 +155,9 @@ int ui_scroll_drag(int x, int y, int py) {
     if (top < 0) top = 0;
     return top;
 }
-int ui_scroll_active() { return sd_on; }
-void ui_scroll_end() { sd_on = 0; }
+int ui_scroll_active() { return sd_on || sp_on; }
+int ui_scroll_repeat() { return sr_on; }
+void ui_scroll_end() { sd_on = 0; sr_on = 0; sp_on = 0; }
 
 // A bar across, for what is wider than its pane: the same parts turned
 // on their side. LEFT is the first column shown of TOTAL, VISIBLE at once.
@@ -182,16 +190,16 @@ int ui_hscroll_click(int px, int py, int x, int y, int w, int total, int visible
     if (!ui_hit(px, py, x, y, w, 16)) return 0 - 1;
     max = total - visible;
     if (max < 0) max = 0;
-    if (px < x + 16) left = left - 1;
-    else if (px >= x + w - 16) left = left + 1;
+    if (px < x + 16) { left = left - 1; sr_on = 1; }
+    else if (px >= x + w - 16) { left = left + 1; sr_on = 1; }
     else {
         track = w - 32;
         if (total <= visible) return left;
         tw = (track * visible) / total;
         if (tw < 10) tw = 10;
         tx = x + 16 + ((track - tw) * left) / (total - visible);
-        if (px < tx) left = left - visible;
-        else if (px >= tx + tw) left = left + visible;
+        if (px < tx) { left = left - visible; sr_on = 1; }
+        else if (px >= tx + tw) { left = left + visible; sr_on = 1; }
         else { sd_on = 1; sd_x = x; sd_y = y; sd_y0 = px; sd_top0 = left; sd_range = total - visible; sd_span = track - tw; }
     }
     if (left > max) left = max;
@@ -205,16 +213,16 @@ int ui_scroll_click(int px, int py, int x, int y, int h, int total, int visible,
     if (!ui_hit(px, py, x, y, 16, h)) return 0 - 1;
     max = total - visible;
     if (max < 0) max = 0;
-    if (py < y + 16) top = top - 1;
-    else if (py >= y + h - 16) top = top + 1;
+    if (py < y + 16) { top = top - 1; sr_on = 1; }
+    else if (py >= y + h - 16) { top = top + 1; sr_on = 1; }
     else {
         track = h - 32;
         if (total <= visible) return top;
         th = (track * visible) / total;
         if (th < 10) th = 10;
         ty = y + 16 + ((track - th) * top) / (total - visible);
-        if (py < ty) top = top - visible;
-        else if (py >= ty + th) top = top + visible;
+        if (py < ty) { top = top - visible; sr_on = 1; }
+        else if (py >= ty + th) { top = top + visible; sr_on = 1; }
         else { sd_on = 1; sd_x = x; sd_y = y; sd_y0 = py; sd_top0 = top; sd_range = total - visible; sd_span = track - th; }
     }
     if (top > max) top = max;
@@ -250,9 +258,40 @@ int ui_field_hit(int px, int x, int w, char *text, int caret) {
 }
 
 // Editing keys for a field's text; returns 1 if the text changed.
+static int ctrl_letter(int code, int ch, int mods, int c) {
+    return (mods & M_CTRL) && !(mods & M_ALT) && (ch == c || ch == c + 32 || code == c);
+}
+int ui_key_copy(int code, int ch, int mods) { return ctrl_letter(code, ch, mods, 'C') || ((mods & M_CTRL) && code == KEY_INS); }
+int ui_key_cut(int code, int ch, int mods) { return ctrl_letter(code, ch, mods, 'X') || ((mods & M_SHIFT) && code == KEY_DEL); }
+int ui_key_paste(int code, int ch, int mods) { return ctrl_letter(code, ch, mods, 'V') || ((mods & M_SHIFT) && code == KEY_INS); }
+
+// A field has no selection: copy and cut take the whole of it, and a
+// paste puts the clipboard's first line in at the caret, as much as fits.
 int ui_field_key(char *text, int max, int *caret, int code, int ch, int mods) {
-    int n, i;
+    int n, i, k, cn;
+    char *c;
     n = ui_len(text);
+    if (ui_key_copy(code, ch, mods) || ui_key_cut(code, ch, mods)) {
+        wk_clip_set(text, n);
+        if (!ui_key_cut(code, ch, mods) || !n) return 0;
+        text[0] = 0; *caret = 0;
+        return 1;
+    }
+    if (ui_key_paste(code, ch, mods)) {
+        c = wk_clip_get(&cn);
+        k = 0;
+        while (k < cn && c[k] != 10 && c[k] != 13 && n < max) {
+            if (c[k] >= 32 && c[k] <= 126) {
+                i = n + 1;
+                while (i > *caret) { text[i] = text[i - 1]; --i; }
+                text[*caret] = c[k];
+                *caret = *caret + 1;
+                ++n;
+            }
+            ++k;
+        }
+        return k > 0;
+    }
     if (code == KEY_LEFT) { if (*caret > 0) *caret = *caret - 1; return 0; }
     if (code == KEY_RIGHT) { if (*caret < n) *caret = *caret + 1; return 0; }
     if (code == KEY_HOME) { *caret = 0; return 0; }
@@ -345,4 +384,143 @@ void ui_header(int x, int y, int *widths, char **labels, int n) {
         x = x + widths[k];
         ++k;
     }
+}
+
+// A check box: a sunken white square, ticked when ON, its label beside it.
+void ui_check(int x, int y, char *label, int on) {
+    int k;
+    d_rect(x, y, 13, 13, C_WHITE);
+    if (ui_style == S_FLAT) d_recto(x, y, 13, 13, on ? C_TITLE : C_SHADOW);
+    else d_bevel(x, y, 13, 13, B_SUNKEN);
+    if (on) {
+        k = 0;
+        while (k < 7) { d_rect(x + 3 + k, y + (k < 2 ? 5 + k : 9 - k), 2, 2, ui_style == S_FLAT ? C_TITLE : C_DARK); ++k; }
+    }
+    d_text(x + 18, y, C_DARK, F_SANS, label);
+}
+
+// ---- a splitter ------------------------------------------------------------------
+//
+// The bar between two panes side by side, dragged across to size them.
+// ui_split_click starts a drag when the bar is pressed, from POS (what the
+// window sizes by it, the left pane's width); each move then asks
+// ui_split_drag what the pointer has made that, which the window keeps
+// within its limits. The drag ends when the button comes up, as a thumb's
+// does (ui_scroll_end), and follows the pointer out of the window
+// meanwhile (ui_scroll_active).
+
+void ui_splitter(int x, int y, int w, int h) {
+    int k;
+    d_rect(x, y, w, h, C_FACE);
+    d_rect(x, y, 1, h, C_LIGHT);
+    d_rect(x + w - 1, y, 1, h, C_SHADOW);
+    // a grip in the middle, three dots down
+    k = 0;
+    while (k < 3 && h > 30) { d_rect(x + w / 2 - 1, y + h / 2 - 7 + k * 6, 2, 2, C_SHADOW); ++k; }
+}
+int ui_split_click(int px, int py, int x, int y, int w, int h, int pos) {
+    if (!ui_hit(px, py, x, y, w, h)) return 0;
+    sp_on = 1; sp_x0 = px; sp_pos0 = pos;
+    return 1;
+}
+int ui_split_drag(int px) { return sp_on ? sp_pos0 + px - sp_x0 : 0 - 1; }
+int ui_split_active() { return sp_on; }
+
+// ---- a find bar --------------------------------------------------------------------
+//
+// Under an editor's text: what to find, Next and Previous, Match case, a
+// note of what the last look found, and a box to close it. The editor
+// keeps one (struct ui_find) and does the looking; the bar takes the
+// keys while it has them (f->keys) and the clicks on it, and says what
+// they asked for: UF_NEXT, UF_PREV, UF_TYPED (the text changed, to look
+// again from where the match is), UF_CLOSE. Enter is Next, Shift+Enter
+// Previous, F3 and Shift+F3 the same, Esc closes, Alt+C turns Match case
+// over.
+
+// where its parts are, for a bar W wide at (x, y)
+static int fb_fx, fb_fw, fb_nx, fb_px, fb_cx, fb_tx, fb_xx;
+static void fb_layout(int x, int w) {
+    fb_fw = w < 620 ? w - 470 : 150;          // narrower, so the note keeps some room
+    if (fb_fw < 80) fb_fw = 80;
+    fb_fx = x + 40;
+    fb_nx = fb_fx + fb_fw + 6;                 // Next
+    fb_px = fb_nx + 50;                        // Previous
+    fb_cx = fb_px + 70;                        // Match case
+    fb_tx = fb_cx + 92;                        // the note
+    fb_xx = x + w - 22;                        // the close box
+}
+
+void ui_find_open(struct ui_find *f, char *seed, int n) {
+    int k;
+    f->on = 1; f->keys = 1;
+    if (seed && n > 0 && n < UI_FIND_MAX) {
+        k = 0;
+        while (k < n && seed[k] != 10 && seed[k] != 13) ++k;
+        if (k == n) { memcpy(f->text, seed, n); f->text[n] = 0; }
+    }
+    f->caret = ui_len(f->text);
+    f->note[0] = 0; f->bad = 0;
+}
+
+void ui_find_say(struct ui_find *f, char *note, int bad) {
+    ui_ncpy(f->note, note, 64);
+    f->bad = bad;
+}
+
+void ui_find_draw(struct ui_find *f, int x, int y, int w, int focused) {
+    fb_layout(x, w);
+    d_rect(x, y, w, UI_FIND_H, C_FACE);
+    d_rect(x, y, w, 1, C_SHADOW);
+    d_rect(x, y + 1, w, 1, C_LIGHT);
+    d_text(x + 6, y + 8, C_DARK, F_SANS, "Find:");
+    ui_field(fb_fx, y + 4, fb_fw, f->text, f->caret, focused && f->keys);
+    ui_button(fb_nx, y + 4, 46, 22, "Next", 0, 0);
+    ui_button(fb_px, y + 4, 66, 22, "Previous", 0, 0);
+    ui_check(fb_cx, y + 9, "Match case", f->mcase);
+    if (f->note[0] && fb_tx < fb_xx - 12) {
+        d_clip(fb_tx, y + 2, fb_xx - 4 - fb_tx, UI_FIND_H - 2);
+        d_text(fb_tx, y + 8, f->bad ? 0xc00000 : C_DARK, F_SANS, f->note);
+        d_clip_end();
+    }
+    ui_button(fb_xx, y + 5, 18, 18, "x", 0, 0);
+}
+
+int ui_find_mouse(struct ui_find *f, int ev, int px, int py, int x, int y, int w) {
+    if (!f->on || !ui_hit(px, py, x, y, w, UI_FIND_H)) return 0 - 1;
+    if (ev != E_DOWN) return UF_NONE;
+    fb_layout(x, w);
+    f->keys = 1;
+    if (ui_hit(px, py, fb_fx, y + 4, fb_fw, 22)) { f->caret = ui_field_hit(px, fb_fx, fb_fw, f->text, f->caret); return UF_NONE; }
+    if (ui_hit(px, py, fb_nx, y + 4, 46, 22)) return UF_NEXT;
+    if (ui_hit(px, py, fb_px, y + 4, 66, 22)) return UF_PREV;
+    if (ui_hit(px, py, fb_cx, y + 6, 88, 18)) { f->mcase = !f->mcase; return UF_NONE; }
+    if (ui_hit(px, py, fb_xx, y + 5, 18, 18)) { f->on = 0; f->keys = 0; return UF_CLOSE; }
+    return UF_NONE;
+}
+
+int ui_find_key(struct ui_find *f, int code, int ch, int mods) {
+    if (code == KEY_ESC) { f->on = 0; f->keys = 0; return UF_CLOSE; }
+    if (code == KEY_ENTER || code == KEY_F3) return (mods & M_SHIFT) ? UF_PREV : UF_NEXT;
+    if ((mods & M_ALT) && (ch == 'c' || ch == 'C' || code == 'C')) { f->mcase = !f->mcase; return UF_NONE; }
+    if (ui_field_key(f->text, UI_FIND_MAX - 1, &f->caret, code, ch, mods)) { f->note[0] = 0; f->bad = 0; return UF_TYPED; }
+    return UF_NONE;
+}
+
+// Does what F looks for start at S, which has N characters to look at?
+int ui_find_at(struct ui_find *f, char *s, int n) {
+    int m, k, a, b;
+    m = ui_len(f->text);
+    if (!m || m > n) return 0;
+    k = 0;
+    while (k < m) {
+        a = s[k] & 255; b = f->text[k] & 255;
+        if (a != b) {
+            if (f->mcase) return 0;
+            if (a >= 'A' && a <= 'Z') a = a + 32;
+            if (b >= 'A' && b <= 'Z') b = b + 32;
+            if (a != b) return 0;
+        }
+        ++k;
+    }
+    return 1;
 }

@@ -11,7 +11,7 @@
 //           BUILD; RUN dosload.c4r c4ke.c4r
 //   c4sh>   doom, quit, three times; HEAP_USED the same each time; rps, q
 //           tar x c4ix-src.tar; b4ke -f c4ix.b4k; kboot c4ix.c4r
-//   c4ix:/$ ls; doom, quit; exit
+//   c4ix:/$ ls /bin; doom, quit; exit
 //   A:\>    MEM: C4IX returned to C4KE, C4KE to dosload, dosload to DOS
 //
 // and says what each step cost: wall time, cycles, and the heap.
@@ -25,10 +25,11 @@ import { join } from 'node:path';
 import { createMachine, boot } from '../boot.js';
 import { STOP } from '../c4m.js';
 import { GuiDevice, CMD } from '../gui-device.js';
+import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
 const opt = n => (args.includes(n) ? args[args.indexOf(n) + 1] : null);
-const disk = opt('--disk') || new URL('../images/ladder/', import.meta.url).pathname;
+const disk = opt('--disk') || fileURLToPath(new URL('../images/ladder/', import.meta.url));
 const quick = args.includes('--quick');
 const T = 'test-c4dos-ladder';
 if (!existsSync(join(disk, 'index.json'))) {
@@ -140,7 +141,7 @@ let o = cmd('DIR', A, 60);
 check(/^GAMES  <DIR>$/m.test(o) && /^BUILD  <DIR>$/m.test(o) && /^C4IX  <DIR>$/m.test(o) && !/doom1\.wad/i.test(o),
   'DIR at A:\\: the directories, not the 250 files', o);
 o = cmd('APPEND', A, 60);
-check(/^APPEND=A:\\BUILD;A:\\C4KE;A:\\C4IX;A:\\GRIN;A:\\BIN;A:\\GAMES\\DOOM/m.test(o), "APPEND, AUTOEXEC.BAT's", o);
+check(/^APPEND=A:\\BUILD;A:\\C4KE;A:\\C4IX;A:\\GRIN;A:\\BIN;(A:\\GAMES\\\w+;)*A:\\GAMES\\DOOM/m.test(o), "APPEND, AUTOEXEC.BAT's", o);
 o = cmd('CD GAMES\\DOOM', /A:\\GAMES\\DOOM>\s*$/, 60) + cmd('DIR', /A:\\GAMES\\DOOM>\s*$/, 60) + cmd('CD \\', A, 60);
 check(/doom1\.wad/.test(o) && /doom\.c4r/.test(o), 'CD GAMES\\DOOM, DIR there, CD \\', o);
 const used0 = vm.heap.used;
@@ -160,6 +161,17 @@ o = cmd('RUN dosload.c4r c4ke.c4r', KE, 300);
 check(/seeded \d+\/\d+ file\(s\) from the C4DOS RAM disk/.test(o) && o.includes('C4SH - The C4 SHell'),
   'dosload boots the C4KE it built, seeded from the RAM disk', o);
 cost('dosload c4ke.c4r');
+// The ladder's instructions are C4KE's too: the disk's one LADDER.TXT
+// (src/c4dos/fs), at the root of C4KE's tree, which TYPE LADDER.TXT
+// at A:\> says is there
+const ladderTxt = readFileSync(join(disk, 'ladder.txt'), 'latin1').replace(/\r/g, '');
+const keBoot = o;
+o = cmd('cat ladder.txt', KE, 60);
+check(o.replace(/\r/g, '').includes(ladderTxt.trimEnd()) && ladderTxt.includes('cat ladder.txt'),
+  'cat ladder.txt at c4sh> shows the ladder\'s instructions', o.slice(-600));
+o = cmd('ls', KE, 60);
+check(/(^|\s)ladder\.txt(\s|$)/m.test(o), 'and ls lists ladder.txt in C4KE\'s root', o);
+o = keBoot;
 
 // ---- C4KE -----------------------------------------------------------------
 // Three rounds. C4KE gives each task a heap generation of HEAP.SYS's
@@ -233,7 +245,7 @@ if (!quick) {
   begin();
   o = cmd('b4ke -f c4ix.b4k', KE, 3000);
   const ixbytes = /c4rlink: wrote (\d+) bytes to ramfs:c4ix\.c4r/.exec(o);
-  check(ixbytes && o.includes('b4ke: 13 ran, 0 skipped, 0 failed'), 'b4ke builds C4IX: twelve modules and a link', o.slice(-1500));
+  check(ixbytes && o.includes('b4ke: 14 ran, 0 skipped, 0 failed'), 'b4ke builds C4IX: thirteen modules and a link', o.slice(-1500));
   cost(`b4ke -f c4ix.b4k (c4ix.c4r ${ixbytes ? ixbytes[1] : '?'} bytes)`);
 
   begin();
@@ -243,7 +255,7 @@ if (!quick) {
   cost('kboot c4ix.c4r');
 
   // ---- C4IX ---------------------------------------------------------------
-  o = cmd('ls', IX, 60);
+  o = cmd('ls /bin', IX, 60) + cmd('ls /usr/games/bin', IX, 60);
   check(/\bdoom\b/.test(o) && /\bdesktop\b/.test(o), "C4IX's tree has the page's userland", o);
   begin();
   check(doom('doom', IX), 'Doom under C4IX, played and quit', text().slice(-1500));

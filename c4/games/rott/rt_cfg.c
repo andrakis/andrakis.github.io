@@ -43,6 +43,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #ifdef _ROTT_
 #include "rt_def.h"
+#ifdef C4ROTT
+#include "c4accel.h"     /* c4: the accelerators, ACCELERATED */
+#endif
 #else
 #include "st_def.h"
 #endif
@@ -521,6 +524,12 @@ boolean ParseConfigFile (void)
       // Read in CrossHair
       ReadBoolean("CrossHair",&iG_aimCross);
 
+#ifdef C4ROTT
+      // c4: Extended User Options' ACCELERATED, on unless this says 0
+      ReadInt("BrowserAccelerated",&rott_accel_on);
+      rott_accel_set(rott_accel_on);
+#endif
+
       // Read in JoystickEnabled
       ReadBoolean("JoystickEnabled",&joystickenabled);
 
@@ -537,6 +546,14 @@ boolean ParseConfigFile (void)
       // Read in resolution
       ReadInt("ScreenWidth", &iGLOBAL_SCREENWIDTH);
       ReadInt("ScreenHeight", &iGLOBAL_SCREENHEIGHT);
+#ifdef C4ROTT
+      // c4: one of the port's sizes (winrott.c), else the original's
+      if (!rott_size_ok (iGLOBAL_SCREENWIDTH, iGLOBAL_SCREENHEIGHT))
+         {
+         iGLOBAL_SCREENWIDTH = 320;
+         iGLOBAL_SCREENHEIGHT = 200;
+         }
+#endif
 
       // Read in ViewSize
 
@@ -546,6 +563,9 @@ boolean ParseConfigFile (void)
 
       ReadInt("Weaponscale",&G_weaponscale);//bna added
 	   if ((G_weaponscale <150)||(G_weaponscale>600)){
+#ifdef C4ROTT
+		   G_weaponscale = rott_default_weaponscale ();   // c4: winrott.c, every size
+#else
 		   if (iGLOBAL_SCREENWIDTH == 320){
 				G_weaponscale=168;
 		   }else if (iGLOBAL_SCREENWIDTH == 640){
@@ -553,6 +573,7 @@ boolean ParseConfigFile (void)
 		   }else if (iGLOBAL_SCREENWIDTH == 800) {
 				G_weaponscale=376;
 		   }	   
+#endif
 	   }
 
       // Read in MouseAdjustment
@@ -1782,6 +1803,14 @@ void WriteConfig (void)
    SafeWriteString(file,"; 0 - CrossHair Disabled\n");
    WriteParameter(file,"CrossHair        ", iG_aimCross);
 
+#ifdef C4ROTT
+   // c4: Write out BrowserAccelerated
+   SafeWriteString(file,"\n;\n");
+   SafeWriteString(file,"; 1 - the browser draws the walls, floors and sprites, when it can\n");
+   SafeWriteString(file,"; 0 - the game draws them\n");
+   WriteParameter(file,"BrowserAccelerated ",rott_accel_on);
+#endif
+
    // Write out JoystickEnabled
 
    SafeWriteString(file,"\n;\n");
@@ -1831,6 +1860,9 @@ void WriteConfig (void)
    G_weaponscale = (weaponscale * 168 )/65536;
 
    if ((G_weaponscale <150)||(G_weaponscale>600)){
+#ifdef C4ROTT
+	   G_weaponscale = rott_default_weaponscale ();   // c4: winrott.c, every size
+#else
 	   if (iGLOBAL_SCREENWIDTH == 320){
 			G_weaponscale=168;
 	   }else if (iGLOBAL_SCREENWIDTH == 640){
@@ -1838,6 +1870,7 @@ void WriteConfig (void)
 	   }else if (iGLOBAL_SCREENWIDTH == 800) {
 			G_weaponscale=376;
 	   }	   
+#endif
    }
    WriteParameter(file,"Weaponscale         ",G_weaponscale);
 

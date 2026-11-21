@@ -20,8 +20,9 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { networkInterfaces } from 'node:os';
 import { proxyUrl } from '../src/c4bb/tools/proxy-domain.mjs';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const args = process.argv.slice(2);
 const PORT = Number(args.find(a => /^\d+$/.test(a)) || process.env.LIBJS_PORT || 8472);
 const ISOLATE = args.includes('--isolate');
@@ -48,6 +49,13 @@ export function makeServer(root = ROOT, isolate = ISOLATE) {
           list.sort((x, y) => x.name.localeCompare(y.name));
           res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
           res.end(JSON.stringify(list));
+          return;
+        }
+        // without the slash, the page's relative URLs would name the directory above it
+        const [path, query] = req.url.split('?');
+        if (!path.endsWith('/')) {
+          res.writeHead(302, { location: path.replace(/^\/+/, '/') + '/' + (query === undefined ? '' : '?' + query) });
+          res.end();
           return;
         }
         p = join(p, 'index.html');

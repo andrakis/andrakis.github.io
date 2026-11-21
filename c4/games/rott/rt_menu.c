@@ -45,6 +45,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <sys/stat.h>
 
 #include "rt_def.h"
+#ifdef C4ROTT
+#include "c4accel.h"     /* c4: the accelerators, ACCELERATED */
+#endif
 #include "_rt_menu.h"
 #include "rt_menu.h"
 #include "rt_sound.h"
@@ -384,12 +387,27 @@ CP_MenuNames MainMenuNames[] =
    "QUIT"
    };
 
+#ifdef C4ROTT
+// c4: a menu item's routine is called with one argument (menuptr), and
+// CP_LoadGame takes two: c4 pushes them in order, so its quick was what lay
+// beyond the one. From the menu it is neither quick nor a dead player's.
+static void CP_LoadGameItem (int which)
+{
+   (void) which;
+   CP_LoadGame (0, 0);
+}
+#endif
+
 CP_iteminfo MainItems  = { MENU_X, MENU_Y + 1, 9, STARTITEM, 32, MainMenuNames, mn_largefont };
 CP_itemtype MainMenu[] =
    {
       { CP_CursorLocation, "mm_opt1\0",  'N', (menuptr)CP_NewGame },
       { CP_Active,         "battle\0",   'C', (menuptr)CP_BattleModes },
+#ifdef C4ROTT
+      { CP_Active,         "mm_opt2\0",  'R', (menuptr)CP_LoadGameItem },
+#else
       { CP_Active,         "mm_opt2\0",  'R', (menuptr)CP_LoadGame },
+#endif
       { CP_Inactive,       "mm_opt3\0",  'S', (menuptr)CP_SaveGame },
       { CP_Active,         "mm_opt5\0",  'O', (menuptr)CP_ControlMenu },
       { CP_Active,         "ordrinfo\0", 'O', (menuptr)CP_OrderInfo },
@@ -753,9 +771,12 @@ CP_MenuNames ExtOptionsNames[] =
    "INVERSE MOUSE",
    "CROSS HAIR",
    "JUMPING",
-   "FULLSCREEN"
+   "FULLSCREEN",
+   "ACCELERATED",  // c4: the machine's accelerators (c4/accel.mjs)
+   "RESOLUTION"    // c4: 320x200 to 800x600, Duke3D's sizes (CP_ResolutionMenu)
    };
-CP_iteminfo ExtOptionsItems = { 20, MENU_Y, 5, 0, 43, ExtOptionsNames, mn_largefont };
+CP_iteminfo ExtOptionsItems = { 20, MENU_Y, 7, 0, 43, ExtOptionsNames, mn_largefont };
+void CP_ResolutionMenu (void);   // c4
 
 CP_itemtype ExtOptionsMenu[] =
 {
@@ -763,8 +784,44 @@ CP_itemtype ExtOptionsMenu[] =
    {1, "", 'I', NULL},
    {1, "", 'C', NULL},
    {1, "", 'J', NULL},
-   {1, "", 'F', NULL}
+   {1, "", 'F', NULL},
+   {1, "", 'B', NULL},
+   {1, "", 'R', (menuptr)CP_ResolutionMenu}
 };
+
+#ifdef C4ROTT
+// c4: RESOLUTION's own menu, as Detail Levels' is: the port's sizes
+// (winrott.c), Duke3D's, the one in use marked, taking at once (rt_main.c,
+// rott_set_resolution)
+#define NRESOLUTIONS 7
+CP_MenuNames ResolutionNames[] =
+   {
+   "320 X 200",
+   "320 X 240",
+   "400 X 300",
+   "512 X 384",
+   "640 X 400",
+   "640 X 480",
+   "800 X 600"
+   };
+CP_iteminfo ResolutionItems = { 32, MENU_Y + 16, NRESOLUTIONS, 0, 43, ResolutionNames, mn_largefont };
+// No letters: the menus take a key's character from its scan code
+// (getASCII), and the arrows are the keypad's, Up 8 and Down 2, so a '8'
+// for 800x600 sent every Up there and nothing above it could be reached
+CP_itemtype ResolutionMenu[] =
+{
+   {1, "", 0, NULL},
+   {1, "", 0, NULL},
+   {1, "", 0, NULL},
+   {1, "", 0, NULL},
+   {1, "", 0, NULL},
+   {1, "", 0, NULL},
+   {1, "", 0, NULL}
+};
+static int ResolutionNums[NRESOLUTIONS] = { 0, 1, 2, 3, 4, 5, 6 };
+static int resolution_w[NRESOLUTIONS] = { 320, 320, 400, 512, 640, 640, 800 };
+static int resolution_h[NRESOLUTIONS] = { 200, 240, 300, 384, 400, 480, 600 };
+#endif
    
 //bna added end
 
@@ -1540,6 +1597,15 @@ void SetUpControlPanel (void)
 
 
     
+#ifdef C4ROTT
+	  // c4: the sizes between (WinRott.h) and 320x240: 160 by 100 of
+	  // the whole screen, column by column, as the two below take theirs
+	  if (!ROTT_IS(320, 200) && iGLOBAL_SCREENWIDTH < 640) {
+		  for (i=0;i<160;i++)
+			  for (j=0;j<100;j++,s++)
+				 *s=*((byte *)bufferofs+(j*iGLOBAL_SCREENHEIGHT/100)*iGLOBAL_SCREENWIDTH+i*iGLOBAL_SCREENWIDTH/160);
+	  } else
+#endif
 	  if (iGLOBAL_SCREENWIDTH == 320) { 
 		  for (i=0;i<Xres;i+=2)	{	  
 			  b=(byte *)bufferofs+i;
@@ -5348,6 +5414,14 @@ void DrawExtOptionsMenu (void)
 {
    MenuNum = 1;
 
+#ifdef C4ROTT
+   // c4: ACCELERATED only where the machine has them
+   if (!rott_accel_avail())
+      ExtOptionsMenu[5].active = CP_Inactive;
+   else if (ExtOptionsMenu[5].active == CP_Inactive)
+      ExtOptionsMenu[5].active = CP_Active;
+#endif
+
    SetAlternateMenuBuf();
    ClearMenuBuf();
    SetMenuTitle ("Extended User Options");
@@ -5361,7 +5435,7 @@ void DrawExtOptionsMenu (void)
 }
 extern long inverse_mouse;
 extern boolean usemouselook;
-extern int iG_aimCross;
+extern boolean iG_aimCross;
 extern boolean usejump;
 extern boolean sdl_fullscreen;
 
@@ -5394,12 +5468,78 @@ void CP_ExtOptionsMenu (void)
                DrawExtOptionsButtons ();
             }
             break;
+#ifdef C4ROTT
+         case 5:   // c4: the machine's accelerators, when it has them
+            if (rott_accel_avail())
+            {
+               rott_accel_set(!rott_accel_on);
+               DrawExtOptionsButtons ();
+            }
+            break;
+#endif
       }
 
 	} while (which >= 0);
 
    DrawControlMenu();
 }
+#ifdef C4ROTT
+static int ResolutionNow (void)
+{
+   int i;
+   for (i = 0; i < NRESOLUTIONS; i++)
+      if (resolution_w[i] == iGLOBAL_SCREENWIDTH && resolution_h[i] == iGLOBAL_SCREENHEIGHT)
+         return i;
+   return -1;
+}
+
+static void DrawResolutionMenu (void)
+{
+   MenuNum = 1;
+
+   SetAlternateMenuBuf();
+   ClearMenuBuf();
+   SetMenuTitle ("Resolution");
+
+   MN_DrawButtons (&ResolutionItems, &ResolutionMenu[0], ResolutionNow (), ResolutionNums);
+   MN_GetCursorLocation( &ResolutionItems, &ResolutionMenu[ 0 ] );
+   DrawMenu (&ResolutionItems, &ResolutionMenu[0]);
+   DisplayInfo (0);
+   FlipMenuBuf();
+}
+
+void rott_set_resolution (int w, int h);   // rt_main.c
+
+void CP_ResolutionMenu (void)
+{
+   int which;
+   int i;
+
+   // the cursor on the size in use (MN_GetCursorLocation takes the item
+   // marked so), not on the first
+   for (i = 0; i < NRESOLUTIONS; i++)
+      ResolutionMenu[i].active = (i == ResolutionNow ()) ? CP_CursorLocation : CP_Active;
+   DrawResolutionMenu ();
+
+   do
+   {
+      which = HandleMenu (&ResolutionItems, &ResolutionMenu[0], NULL);
+
+      if (which >= 0 && which < NRESOLUTIONS && which != ResolutionNow ())
+      {
+         rott_set_resolution (resolution_w[which], resolution_h[which]);
+         DrawResolutionMenu ();
+      }
+
+   } while (which >= 0);
+
+   // as CP_DetailMenu: what the menu just left in handlewhich is no item
+   // of Extended User Options (its HandleMenu returns it)
+   handlewhich = 10;
+   DrawExtOptionsMenu();
+}
+#endif
+
 void DrawExtOptionsButtons (void)
 {
    int i,
@@ -5426,6 +5566,10 @@ void DrawExtOptionsButtons (void)
             case 2: if (iG_aimCross   == 1) on = 1; break;
             case 3: if (usejump       == 1) on = 1; break;
             case 4: if (sdl_fullscreen== 1) on = 1; break;
+#ifdef C4ROTT
+            case 5: if (rott_accel_on && rott_accel_avail()) on = 1; break;
+            case 6: continue;   // a menu of its own, no button
+#endif
          }
 
          if (on)

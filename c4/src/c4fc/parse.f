@@ -73,7 +73,9 @@ Add 11 oADD INFIX   Sub 11 oSUB INFIX
 Mul 12 oMUL INFIX   Div 12 oDIV INFIX  Mod 12 oMOD INFIX
 
 \ L op= R is L = L op R, the lvalue's tree in both places (c4lc-parse's
-\ p:compound): the binary operator an assignment operator stands for, or 0
+\ p:compound) -- unless evaluating L does something (EFFECTS?), when it
+\ is n_opasgn and gen.f evaluates L once. The binary operator an
+\ assignment operator stands for, or 0
 : COMPOUND-OF ( kind -- kind' | 0 ) {: k -- k' :}
    k AddA = IF Add EXIT THEN  k SubA = IF Sub EXIT THEN  k MulA = IF Mul EXIT THEN
    k DivA = IF Div EXIT THEN  k ModA = IF Mod EXIT THEN  k ShlA = IF Shl EXIT THEN
@@ -457,10 +459,17 @@ VARIABLE PACK-NOW   0 PACK-NOW !
 ' (PARSE-TYPE) IS PARSE-TYPE
 : SKIP-TYPE PARSE-TYPE DROP ;
 
+\ A call's arguments, at most MAXARGS. There were room for eight and no
+\ check, so a ninth (C4IX's boot_caps has nine) went past the cells into
+\ whatever the arena held next: the first string literal among the
+\ arguments, its bytes then written into the image as that pointer's.
+32 CONSTANT MAXARGS
 : ARGS ( -- args n ) {: | v n -- :}
-   8 CELLS ALLOT: TO v   0 TO n
+   MAXARGS CELLS ALLOT: TO v   0 TO n
    TK Rparen <> IF
-      BEGIN 1 EXPR v n CELLS + !  n 1+ TO n  TK Comma = WHILE TNEXT REPEAT
+      BEGIN
+         n MAXARGS = IF ." c4fc: " TOK@ .WHERE ." : more than 32 arguments" CR ABORT THEN
+         1 EXPR v n CELLS + !  n 1+ TO n  TK Comma = WHILE TNEXT REPEAT
    THEN
    Rparen WANT
    v n ;
@@ -633,6 +642,31 @@ CREATE SLBUF 8192 ALLOT
    TK Dec   = IF TNEXT 13 EXPR n_predec N1 EXIT THEN
    POSTFIX ;
 
+\ Does evaluating this do anything -- a call, an assignment or a ++
+\ anywhere in it? c4lc-parse's p:effects?. A compound assignment whose
+\ lvalue does is n_opasgn, and every other stays L = L op R, which is
+\ what the optimizer wants of i += 1. No locals: it recurses with the
+\ expression, and c4th's locals stack is not checked.
+: EFFECTS? ( n -- f )
+   DUP >TAG
+   DUP n_call = OVER n_icall = OR OVER n_asgn = OR OVER n_opasgn = OR
+   OVER n_preinc = OR OVER n_predec = OR OVER n_postinc = OR OVER n_postdec = OR
+   IF 2DROP -1 EXIT THEN
+   DUP n_bin = OVER n_index = OR OVER n_lor = OR OVER n_land = OR IF
+      DROP DUP >lhs @ RECURSE IF DROP -1 EXIT THEN  >rhs @ RECURSE EXIT THEN
+   DUP n_member = IF DROP >lhs @ RECURSE EXIT THEN
+   DUP n_cast = IF DROP >expr @ RECURSE EXIT THEN
+   DUP n_not = OVER n_bnot = OR OVER n_neg = OR OVER n_deref = OR OVER n_addr = OR IF
+      DROP >opnd @ RECURSE EXIT THEN
+   DUP n_cond = IF
+      DROP DUP >cond @ RECURSE IF DROP -1 EXIT THEN
+      DUP >body @ RECURSE IF DROP -1 EXIT THEN
+      >else @ RECURSE EXIT THEN
+   n_comma = IF
+      0 SWAP DUP >argn @ 0 ?DO DUP >args @ I CELLS + @ RECURSE ROT OR SWAP LOOP
+      DROP EXIT THEN
+   DROP 0 ;
+
 : (EXPR) ( lev -- node ) {: lev | n i p r q nd -- n :}
    UNARY TO n
    BEGIN
@@ -642,7 +676,7 @@ CREATE SLBUF 8192 ALLOT
          TNEXT  1 EXPR TO r
          n_bin 4 CELLS NEW TO nd
          n nd >lhs !  r nd >rhs !  q IN-FIND CELLS INO + @ nd >op !
-         n nd n_asgn N2 TO n
+         n nd  n EFFECTS? IF n_opasgn ELSE n_asgn THEN  N2 TO n
       ELSE TK Cond = lev 2 <= AND IF
          TNEXT  1 EXPR TO r  Colon WANT  2 EXPR TO q
          n_cond 4 CELLS NEW TO nd
@@ -750,7 +784,8 @@ DEFER LOCAL-RECS ( ety cnt ai -- v )
             dt  ag IF na ELSE -1 THEN  ai LOCAL-RECS nn >lrecs !
             nn v V,
          THEN
-         nd 0<> ivn 0<> OR IF
+         \ iv alone is `= ""` or `= {}`: no values, every element zeroed
+         nd 0<> ivn 0<> OR iv 0<> OR IF
             STN @ 1- ST[] TO y
             n_linit 7 CELLS NEW TO nn
             nd nn >expr !  y nn >isym !  iv nn >ivals !  ivn nn >ivn !
@@ -1446,6 +1481,108 @@ DEFER AGG-FILL ( ety cnt off v i -- i' )
    16 NEW-VEC LREC !  2 AMODE !  0 SWAP AGG-TOP  0 AMODE !  LREC @ ;
 ' (LOCAL-RECS) IS LOCAL-RECS
 
+\ -- initializers set at start-up (c4lc-parse's p:dyninit?) ------------
+\ A scalar global whose initializer is not a form the folder takes -- a
+\ string, &NAME, a NAME, a brace list or a constant expression -- is set
+\ by __c4lc_init, a static constructor written after the unit, as c4lc
+\ does: `int *tend = &table[4];`, `fixed *costable = sintable+(ANGLES/4);`.
+\ The global itself is `T x = 0;`, a definition and never a constant, as
+\ c4lc's (dynz): a second is "redefinition", another unit's is c4rlink's
+\ "multiple definition", and an `int *x;` gives way to it. DYNV holds one
+\ record per global:
+\ name, length, its expression's tokens (a vector), and its symbol and
+\ qualifiers while the constructor is compiled.
+VARIABLE DYNV
+: DYN-RESET ( -- )  16 NEW-VEC DYNV ! ;
+: TOKK ( i -- k )  DUP TOKS V# < IF TOKS V@ t.kind @ ELSE DROP Eof THEN ;
+: DYN-END? ( k -- f )  DUP Comma = SWAP Semi = OR ;
+\ past a parenthesized group at I (p:skipgroup)
+: DYN-GROUP ( i -- i' ) {: i | d k -- i :}
+   0 TO d
+   BEGIN
+      i TOKK TO k
+      k Eof = IF i EXIT THEN
+      k Lparen = IF d 1+ TO d THEN   k Rparen = IF d 1- TO d THEN
+      i 1+ TO i
+      k Rparen = d 0= AND
+   UNTIL i ;
+\ past `[...]`s, `.m` and `->m` (p:skippost, p:skipbrak)
+: DYN-POST ( i -- i' ) {: i | d k -- i :}
+   BEGIN
+      i TOKK TO k
+      k Dot = k Arrow = OR IF i 2 + TO i 0 ELSE
+      k Brak = IF
+         i 1+ TO i   1 TO d
+         BEGIN
+            i TOKK TO k
+            k Eof = IF -1 ELSE
+            k Rbrak = d 1 = AND IF i 1+ TO i -1 ELSE
+            k Brak = IF d 1+ TO d THEN   k Rbrak = IF d 1- TO d THEN
+            i 1+ TO i  0 THEN THEN
+         UNTIL 0
+      ELSE -1 THEN THEN
+   UNTIL i ;
+\ past sizeof's unparenthesized operand, `*p`, `name`, `a[i].m` (p:skipunary)
+: DYN-UNARY ( i -- i' ) {: i | k -- i :}
+   BEGIN i TOKK DUP Mul = SWAP And = OR WHILE i 1+ TO i REPEAT
+   i TOKK Id = IF i 1+ DYN-POST ELSE i THEN ;
+\ up to the , or ; that ends it, does the initializer hold a string, an
+\ &, a type name or a name that is no constant? sizeof's operand aside
+\ (p:dynscan)
+: DYN-SCAN ( i -- f ) {: i | d k -- f :}
+   0 TO d
+   BEGIN
+      i TOKK TO k
+      k Eof = IF 0 EXIT THEN
+      d 0= k DYN-END? AND IF 0 EXIT THEN
+      k Sizeof = IF
+         i 1+ TOKK Lparen = IF i 1+ DYN-GROUP ELSE i 1+ DYN-UNARY THEN TO i
+      ELSE
+         k Str = k And = OR IF -1 EXIT THEN
+         k KIND-TYPE? IF -1 EXIT THEN
+         k Id = IF i NONCONST-AT? IF -1 EXIT THEN THEN
+         k Lparen = k Brak = OR IF d 1+ TO d THEN
+         k Rparen = k Rbrak = OR IF d 1- TO d THEN
+         i 1+ TO i
+      THEN
+   AGAIN ;
+\ is the initializer at token I one for __c4lc_init? Not a string, &NAME
+\ alone, a brace list or a NAME alone (p:dyninit?)
+: DYN-AT? ( i -- f ) {: i | k k2 -- f :}
+   i TOKK TO k   i 1+ TOKK TO k2
+   k Str = IF 0 EXIT THEN
+   k And = IF  k2 Id = IF i 2 + TOKK DYN-END? 0= EXIT THEN  -1 EXIT THEN
+   k Lbrace = IF 0 EXIT THEN
+   k Id = k2 DYN-END? AND IF 0 EXIT THEN
+   i DYN-SCAN ;
+\ a static local's initializer names the function's other static locals
+\ by their plain names, which mean FUNCTION.NAME only inside it: the
+\ token is copied under the name SALIAS gives, as c4lc-parse resolves
+\ the names where it reads the expression. A member's name stays.
+: DYN-TOK ( t pk -- t' ) {: t pk | a u t2 -- t :}
+   ST-MANGLE @ 0=  t t.kind @ Id <> OR  pk Dot = OR  pk Arrow = OR IF t EXIT THEN
+   t t.val @ t t.len @ SALIAS TO u TO a
+   a t t.val @ = IF t EXIT THEN
+   TOK ALLOT: TO t2   t t2 TOK MOVE   a t2 t.val !  u t2 t.len !  t2 ;
+\ at the `=` of global A U: record its expression and step past it, to
+\ the , or ; -- DECL then makes the global `T x = 0;` (DYN-Z; DECL has
+\ no room for another local)
+VARIABLE DYN-Z
+: DYN-REC ( a u -- ) {: a u | r d k v pk -- :}
+   TNEXT
+   16 NEW-VEC TO v   0 TO d   0 TO pk
+   BEGIN
+      TK TO k
+      k Eof =  d 0= k DYN-END? AND  OR 0=
+   WHILE
+      k Lparen = k Brak = OR IF d 1+ TO d THEN
+      k Rparen = k Rbrak = OR IF d 1- TO d THEN
+      TOK@ pk DYN-TOK v V,   k TO pk
+      TNEXT
+   REPEAT
+   5 CELLS ALLOT: TO r   a r !  u r CELL+ !  v r 2 CELLS + !
+   r DYNV @ V,   1 DYN-Z ! ;
+
 : DECL {: | a u ct dt t n sz ag sc at y ivn off es fa fu fr fs fx fk bq q ce fn ai sa su aet acn gy pm sbr -- :}
    STORAGE TO sc
    TYPE? 0= IF ." c4fc: a declaration was expected" CR ABORT THEN
@@ -1484,8 +1621,11 @@ DEFER AGG-FILL ( ety cnt off v i -- i' )
          dt T-STRUCT? IF dt T-SIZE TO sz  1 TO ag THEN
       THEN
       \ the initialiser, if there is one
-      -1 TO fr   -1 TO fs   0 TO ai   0 TO gy   0 TO sbr
-      TK Assign = IF
+      -1 TO fr   -1 TO fs   0 TO ai   0 TO gy   0 TO sbr   0 DYN-Z !
+      \ ... unless __c4lc_init sets it: then this is `T x = 0;`
+      ag 0=  TK Assign = AND IF  TP @ 1+ DYN-AT? IF a u DYN-REC THEN  THEN
+      TK Assign = DYN-Z @ OR IF
+         DYN-Z @ IF 0 IVAL !  1 TO ivn ELSE
          TNEXT
          \ a scalar's string in braces, `char *s = { "..." };`: the string
          ag 0=  TK Lbrace = AND  TP @ 1+ TOKS V@ t.kind @ Str = AND IF TNEXT 1 TO sbr THEN
@@ -1521,6 +1661,7 @@ DEFER AGG-FILL ( ety cnt off v i -- i' )
             CONST-EXPR IVAL !  1 TO ivn  1 TO ce
          THEN THEN THEN THEN THEN
          sbr IF  TK Comma = IF TNEXT THEN  Rbrace WANT  THEN
+         THEN                                   \ DYN-Z
          ai IF
             \ M7b: the strings the pointers take first, then the storage,
             \ then every value at its offset (c4lc-gen's g:globalaggr)
@@ -1554,6 +1695,11 @@ DEFER AGG-FILL ( ety cnt off v i -- i' )
          \ not taken for another unit's.
          COLLECT @ IF a u DG-DEF THEN
          a u ST-FIND TO y
+         \ a second initialised definition of a global is an error; a
+         \ static's two stay two objects (c4lc-gen's g:datapass)
+         y IF y y.class @ c_glo = y y.ini @ 0<> AND sc 8 <> AND IF
+            ." c4fc: redefinition of " a u TYPE CR ABORT
+         THEN THEN
          y IF y y.class @ c_glo = y y.ini @ 0= AND IF
             off  y y.val @ CELLS GOFF + !   c_gone y y.class !   0 y y.nlen !
          THEN THEN
@@ -1632,12 +1778,24 @@ DEFER AGG-FILL ( ety cnt off v i -- i' )
       THEN
    LOOP ;
 
+\ A global with no initialiser, not static, in an object: a tentative
+\ definition, which c4rlink makes one object with the other units'
+\ (c4rlink.c, common_plan). Its symbol says so, ATTR_COMMON (128), and a
+\ word nothing uses follows it, so that the address just past it is no
+\ other global's -- c4rlink moves every reference into it to the one it
+\ keeps. c4lc-gen's g:tattrs and g:tballoc, word for word.
+: COMMON? ( y -- f )
+   >R  OBJECT @  R@ y.ini @ 0= AND  R> y.sc @ 8 <> AND ;
+
 \ Where the three data regions actually land. Region 1 was placed as it
 \ was declared; regions 2 and 3 are relative until now, so every patch
 \ that names one gets shifted here.
 : PLACE-GLOBALS {: | off y -- :}
    IDN @ ALIGNUP DB2 !
-   DB2 @ DN @ ALIGNUP + DB3 !
+   \ a word between the initialised data and region 3, as c4lc leaves:
+   \ the address just past the last initialised object is then never
+   \ region 3's first, which c4rlink puts somewhere else (emit.f)
+   DB2 @ DN @ ALIGNUP + 1 CELLS + DB3 !
    DB2 @ FIX-REGION2
    0 TO off
    STN @ 0 ?DO
@@ -1646,6 +1804,7 @@ DEFER AGG-FILL ( ety cnt off v i -- i' )
          off ALIGNUP TO off
          DB3 @ off +  y y.val @ CELLS GOFF + !
          off y y.sz @ + TO off
+         y COMMON? IF off 1 CELLS + TO off THEN
       THEN
    LOOP
    GOFF FIX-GLOBALS
@@ -1657,17 +1816,51 @@ DEFER AGG-FILL ( ety cnt off v i -- i' )
          y y.name @ y y.nlen @ y y.ct @ 131
          y y.ini @ IF y y.val @ ELSE y y.val @ CELLS GOFF + @ THEN
          y y.agg @ IF ATTR-ARRAY ELSE 0 THEN  y y.sc @ OR
+         y COMMON? IF 128 OR THEN
          SYM,
       THEN
    LOOP ;
 
 ' DECL IS DECL-D
 
+\ __c4lc_init (p:dynfunc), after the last function and before the
+\ helpers: `static int __attribute__((constructor)) __c4lc_init() {
+\ x = EXPR; ... }`, parsed from tokens made here and each initializer's
+\ own. c4lc stores through `*(T *)&x`, which is the same code as `x`
+\ (2026-11-14, every scalar type, plain and -O) but for a const x: its
+\ const is lifted while the constructor is compiled, so it is set once.
+CREATE DYN-TOKS VEC ALLOT
+: DYN-FUNC ( -- ) {: | v r y tp -- :}
+   DYNV @ V# 0= IF EXIT THEN
+   64 NEW-VEC TO v   v LEXV !
+   Static 0 0 TOK,  Int 0 0 TOK,
+   Attribute 0 0 TOK,  Lparen 0 0 TOK,  Lparen 0 0 TOK,  Constructor 0 0 TOK,
+   Rparen 0 0 TOK,  Rparen 0 0 TOK,
+   Id S" __c4lc_init" TOK,  Lparen 0 0 TOK,  Rparen 0 0 TOK,  Lbrace 0 0 TOK,
+   DYNV @ V# 0 ?DO
+      I DYNV @ V@ TO r
+      Id r @ r CELL+ @ TOK,  Assign 0 0 TOK,
+      r 2 CELLS + @ DUP V# 0 ?DO I OVER V@ v V, LOOP DROP
+      Semi 0 0 TOK,
+      r @ r CELL+ @ ST-FIND TO y   y r 3 CELLS + !
+      y IF  y y.q @ r 4 CELLS + !  y y.q @ 1 INVERT AND y y.q !  THEN
+   LOOP
+   Rbrace 0 0 TOK,  Eof 0 0 TOK,
+   TOKS LEXV !
+   TOKS DYN-TOKS VEC MOVE   v TOKS VEC MOVE   TP @ TO tp  0 TP !
+   DECL
+   DYN-TOKS TOKS VEC MOVE   tp TP !
+   DYNV @ V# 0 ?DO
+      I DYNV @ V@ TO r   r 3 CELLS + @ TO y
+      y IF r 4 CELLS + @ y y.q ! THEN
+   LOOP ;
+
 : PROGRAM
-   0 PACK-NOW !
+   0 PACK-NOW !  DYN-RESET
    BEGIN TK Eof <> WHILE
       TK Pack = IF TV PACK-NOW ! TNEXT ELSE DECL THEN   \ a #pragma pack line
    REPEAT
+   DYN-FUNC
    EMIT-HELPERS                         \ M4: after the last function, as c4lc
    FIX-FORWARDS
    PLACE-GLOBALS

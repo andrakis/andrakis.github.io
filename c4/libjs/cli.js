@@ -2,7 +2,8 @@
 // cli.js - run a .c4r on the libjs c4m from the command line.
 //
 //   node libjs/cli.js [-m MB] [-c cycles] [-s] [-d dir] [-w dir] [-i]
-//                     [-hz MHz] [--fast] [--mbox BYTES] [--wav FILE] program.c4r [args...]
+//                     [-hz MHz] [--fast] [--mbox BYTES] [--wav FILE] [--midi FILE] [--sf2 FILE]
+//                     program.c4r [args...]
 //
 //   -m MB        arena size in megabytes (default 32)
 //   -c cycles    cycle budget (default unlimited); running out is status 9
@@ -18,10 +19,24 @@
 //                each runs -q instructions in turn (default 1000)
 //   -q N         instructions a CPU runs before the next one's turn
 //   --parallel   ... each CPU on a thread of its own (par.js), for real
+//   --mmu        fit an MMU (docs/c4ix-mmu.md): C4IX turns it on, and
+//                then user tasks run in address spaces of their own, so a
+//                wild write is caught where it happens; nothing else uses
+//                it. Off by default, for its cost (docs/c4ix-mmu.md 12);
+//                the tests fit one. (--no-mmu: the default)
 //   --wav FILE   fit a sound card (snd-device.js) and write what it played,
 //                on the machine's own clock, to FILE: 44.1 kHz 16-bit stereo.
 //                The same session makes the same file. Without it there is
 //                no sound card, and programs run silent
+//   --midi FILE  the sound card has a General MIDI synth on its MIDI port
+//                (CAPS bit 5), so a game plays its music there, and every
+//                message is written to FILE as it is stamped, a line each:
+//                microseconds, then the bytes in hex
+//   --sf2 FILE   ... and --wav plays them with this SoundFont (snd-gm.js)
+//   --no-accel   no accelerators (accel.js): a game draws with its own
+//                loops, as on any other machine
+//   --no-osaccel ... nor C4IX's own (src/c4ix/accel.mjs): its gunzip, tar and
+//                boot unpack the root archive in its own C
 //
 // The flags are c4bb's (src/c4bb/sim/cli.js), so a test can swap one
 // runner for the other. Piped stdin without -i is fed to the keyboard up
@@ -33,18 +48,20 @@ import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { constants } from 'node:os';
 import { createMachine, boot } from './boot.js';
+import { loadAccel, accelManifest } from './accel.js';
 import { Worker } from 'node:worker_threads';
 import { STOP } from './c4m.js';
-import { SoundDevice } from './snd-device.js';
+import { requireSlot } from './hostlock.mjs';
+import { SoundDevice, EVT } from './snd-device.js';
 import { renderWav } from './snd-mix.js';
 
 function usage() {
-  console.error('usage: cli.js [-m MB] [-c cycles] [-s] [-d dir] [-w dir] [-i] [-hz MHz] [--fast] [--mbox BYTES] [--wav FILE] program.c4r [args...]');
+  console.error('usage: cli.js [-m MB] [-c cycles] [-s] [-d dir] [-w dir] [-i] [-hz MHz] [--fast] [--mbox BYTES] [--wav FILE] [--midi FILE] [--sf2 FILE] program.c4r [args...]');
   process.exit(1);
 }
 
 function parseArgs(argv) {
-  const o = { arenaMb: 32, maxCycles: Infinity, stats: false, drives: [],
+  const o = { arenaMb: 32, maxCycles: Infinity, stats: false, drives: [], mmu: false,
               interactive: false, mhz: 20, unpaced: false, mbox: 0 };
   let i = 0;
   while (i < argv.length && argv[i].startsWith('-')) {
@@ -58,11 +75,17 @@ function parseArgs(argv) {
     else if (f === '-hz') o.mhz = parseFloat(argv[++i]);
     else if (f === '--fast') o.unpaced = true;
     else if (f === '--no-fpu') o.fpu = false;
+    else if (f === '--no-accel') o.accel = false;
+    else if (f === '--no-osaccel') o.osAccel = false;
     else if (f === '--mbox') o.mbox = parseInt(argv[++i], 10);
     else if (f === '--wav') o.wav = argv[++i];
+    else if (f === '--midi') o.midi = argv[++i];
+    else if (f === '--sf2') o.sf2 = argv[++i];
     else if (f === '--cpus') o.cpus = parseInt(argv[++i], 10);
     else if (f === '-q') o.quantum = parseInt(argv[++i], 10);
     else if (f === '--parallel') o.parallel = true;
+    else if (f === '--mmu') o.mmu = true;
+    else if (f === '--no-mmu') o.mmu = false;
     else if (f === '--') { i++; break; }
     else { console.error(`libjs: unknown option ${f}`); usage(); }
     i++;
@@ -107,11 +130,13 @@ async function main(argv) {
     remove: d.writable ? name => rmSync(join(d.dir, name), { force: true }) : null,
   }));
 
-  const snd = o.wav ? new SoundDevice() : null;
+  const snd = o.wav || o.midi || o.sf2 ? new SoundDevice({ midi: !!(o.midi || o.sf2) }) : null;
   const played = [];
+  // the games' accelerators, the build's list (accel.js), before it starts
+  if (o.accel !== false) await loadAccel(await accelManifest());
   const machine = createMachine({
-    arenaMb: o.arenaMb, drives, mhz: o.mhz, fpu: o.fpu, snd, cpus: o.cpus, quantum: o.quantum,
-    parallel: o.parallel, spawn: url => new Worker(url),
+    arenaMb: o.arenaMb, drives, mhz: o.mhz, fpu: o.fpu, accel: o.accel, osAccel: o.osAccel, snd, cpus: o.cpus, quantum: o.quantum,
+    parallel: o.parallel, spawn: url => new Worker(url), mmu: o.mmu,
     onByte: b => { out.push(b); if (out.length >= 4096 || b === 10) flush(); },
   });
   const dev = machine.dev;
@@ -175,8 +200,11 @@ async function main(argv) {
     if (par && !dev.halted) {
       par.service();
       // CPU 0 naps while the others work: for real, until an IPI. The
-      // machine's clock gets only what it slept.
-      if (r === STOP.SLEEP && par.othersRunning()) {
+      // machine's clock gets only what it slept. An IPI may have come
+      // already, from a CPU that has parked since (a task it put to sleep
+      // sooner than the nap's end): then the nap is over at once, rather
+      // than a nap the clock took whole with nobody running.
+      if (r === STOP.SLEEP && (par.othersRunning() || par.ipiFor0())) {
         const nap = dev.napMs;
         let slept = 0;
         while (slept < nap && !par.ipiFor0() && !dev.halted) {
@@ -236,17 +264,34 @@ async function main(argv) {
   flush();
   if (par) par.shutdown();
   if (process.stdin.isTTY && o.interactive) process.stdin.setRawMode(false);
+  const sndStats = {};
   if (snd) {
     const e = snd.drain();
     if (e) for (const x of e) played.push(x);
-    writeFileSync(o.wav, renderWav(played, 44100, Math.max(snd.now(), snd.cursor)));
+    let synth = null;
+    if (o.sf2 && o.wav) {
+      const { GmSynth } = await import('./snd-gm.js');
+      synth = new GmSynth(44100);
+      await synth.load(readFileSync(o.sf2), o.sf2);
+    }
+    if (o.wav) writeFileSync(o.wav, renderWav(played, 44100, Math.max(snd.now(), snd.cursor), { synth, stats: sndStats }));
+    if (o.midi) writeFileSync(o.midi, played.filter(x => x[0] === EVT.MIDI)
+      .map(x => `${Math.round(x[1])} ${x[2].map(b => b.toString(16).padStart(2, '0')).join(' ')}\n`).join(''));
   }
   if (o.stats) {
     const dt = (Date.now() - t0) / 1000;
     const ran = machine.cycle - machine.skipped;
     console.error(`libjs: ${ran} cycles in ${dt.toFixed(2)}s (${Math.round(ran / dt / 1000)}k inst/s), ` +
       `${machine.missedTraps} missed traps, status ${status}`);
-    if (snd) { const st = snd.stats(); console.error(`libjs: sound: ${st.writes} OPL writes, ${st.plays} samples played`); }
+    // the heap MALC hands out: what was still held at the end, and the most ever held
+    if (machine.heap) console.error(`libjs: heap ${Math.round(machine.heap.used / 1024)} KB in use at exit, ` +
+      `${Math.round(machine.heap.peak / 1024)} KB at most, of ${Math.round((machine.heap.end - machine.heap.base) / 1024)} KB`);
+    if (snd) { const st = snd.stats(); console.error(`libjs: sound: ${st.writes} OPL writes, ${st.plays} samples played, ${st.midis} MIDI messages`); }
+    // the OPL as --wav played it: a level of 0 for thousands of writes is
+    // music playing silence (snd-mix.js oplState)
+    const op = sndStats.opl;
+    if (op) console.error(`libjs: sound: the OPL's level ${op.rms} RMS, peak ${op.peak}, over ${op.seconds} s; ` +
+      `at the end its OPL3 mode ${op.opl3 ? 'on' : 'off'}`);
   }
   return status & 0xff;
 }
@@ -262,6 +307,8 @@ if (process.send && process.env.LIBJS_CHILD) {
   const done = s => process.send({ status: s }, () => process.exit(s));
   main(process.argv.slice(2)).then(done, e => { console.error(e); done(70); });
 } else {
+  // here, not in the child: it has no lock fd to show (its stdio is three and ipc)
+  requireSlot("libjs/cli.js");
   const child = spawn(process.execPath, [...process.execArgv, ...process.argv.slice(1)],
     { stdio: ['inherit', 'inherit', 'inherit', 'ipc'], env: { ...process.env, LIBJS_CHILD: '1' } });
   let status = null;

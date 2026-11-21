@@ -48,6 +48,7 @@ struct wk_env {
     int mods;                         // Shift, Ctrl, Alt as the last key left them
     int desk, face, light, shadow;    // the scheme's colours (Settings)
     int title, title2, ititle, ititle2, sel;
+    int fsans, fbold, fsize;          // the interface's font (wk_font_use): F_SANS's, F_BOLD's, a size step
 };
 // A grin application (compiled with -D WK_IMPORT, src/grin/import.c) has
 // no wk of its own: it reads grin's, through the pointer grin publishes
@@ -77,8 +78,21 @@ enum { C_DARK = 0x000000, C_WHITE = 0xffffff, C_GREEN = 0x00ff00 };
 enum { S_FLAT = 0, S_CLASSIC = 1, S_WIN31 = 2, N_STYLES = 3 };
 #define ui_style (wk.style)
 
-// fonts: monospace, a UI face, and its bold
-enum { F_MONO = 0, F_SANS = 1, F_BOLD = 2 };
+// fonts: monospace, a UI face, and its bold; then the display's other
+// faces (gui.h's GUI_* fonts), for a choice of them
+enum { F_MONO = 0, F_SANS = 1, F_BOLD = 2, F_COURIER = 3, F_LUCIDA = 4,
+       F_VERDANA = 5, F_VERDANA_B = 6, F_SERIF = 7, F_SERIF_B = 8 };
+// The choices offered (draw.c): faces for the interface, which d_text and
+// d_textn then draw F_SANS and F_BOLD in; fixed-width faces for an
+// editor; and sizes, Small, Normal and Large. The interface's size moves
+// F_SANS and F_BOLD a pixel down or up; an editor's is a text grid's.
+enum { WK_FACES = 3, WK_SIZES = 3 };
+char *wk_face_name(int i);            // the interface's faces: "Tahoma", "Verdana", "Georgia"
+char *wk_mono_name(int i);            // the fixed-width faces: "Consolas", "Courier New", "Lucida Console"
+int   wk_mono_font(int i);            // ... as a font for d_textn
+char *wk_size_name(int i);
+void  wk_font_use(int face, int size);  // the interface's face and size, from now on
+void  wk_grid(int size, int *font_size, int *cw, int *ch);   // a text grid's: its font's size, a cell
 // bevel styles
 enum { B_RAISED = 1, B_SUNKEN = 2, B_FIELD = 3, B_PRESSED = 4, B_ETCHED = 5 };
 // mouse events, in client coordinates
@@ -86,10 +100,11 @@ enum { E_DOWN = 1, E_UP = 2, E_MOVE = 3, E_DBL = 4, E_WHEEL = 5 };
 // keys (browser keyCodes) and modifiers
 enum { KEY_BACK = 8, KEY_TAB = 9, KEY_ENTER = 13, KEY_ESC = 27, KEY_PGUP = 33, KEY_PGDN = 34,
        KEY_END = 35, KEY_HOME = 36, KEY_LEFT = 37, KEY_UP = 38, KEY_RIGHT = 39, KEY_DOWN = 40,
-       KEY_DEL = 46, KEY_F2 = 113, KEY_F4 = 115, KEY_F5 = 116 };
+       KEY_INS = 45, KEY_DEL = 46, KEY_F2 = 113, KEY_F3 = 114, KEY_F4 = 115, KEY_F5 = 116 };
 enum { M_SHIFT = 1, M_CTRL = 2, M_ALT = 4 };
-// pointer shapes, GUI_PTR_*'s numbers
-enum { PTR_ARROW = 0, PTR_TEXT = 1, PTR_RESIZE = 2 };
+// pointer shapes, GUI_PTR_*'s numbers (PTR_COLS: a splitter's, left and right;
+// PTR_LOCK: "click to capture", the mouse locked to the display at a click)
+enum { PTR_ARROW = 0, PTR_TEXT = 1, PTR_RESIZE = 2, PTR_LOCK = 8, PTR_COLS = 9 };
 // 16x16 icons (d_icon), which a class names by its kind; the numbers are
 // the C4IX desktop's window kinds
 enum { ICON_TERM = 1, ICON_INFO = 2, ICON_FILES = 3, ICON_TASKS = 4, ICON_NOTE = 5,
@@ -121,7 +136,10 @@ struct wk_class {
 // a menu bar: titles, and for each an array of items ending in 0 ("-" a
 // separator); an item chosen reaches command as WK_CMD(menu, item)
 struct wk_menu { char *title; char **items; };
-enum { WK_CMD_STEP = 256 };
+// an item whose first byte is WK_CHECKED is drawn with a check mark beside
+// it, and without that byte ("-" is a separator)
+enum { WK_CHECKED = 1 };
+enum { WK_CMD_STEP = 256, WK_POPUP = 200 };
 #define WK_CMD(m, i) ((m) * WK_CMD_STEP + (i))
 
 // wk_open's flags
@@ -141,7 +159,14 @@ int   wk_alive(int w);
 void  wk_title(int w, char *s);
 char *wk_get_title(int w);
 void  wk_invalidate(int w, int x, int y, int ww, int hh);   // ww = 0: all of it
+void  wk_invalidate_covered(int w, int x, int y, int ww, int hh);
+                                      // ... part of it that its draw paints every pixel of (a
+                                      // program's frame): when nothing else changed, only it is
+                                      // drawn there, not what is under it or its own frame
 void  wk_menu(int w, struct wk_menu *m, int n);
+void  wk_popup(int w, int x, int y, char **items);          // a menu of its own at (x, y) in the
+                                      // client area (a right click's): ITEMS as a menu bar's, the
+                                      // one chosen reaching command as WK_CMD(WK_POPUP, item)
 int   wk_timer(int w, int id, int ms);                      // every ms (0 stops it); 1 if set
 void  wk_raise(int w);
 int   wk_focus();                     // the window with the keyboard, or 0
@@ -158,9 +183,12 @@ int   wk_now();                       // milliseconds of machine time
 void  wk_msgbox(int owner, int dialog, char *title, char *text, int buttons);
 void  wk_inputbox(int owner, int dialog, char *title, char *prompt, char *buf, int max);
 void  wk_filebox(int owner, int dialog, int save, char *pattern, char *buf, int max);
-                                      // buf: the start folder or name in, the path chosen out
+                                      // buf: the start folder or name in, the path chosen out;
+                                      // pattern: "*", "*.c;*.h", or types and their patterns,
+                                      // "C Source (*.c)|*.c|All Files (*)|*", the first shown first
 
-// the clipboard: text, copied in
+// the clipboard: text, copied in. One for every window: in grin the
+// kit's own memory, so a paste after the copier has gone still has it
 int   wk_clip_set(char *s, int n);    // 1 if it took it
 char *wk_clip_get(int *n);
 
@@ -179,6 +207,7 @@ void d_imgdef(int id, int w, int h, int *px);
 void d_image(int id, int x, int y);
 // w x h 8-bit pixels at src through 256 colours at pal, scaled to dw x dh
 void d_blit8(int x, int y, int w, int h, char *src, int pitch, int *pal, int dw, int dh);
+int  d_damage_within(int x, int y, int w, int h);   // 1 if all that is being redrawn is inside
 int  ui_mix(int a, int b, int t, int n);   // a colour T/N of the way from A to B
 
 // colour schemes (draw.c)
@@ -196,10 +225,46 @@ void ui_hscrollbar(int x, int y, int w, int total, int visible, int left);
 int  ui_hscroll_click(int px, int py, int x, int y, int w, int total, int visible, int left);
                                                // ... and a bar across: ui_scroll_drag(x, y, px)
 int  ui_scroll_active();
+int  ui_scroll_repeat();                        // the last press was an arrow's or the track's: the desktop repeats it
 void ui_scroll_end();
 void ui_field(int x, int y, int w, char *text, int caret, int focused);
 int  ui_field_key(char *text, int max, int *caret, int code, int ch, int mods);
+                                               // ... Ctrl+C copies the whole field, Ctrl+X cuts it,
+                                               // Ctrl+V pastes at the caret (the clipboard's first line)
+// the clipboard's keys, CUA's beside the letters, as Windows 3.1 took
+// both: copy Ctrl+C or Ctrl+Ins, cut Ctrl+X or Shift+Del, paste Ctrl+V
+// or Shift+Ins
+int  ui_key_copy(int code, int ch, int mods);
+int  ui_key_cut(int code, int ch, int mods);
+int  ui_key_paste(int code, int ch, int mods);
 int  ui_field_hit(int px, int x, int w, char *text, int caret);   // the caret for a click
+void ui_check(int x, int y, char *label, int on);  // a check box and its label
+// a splitter: the bar between two panes side by side, dragged across
+void ui_splitter(int x, int y, int w, int h);
+int  ui_split_click(int px, int py, int x, int y, int w, int h, int pos);   // 1: pressed, a drag from POS begun
+int  ui_split_drag(int px);                    // POS as the pointer has moved it, or -1 for no drag
+int  ui_split_active();
+// A find bar, under an editor's text (ui.c): the editor keeps one and does
+// the looking, the bar says what was asked for -- UF_NEXT, UF_PREV,
+// UF_TYPED (the text changed), UF_CLOSE -- and keeps a note of what the
+// last look found.
+enum { UI_FIND_H = 30, UI_FIND_MAX = 64 };
+enum { UF_NONE = 0, UF_NEXT = 1, UF_PREV = 2, UF_TYPED = 3, UF_CLOSE = 4 };
+struct ui_find {
+    char text[UI_FIND_MAX];           // what to find
+    int caret;
+    int on;                           // shown
+    int keys;                         // it has the keyboard, not the text
+    int mcase;                        // Match case
+    char note[64];                    // what the last look found
+    int bad;                          // ... and it was nothing (drawn in red)
+};
+void ui_find_open(struct ui_find *f, char *seed, int n);   // shown, with the keys; SEED (a selection) to find
+void ui_find_draw(struct ui_find *f, int x, int y, int w, int focused);
+int  ui_find_mouse(struct ui_find *f, int ev, int px, int py, int x, int y, int w);   // UF_*, or -1 off it
+int  ui_find_key(struct ui_find *f, int code, int ch, int mods);                      // UF_*
+void ui_find_say(struct ui_find *f, char *note, int bad);
+int  ui_find_at(struct ui_find *f, char *s, int n);       // 1 if what F finds starts at S (N characters there)
 void ui_tabs(int x, int y, char **labels, int n, int sel);
 int  ui_tab_hit(int px, int py, int x, int y, char **labels, int n);
 void ui_group(int x, int y, int w, int h, char *label);
@@ -274,7 +339,9 @@ extern char *notepad_name;            // in its titles ("Notepad"; the desktop's
 extern char *notepad_about;           // its Help > About line
 extern char *notepad_home;            // where Open starts
 extern char *notepad_untitled;        // where Save As offers to put a new document
-extern int notepad_filebox;           // 1: Open and Save As are file boxes (grin's); 0: typed paths
+extern int notepad_filebox;           // 1: Open and Save As are file boxes; 0: typed paths
+extern char *notepad_filter;          // the types the file box offers ("*"; wk_filebox)
+extern char *notepad_cfg;             // where Format's choices are kept (wk_fopen), or 0 for nowhere
 int  wk_clock();                      // the host's time of day, in seconds since midnight
 
 // ---- screen savers (savers.c) ----------------------------------------------
@@ -286,5 +353,6 @@ void saver_start(int which);
 void saver_frame();
 void saver_stop();
 int  saver_frames();
+extern char *saver_marquee;          // what Marquee says (the C4IX desktop's line unless the shell says)
 
 #endif // WINKIT_H

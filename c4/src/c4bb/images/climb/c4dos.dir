@@ -16,9 +16,11 @@ c4ix-cc.c4r
 c4ix-crc32.c4r
 c4ix-cycles.c4r
 c4ix-desktop.c4r
+c4ix-dmesg.c4r
 c4ix-doom.c4r
 c4ix-echo.c4r
 c4ix-fmt.c4r
+c4ix-free.c4r
 c4ix-gui.c4r
 c4ix-gunzip.c4r
 c4ix-hello.c4r
@@ -32,6 +34,7 @@ c4ix-pictest.c4r
 c4ix-pin.c4r
 c4ix-ps.c4r
 c4ix-rott.c4r
+c4ix-rottreg.c4r
 c4ix-sh.c4r
 c4ix-spin.c4r
 c4ix-splash.c4r

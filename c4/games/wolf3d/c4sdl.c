@@ -14,6 +14,7 @@
 #include "SDL.h"
 #include "SDL_mixer.h"
 #include "plat.h"
+#include "c4/c4accel.h"         // c4sdl: the browser's accelerators
 
 int c4sdl_timedemo;            // virtual time, and frames counted
 int c4sdl_sound;               // --sound: a timedemo plays sound too
@@ -21,6 +22,7 @@ int c4sdl_show;                // --show: a timedemo on the display or window to
 int c4sdl_direct = 1;          // the display itself; --window: a window (plat-c4ix.c)
 unsigned int c4sdl_frames;
 unsigned int c4sdl_sum;
+unsigned int c4sdl_palgen = 1;  // counts palette changes: a platform converts it only then
 static unsigned int c4sdl_vclock;
 
 // ---- start-up, errors, hints ----
@@ -94,6 +96,7 @@ void SDL_FreeSurface(SDL_Surface *s) {
 
 int SDL_SetPaletteColors(SDL_Palette *p, const SDL_Color *colors, int first, int n) {
     memcpy(p->colors + first, colors, n * sizeof(SDL_Color));
+    ++c4sdl_palgen;
     return 0;
 }
 
@@ -138,20 +141,26 @@ void c4sdl_present(Uint8 *pixels, int w, int h, int pitch, SDL_Color *pal) {
         // the frame and its colours, as the window would show them: four
         // pixels at a time, a little-endian word (the rows are whole words)
         sum = c4sdl_sum;
-        y = 0;
-        while (y < h) {
-            words = (unsigned int *)(pixels + y * pitch);
+        // in one instruction where the machine has the game's accelerators
+        // (c4/c4accel.h), the same sum
+        if (WOLF_ACCEL())
+            sum = (unsigned int)wolf_sum(sum, pixels, w, h, pitch, pal);
+        else {
+            y = 0;
+            while (y < h) {
+                words = (unsigned int *)(pixels + y * pitch);
+                x = 0;
+                while (x < w / 4) {
+                    sum = (sum * 31 + words[x]) & 0xFFFFFFFF;
+                    ++x;
+                }
+                ++y;
+            }
             x = 0;
-            while (x < w / 4) {
-                sum = (sum * 31 + words[x]) & 0xFFFFFFFF;
+            while (x < 256) {
+                sum = (sum * 31 + pal[x].r * 65536 + pal[x].g * 256 + pal[x].b) & 0xFFFFFFFF;
                 ++x;
             }
-            ++y;
-        }
-        x = 0;
-        while (x < 256) {
-            sum = (sum * 31 + pal[x].r * 65536 + pal[x].g * 256 + pal[x].b) & 0xFFFFFFFF;
-            ++x;
         }
         c4sdl_sum = sum;
         ++c4sdl_frames;

@@ -1,5 +1,5 @@
 B4KE2
-# The C4IX kernel: twelve modules and a link, as build-images.sh and
+# The C4IX kernel: thirteen modules and a link, as build-images.sh and
 # `make c4ix.c4r` build it. The result is $(OUT)/c4ix.c4r, a kernel the
 # page can boot (?image=) once something gets it off the RAM disk.
 # Every module includes c4ix.h, so a change there rebuilds them all.
@@ -9,7 +9,7 @@ SET OUT /build
 # at 7.4 KB, most of it c4ix.h's struct task, at 108 bytes a member
 # (measured 2026-10-25). The 1 MB this set was for a c4lc bug,
 # g:resolvecode recursing once per instruction (fixed in 29cbac9).
-SET LC c4sc -c 400000 compile -O -c -I src/c4ix
+SET LC c4sc -c 65536 compile -O -c -I src/c4ix
 SET H src/c4ix/c4ix.h
 CD $(ROOT)
 MKDIR $(OUT)/kernel
@@ -35,9 +35,11 @@ DEPS $(OUT)/kernel/c4ke.c4o : src/c4ix/c4ke.c $(H)
 RUN $(LC) src/c4ix/c4ke.c $(OUT)/kernel/c4ke.c4o
 DEPS $(OUT)/kernel/loader.c4o : src/c4ix/loader.c $(H)
 RUN $(LC) src/c4ix/loader.c $(OUT)/kernel/loader.c4o
+DEPS $(OUT)/kernel/mmu.c4o : src/c4ix/mmu.c $(H)
+RUN $(LC) src/c4ix/mmu.c $(OUT)/kernel/mmu.c4o
 DEPS $(OUT)/kernel/init.c4o : src/c4ix/init.c $(H)
 RUN $(LC) src/c4ix/init.c $(OUT)/kernel/init.c4o
-SET OBJS boot.c4o console.c4o va.c4o host.c4o sl4b.c4o task.c4o sched.c4o vfs.c4o sys.c4o c4ke.c4o loader.c4o init.c4o
+SET OBJS boot.c4o console.c4o va.c4o host.c4o sl4b.c4o task.c4o sched.c4o vfs.c4o sys.c4o c4ke.c4o loader.c4o mmu.c4o init.c4o
 CD $(OUT)/kernel
 LIST c4ix.objs $(OBJS)
 DEPS $(OUT)/c4ix.c4r : $(OBJS)

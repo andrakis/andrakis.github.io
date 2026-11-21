@@ -381,10 +381,14 @@
 	(begin
 		(define c (string:byte lex:src i))
 		(if (= c 92)
+			;; -conforming: a backslash-newline in a string is nothing at all
+			;; (C's phase 2). c4cc's escape table keeps the newline.
+			(if (if lex:conforming (= (lex:peek (+ i 1)) 10) false)
+				(next lex:strdecode (+ i 2) end buf n)
 			(begin
 				(define j (lex:escape2 (+ i 1)))
 				(string:byte! buf n lex:val)
-				(next lex:strdecode j end buf (+ n 1)))
+				(next lex:strdecode j end buf (+ n 1))))
 		(begin
 			(string:byte! buf n c)
 			(next lex:strdecode (+ i 1) end buf (+ n 1))))))))
@@ -615,7 +619,8 @@
 		(define fp (string:substr lex:src fs (- fe fs)))
 		(define x0 (if (lex:expat? fe) (+ fe 1) fe))
 		(define neg (= (lex:peek x0) 45))
-		(define x1 (if (if (= (lex:peek x0) 43) true neg) (+ x0 1) x0))
+		;; (no exponent, no sign: in 1.0-x the - is the expression's)
+		(define x1 (if (= x0 fe) x0 (if (if (= (lex:peek x0) 43) true neg) (+ x0 1) x0)))
 		(define x2 (if (= x0 fe) x1 (lex:decimal x1 0)))
 		(define ev (if (= x0 fe) 0 (if neg (- 0 lex:val) lex:val)))
 		(define sc (lex:peek x2))

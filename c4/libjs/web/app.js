@@ -2,16 +2,28 @@
 //
 // URL parameters:
 //   ?system=NAME                 which machine to boot (default c4ix): c4ix, c4ke,
-//                                c4dos, c4dos-ladder, wolf3d, wolf3d6, wolf3d-c4ix, doom, tyrian, rott, gui-demo, fb-demo,
+//                                c4dos, c4dos-ladder, wolf3d, wolf3d6, wolf3d-c4ix, doom, doom-full,
+//                                doom1-full, doom2-full, tnt-full, plutonia-full, tyrian, rott,
+//                                rottreg, quake, quake-full, duke3d, duke3d-full, gui-demo, fb-demo,
 //                                snd-demo, raycast -- SYSTEMS below
 //   ?image=URL&disk=URL          any other image and disk instead
 //   ?args=A+B                    more arguments for the system's program, after its
 //                                own: ?system=wolf3d&args=--secrets+--nodeath
 //   ?mhz=N                       how fast the machine runs, paced (default 100)
 //   ?snd=0                       no sound card
+//   ?music=gm | midi             the games' music in General MIDI rather than on the
+//                                AdLib: gm plays it with a SoundFont from the Uploads
+//                                (?soundfont=NAME picks one; the first by default),
+//                                midi sends it to the computer's own synth by Web
+//                                MIDI (?midiout=NAME picks an output) -- page.js
 //   ?cpus=N                      N processors, simulated (smp.js, docs/c4ix-smp.md)
 //   ?parallel                    ... each on a worker of its own (par.js), when the
 //                                page is cross-origin isolated (serve.mjs --isolate)
+//   ?mmu=1 | 0                   fit an MMU (mmu.js, docs/c4ix-mmu.md), or not: C4IX
+//                                turns it on, and its user tasks each get an address
+//                                space of their own; nothing else uses it. Off
+//                                unless ?mmu=1 (or the Configuration dialog says
+//                                so), for what it costs; the browser checks fit one
 //   ?persist=0 | reset           the system's saved files (its store, SYSTEMS' `persist`) are
 //                                not kept between visits / are forgotten first
 //   ?uploads=0                   the Uploads (your own files) are not put on the disk
@@ -31,7 +43,10 @@
 // test can drive it: c4m.write('ps\n'), c4m.status, await c4m.peek(a, n).
 
 import { C4M } from '../page.js';
+import { SITE } from './site.js';
 import { MediaStore, indexedDbBackend } from '../../src/c4bb/web/store.js';
+import { FOLDERS, uploadName, uploadParts, needsStatus } from '../uploads.js';
+import { keptFiles, keptFolders, folderTar } from '../kept.js';
 
 // On a host that cannot isolate the page, coi.js reloads it once with a
 // service worker that does: nothing boots before that
@@ -45,15 +60,22 @@ const LJIMAGES = '../images';          // the page's own disks (build-images.sh)
 // the ladder system has `ladder` -- so Reset Files and
 // ?persist= touch the current system's alone (docs/grin-plan.md 3.8).
 const SYSTEMS = {
-  c4ix: { label: 'C4IX', image: `${IMAGES}/c4ix32.c4r`, disk: `${IMAGES}/disk`, argv: ['c4ix32.c4r', '--desktop'], persist: 'c4ix' },
+  c4ix: { label: 'C4IX', image: `${IMAGES}/c4ix32.c4r`, disk: `${IMAGES}/disk`, argv: ['c4ix32.c4r', '--desktop'], persist: 'c4ix', mmu: true },
   c4ke: { label: 'C4KE', image: `${IMAGES}/c4ke32.c4r`, disk: `${IMAGES}/disk`, argv: ['c4ke32.c4r'] },
   // C4DOS on the page's own disk (build-images.sh, libjs/images/dos):
   // its AUTOEXEC.BAT starts grin, the graphical shell (docs/grin-plan.md),
   // whose File > Exit grin comes back to the prompt. The games are on it
   // too, each in its directory (\GAMES\DOOM: CD there, then DOOM). Its CONFIG.SYS
   // says DRIVES.SYS HOME=B:, so what is saved goes to B:, the store.
+  // 256 MB, as the bare machine's biggest games have: the bare libc reads a
+  // file into memory whole, in a buffer that doubles as it fills, so Quake's
+  // 18 MB pak0 wants 48 MB free while it is read (64 MB, less the RAM disk's
+  // 16 and grin's, found no pak at all), and the person's own files, from
+  // the Uploads, more: Duke's 44 MB GRP, Quake's 34 MB pak1.
+  // The Uploads are on B:, the home drive, not on A: with the system
+  // (uploadsHome: uploads.js HomeFiles): B:\DUKE3D\DUKE3D.GRP.
   c4dos: { label: 'C4DOS', image: `${LJIMAGES}/dos/c4dos32.c4r`, disk: `${LJIMAGES}/dos`, argv: ['c4dos32.c4r'], mhz: 400,
-           persist: 'c4dos' },
+           mem: 256, persist: 'c4dos', uploadsHome: true },
   // The Build Ladder (build-images.sh, libjs/images/ladder;
   // docs/c4dos-ladder.md): C4DOS with the games, and what it takes to
   // climb in one sitting -- BUILD compiles C4KE, dosload boots it, C4KE
@@ -81,6 +103,16 @@ const SYSTEMS = {
              disk: `${IMAGES}/games`, argv: ['wolf3d6.c4r'], mhz: 400, persist: 'wolf3d' },
   doom: { label: 'Doom (bare machine)', image: `${IMAGES}/games/doom.c4r`, disk: `${IMAGES}/games`,
           argv: ['doom.c4r'], mhz: 400, persist: 'doom' },
+  // ... and the person's own IWAD (doom.wad, doom2.wad, plutonia.wad,
+  // tnt.wad), which the Uploads put in doom/ or at the root (doom -home,
+  // games/doom/README.md): read whole when it opens, Doom II's 14 MB
+  'doom-full': { label: 'Doom, your files (bare machine)', image: `${IMAGES}/games/doom.c4r`, disk: `${IMAGES}/games`,
+                 argv: ['doom.c4r', '-home'], mhz: 400, mem: 128, persist: 'doom' },
+  // ... or one of them by name (-iwad), when there are several
+  ...Object.fromEntries([['doom1', 'The Ultimate Doom', 'doom.wad'], ['doom2', 'Doom II', 'doom2.wad'],
+                         ['tnt', 'Final Doom: TNT', 'tnt.wad'], ['plutonia', 'Final Doom: Plutonia', 'plutonia.wad']]
+    .map(([k, what, wad]) => [`${k}-full`, { label: `Doom, your files: ${what} (bare machine)`, image: `${IMAGES}/games/doom.c4r`,
+      disk: `${IMAGES}/games`, argv: ['doom.c4r', '-home', '-iwad', wad], mhz: 400, mem: 128, persist: 'doom' }])),
   // OpenTyrian (games/tyrian), where Tyrian's data was there to put on
   // the disk (games/tyrian/data/README.md)
   tyrian: { label: 'Tyrian (bare machine)', image: `${IMAGES}/games/tyrian.c4r`, disk: `${IMAGES}/games`,
@@ -88,8 +120,32 @@ const SYSTEMS = {
   // Rise of the Triad (games/rott), the shareware episode
   rott: { label: 'Rise of the Triad (bare machine)', image: `${IMAGES}/games/rott.c4r`, disk: `${IMAGES}/games`,
           argv: ['rott.c4r'], mhz: 400, persist: 'rott' },
+  // ... and the registered game, rottreg, from the person's own DARKWAR
+  // files, which the Uploads put in rott/ or at the root (games/rott/README.md).
+  // A store of its own: its saved games are not the shareware's.
+  rottreg: { label: 'Rise of the Triad, your files (bare machine)', image: `${IMAGES}/games/rottreg.c4r`,
+             disk: `${IMAGES}/games`, argv: ['rottreg.c4r'], mhz: 400, persist: 'rottreg' },
+  // Quake (games/quake), the shareware episode. The bare libc holds a file in
+  // memory whole, and its pak is 18 MB.
+  quake: { label: 'Quake (bare machine)', image: `${IMAGES}/games/quake.c4r`, disk: `${IMAGES}/games`,
+           argv: ['quake.c4r'], mhz: 400, mem: 128, persist: 'quake' },
+  // ... and the registered game from the person's own pak1.pak (and
+  // pak0.pak), which the Uploads put in quake/ or at the root (quake -home,
+  // games/quake/README.c4.md): 18 and 34 MB, each read whole when it opens
+  'quake-full': { label: 'Quake, your files (bare machine)', image: `${IMAGES}/games/quake.c4r`, disk: `${IMAGES}/games`,
+                  argv: ['quake.c4r', '-home'], mhz: 400, mem: 256, persist: 'quake' },
+  // Duke Nukem 3D (games/duke3d), the shareware episode; and the full game
+  // from the person's own DUKE3D.GRP, which the Uploads put on the disk
+  // (duke3d -home). The bare libc holds a file in memory whole, and the
+  // Atomic Edition's GRP is 44 MB: read into a buffer that doubles as it
+  // fills, 32 MB and 64 MB at once, which 128 MB did not have room for
+  // (160 MB did; more for the bigger screen sizes).
+  duke3d: { label: 'Duke Nukem 3D (bare machine)', image: `${IMAGES}/games/duke3d.c4r`, disk: `${IMAGES}/games`,
+            argv: ['duke3d.c4r'], mhz: 400, mem: 64, persist: 'duke3d' },
+  'duke3d-full': { label: 'Duke Nukem 3D, your files (bare machine)', image: `${IMAGES}/games/duke3d.c4r`,
+                   disk: `${IMAGES}/games`, argv: ['duke3d.c4r', '-home'], mhz: 400, mem: 192, persist: 'duke3d' },
   'wolf3d-c4ix': { label: 'Wolfenstein 3D (C4IX, direct)', image: `${IMAGES}/c4ix32.c4r`, disk: `${IMAGES}/disk`,
-                   argv: ['c4ix32.c4r', '-e', 'persist -d 60 &', '-e', 'wolf3d --direct'], persist: 'c4ix', mhz: 400 },
+                   argv: ['c4ix32.c4r', '-e', 'persist -d 60 &', '-e', 'wolf3d --direct'], persist: 'c4ix', mhz: 400, mmu: true },
   'gui-demo': { label: 'GUI demo (bare machine)', image: `${IMAGES}/gui-demo.c4r`, disk: null, argv: ['gui-demo.c4r'] },
   // Computes every pixel itself, so it claims a faster clock than c4bb's 20 MHz.
   'fb-demo': { label: 'Framebuffer demo (bare machine)', image: `${IMAGES}/fb-demo.c4r`, disk: null, argv: ['fb-demo.c4r'], mhz: 100 },
@@ -131,6 +187,11 @@ const sys = params.get('image')
   ? { image: params.get('image'), disk: params.get('disk'), argv: [params.get('image').split('/').pop()] }
   : SYSTEMS[which] || SYSTEMS.c4ix;
 
+// The MMU: off unless asked for (?mmu=1), since what it costs is what the
+// games feel (docs/c4ix-mmu.md 12); a site may fit one by default
+// (site.js), on a system that has one. The tests ask for it.
+const mmuDefault = !!sys.mmu && SITE.mmu === true;
+
 const status = $('status');
 const kbd = $('kbd');
 const term = $('terminal');
@@ -139,6 +200,19 @@ const info = $('display-info');
 
 function fmtRate(ips) {
   return ips >= 1e6 ? (ips / 1e6).toFixed(1) + 'M' : ips >= 1e3 ? (ips / 1e3).toFixed(0) + 'k' : String(ips);
+}
+// shorter, for a figure per CPU: 390M, 98M, 9.8M, 1.2G, 640k
+function fmtShort(ips) {
+  const u = ips >= 1e9 ? [1e9, 'G'] : ips >= 1e6 ? [1e6, 'M'] : ips >= 1e3 ? [1e3, 'k'] : [1, ''];
+  const x = ips / u[0];
+  return (x >= 10 || u[0] === 1 ? Math.round(x) : x.toFixed(1)) + u[1];
+}
+// the status line's speed: with one CPU its figure; with more, each CPU's
+// and their sum, as "inst/s 98M 97M 99M 96M = 390M" (worker.js cpuIps)
+function fmtSpeed(s) {
+  const c = s.cpuIps;
+  if (!c || c.length < 2) return `${fmtRate(c ? c[0] : s.ips)} inst/s`;
+  return `inst/s ${c.map(fmtShort).join(' ')} = ${fmtShort(c.reduce((a, b) => a + b, 0))}`;
 }
 
 const extraArgs = (params.get('args') || '').split(/\s+/).filter(Boolean);
@@ -154,14 +228,21 @@ const opts = {
   unpaced: params.has('fast') || !!sys.unpaced,
   realtime: params.get('realtime') !== '0',
   fpu: params.get('fpu') !== '0',
+  accel: params.get('accel') !== '0',  // the accelerators (accel.js, docs/accel.md)
+  osAccel: params.get('osaccel') !== '0',  // ... C4IX's own among them, which its Settings may turn
   arenaMb: Number(params.get('mem')) || sys.mem || 64,
   shared: params.get('shared') !== '0',
   snd: params.get('snd') !== '0',
+  music: params.get('music') || 'opl',
+  soundfont: params.get('soundfont') || '',
+  midiOut: params.get('midiout') || '',
   cpus: Number(params.get('cpus')) || 0,
   parallel: params.has('parallel'),
+  mmu: (params.get('mmu') ?? (mmuDefault ? '1' : '0')) === '1',
   persist: params.get('persist') === '0' ? null : sys.persist || null,
   persistReset: params.get('persist') === 'reset',
   uploads: params.get('uploads') === '0' ? null : UPLOADS,
+  uploadsHome: !!sys.uploadsHome,
 };
 // Configuration: the URL's parameters (above) as a form. OK writes the ones
 // that differ from their defaults into the URL, keeps any it does not know,
@@ -177,9 +258,22 @@ const CONFIG = [
     help: 'empty or 1 is one; more are simulated, taking turns' },
   { key: 'parallel', label: 'A thread each', kind: 'flag', tab: 'machine',
     help: 'several processors at once, each on a worker (needs the page cross-origin isolated)' },
+  { key: 'mmu', label: 'MMU', kind: 'select', tab: 'machine', def: mmuDefault ? '1' : '0',
+    options: [['0', 'off'], ['1', 'on: C4IX gives each program its own memory']],
+    help: 'paged memory with protection: a program that writes where it should not is stopped, and nothing else is hurt (C4IX only)' },
+  { key: 'accel', label: 'Accelerators', kind: 'onoff', def: true, tab: 'machine',
+    help: "loops a program hands to the browser, one instruction however much they do: Duke Nukem 3D's and Quake's drawing, C4IX's unpacking (docs/accel.md)" },
+  { key: 'osaccel', label: 'C4IX accelerators', kind: 'onoff', def: true, tab: 'machine',
+    help: "C4IX's own: its gzip and CRC-32, so the root archive unpacks at boot in a fraction of the time; the desktop's Settings turns them too, and this follows" },
   { key: 'mem', label: 'Memory (MB)', kind: 'text', tab: 'machine', options: ['32', '64', '128', '256'],
     help: `the arena; empty is the system's own (${sys.mem || 64})` },
   { key: 'snd', label: 'Sound card', kind: 'onoff', def: true },
+  { key: 'music', label: 'Music', kind: 'select', def: 'opl',
+    options: [['opl', 'AdLib (OPL FM synthesis)'], ['gm', 'General MIDI: a SoundFont from the Uploads'],
+      ['midi', "General MIDI: the computer's own synth (Web MIDI)"]],
+    help: "Doom, Duke Nukem 3D and Rise of the Triad play their music in General MIDI, as on a Sound Canvas; the other games have only the AdLib's" },
+  { key: 'soundfont', label: 'SoundFont', kind: 'text', options: [],
+    help: 'which upload (.sf2, .sf3, .dls) General MIDI plays with; empty: the first in /home/soundfonts, else the first' },
   { key: 'fpu', label: 'FPU', kind: 'onoff', def: true, help: 'off: floats in software' },
   { key: 'realtime', label: 'Keep the wall clock', kind: 'onoff', def: true,
     help: 'off: when the host cannot keep up, the machine slows down instead of dropping frames' },
@@ -342,7 +436,16 @@ window.c4m = vm;
 vm.on('loading', ({ n, of }) => { status.textContent = `loading disk ${n}/${of}`; });
 vm.on('status', s => {
   if (s.state === 'loading') return;
-  const parts = [s.state, `${fmtRate(s.ips)} inst/s`, `cpu ${Math.round((s.busy || 0) * 100)}%`,
+  // C4IX's Settings turned its accelerators: the URL follows, so the next
+  // boot (and the Configuration dialog) keeps what it chose
+  if (opts.accel && typeof s.osAccel === 'boolean' && s.osAccel !== opts.osAccel) {
+    opts.osAccel = s.osAccel;
+    const p = new URLSearchParams(location.search);
+    if (s.osAccel) p.delete('osaccel'); else p.set('osaccel', '0');
+    const q = p.toString();
+    history.replaceState(history.state, '', location.pathname + (q ? '?' + q : '') + location.hash);
+  }
+  const parts = [s.state, fmtSpeed(s), `cpu ${Math.round((s.busy || 0) * 100)}%`,
                  `t ${((s.simMs || 0) / 1000).toFixed(1)}s`];
   status.textContent = parts.join(' · ');
   if (s.gui && s.gui.attached)
@@ -351,6 +454,16 @@ vm.on('status', s => {
 vm.on('kbd', ({ raw }) => updateKbd());
 vm.on('exit', e => { status.textContent = `halted, status ${e.status} after ${e.cycles} cycles`; });
 vm.on('error', e => { status.textContent = e.message; });
+// how the music plays (page.js's musicFor), when it is not the AdLib or
+// the AdLib was not what was asked for
+const musicEl = document.createElement('span');
+musicEl.id = 'music';
+status.after(musicEl);
+vm.on('music', m => {
+  const what = m.music === 'gm' ? `General MIDI · ${m.name}` : m.music === 'midi' ? `General MIDI · ${m.name}` : 'AdLib';
+  musicEl.textContent = m.music === 'opl' && !m.why ? '' : `music: ${what}${m.why ? ` (${m.why})` : ''}`;
+  musicEl.title = m.why || '';
+});
 
 function updateKbd() {
   const focused = document.activeElement === term;
@@ -365,8 +478,10 @@ term.focus();
 // ---- the splitter, and the display scaled to its pane ----------------------
 // The terminal's width is dragged; the display takes the rest, and the
 // canvas is scaled to fit it, keeping its shape. When a whole-number scale
-// (1x, 2x, ...) is within 15% of the best fit, it snaps to that and draws
-// with sharp pixels; otherwise it scales smoothly.
+// (1x, 2x, ...) is within 5% of the best fit, it snaps to that and draws
+// with sharp pixels; otherwise it scales smoothly. (Within 15% it was:
+// 1024x768 in a pane that fits it 1.13 times was left at 1x, with a
+// border of an eighth all round.)
 const panes = $('panes'), splitter = $('splitter'), wrap = $('display-wrap');
 const TERM_W_KEY = 'c4m.js:term-w';
 const setTermW = px => {
@@ -403,7 +518,7 @@ function fitDisplay() {
   if (aw <= 0 || ah <= 0 || !canvas.width) return;
   const fit = Math.min(aw / canvas.width, ah / canvas.height);
   const whole = Math.floor(fit);
-  const scale = whole >= 1 && whole >= fit * 0.85 ? whole : fit;
+  const scale = whole >= 1 && whole >= fit * 0.95 ? whole : fit;
   canvas.style.width = Math.floor(canvas.width * scale) + 'px';
   canvas.style.height = Math.floor(canvas.height * scale) + 'px';
   canvas.classList.toggle('crisp', Number.isInteger(scale));
@@ -411,6 +526,13 @@ function fitDisplay() {
 }
 new ResizeObserver(fitDisplay).observe(wrap);
 vm.on('resize', () => requestAnimationFrame(fitDisplay));
+// and whenever the canvas is sized at all: the worker says so ('resize')
+// for the size registers, a program's attach, but a SIZE command in the
+// shared ring -- the desktop's Settings, wk_screen -- sizes it in
+// display.js without a word to the page, and the canvas kept the scale
+// of the size before
+new MutationObserver(() => requestAnimationFrame(fitDisplay))
+  .observe(canvas, { attributes: true, attributeFilter: ['width', 'height'] });
 fitDisplay();
 
 try {
@@ -422,6 +544,7 @@ try {
 
 $('reset').addEventListener('click', () => { vm.reset(); term.focus(); });
 $('ctrlc').addEventListener('click', () => { vm.signal(2); term.focus(); });
+$('pastebtn').addEventListener('click', () => vm.pasteClipboard());
 // Reset Files: only where the page keeps the system's files (?persist=0
 // has none), and only this system's store
 const filesBtn = $('resetfiles');
@@ -446,24 +569,55 @@ filesBtn.addEventListener('click', async () => {
 // are what the person brings (Wolfenstein's registered data, a WAD),
 // read-only on drive 0 where every system reads -- the bare games, which
 // look on drive 1 and then drive 0; C4DOS, which finds them on A: and
-// lists them there (worker.js adds them to A:'s c4dos.dir); C4IX -- so
+// lists them there (uploads.js adds them to A:'s c4dos.dir); C4IX, which
+// lists them in /home (uploads.js again, and the manifest's hostdir) -- so
 // one upload serves wolf3d6 on the bare machine and WOLF3D under C4DOS.
 // Nothing a system writes goes here, and Reset Files leaves them alone:
 // Uploads' own Forget and Forget all do that.
+//
+// Each upload goes in a folder, picked before the files are (FOLDERS,
+// uploads.js): /home, or a game's own, /home/doom and the like, where
+// that game looks first. Its name in the store is the folder's and the
+// file's, "doom/doom2.wad"; one in /home is the file's alone, as before.
 const upDialog = $('uploads'), upList = $('uploads-list'), upInput = $('uploads-input');
+const upFolder = $('uploads-folder');
 const upStore = () => vm.store || (vm.store = new MediaStore(indexedDbBackend()));
 const fmtSize = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' bytes';
+for (const [f, label, what] of FOLDERS) {
+  const o = document.createElement('option');
+  o.value = f; o.textContent = label; if (what) o.title = what;
+  upFolder.append(o);
+}
+// the folder last picked, for this browser (a convenience: /home without it)
+try { const f = localStorage.getItem('c4m.uploadFolder'); if (FOLDERS.some(([k]) => k === f)) upFolder.value = f; } catch { /* no storage */ }
+const folderHint = () => { $('uploads-folder-what').textContent = (FOLDERS.find(([f]) => f === upFolder.value) || [])[2] || ''; };
+upFolder.addEventListener('change', () => {
+  folderHint();
+  try { localStorage.setItem('c4m.uploadFolder', upFolder.value); } catch { /* no storage */ }
+});
+folderHint();
 async function upFiles() {
-  try { return [...(await upStore().load(UPLOADS))].sort(([a], [b]) => (a < b ? -1 : 1)); } catch { return []; }
+  // by folder, /home's first, then by name
+  const key = n => { const [f, file] = uploadParts(n); return [f, file]; };
+  try {
+    return [...(await upStore().load(UPLOADS))].sort(([a], [b]) => {
+      const [fa, na] = key(a), [fb, nb] = key(b);
+      return fa !== fb ? (fa < fb ? -1 : 1) : na < nb ? -1 : na > nb ? 1 : 0;
+    });
+  } catch { return []; }
 }
 async function upShow() {
   const files = await upFiles();
   upList.replaceChildren();
   for (const [name, data] of files) {
+    const [folder, file] = uploadParts(name);
     const li = document.createElement('li');
-    const n = document.createElement('span'); n.className = 'name'; n.textContent = name;
+    const n = document.createElement('span'); n.className = 'name';
+    const d = document.createElement('span'); d.className = 'dim'; d.textContent = `/home/${folder ? folder + '/' : ''}`;
+    n.append(d, file);
     const z = document.createElement('span'); z.className = 'dim'; z.textContent = fmtSize(data.length);
     const x = document.createElement('button'); x.type = 'button'; x.className = 'small'; x.textContent = 'Forget';
+    x.title = `forget ${file}, in /home/${folder ? folder + '/' : ''}`;
     x.addEventListener('click', () => upForget(name));
     li.append(n, z, x);
     upList.append(li);
@@ -473,10 +627,38 @@ async function upShow() {
     upList.append(li);
   }
   $('uploadsbtn').textContent = files.length ? `Uploads (${files.length})` : 'Uploads';
+  upNeeds(files.map(([n]) => n));
+}
+// What the games that play your own files want (uploads.js NEEDS), each
+// file found or not among the uploads, and where to start the game: so the
+// list says what is still to add, and in which folder.
+function upNeeds(names) {
+  const el = $('uploads-needs');
+  el.replaceChildren();
+  const span = (cls, text) => { const s = document.createElement('span'); if (cls) s.className = cls; s.textContent = text; return s; };
+  for (const { need, have, missing, anyMissing, ready } of needsStatus(names)) {
+    const li = document.createElement('li');
+    if (ready) li.className = 'ready';
+    const head = document.createElement('div');
+    head.append(span('mark', ready ? '✓' : '·'), span('game', need.game), span('dim', ` in /home/${need.folder}`));
+    const files = document.createElement('div'); files.className = 'files';
+    const file = (f, how) => {
+      const got = have.includes(f);
+      files.append(span(got ? 'got' : how === 'opt' ? 'dim' : 'want', (got ? '✓ ' : '') + f + (how === 'opt' ? ' (if you have it)' : '')), ' ');
+    };
+    for (const f of need.all || []) file(f, 'all');
+    if (need.any) { files.append(span('dim', need.all ? 'and one of: ' : 'one of: ')); for (const f of need.any) file(f, 'any'); }
+    for (const f of need.opt || []) file(f, 'opt');
+    const left = missing.length ? `${missing.length} to add` : anyMissing.length ? 'one of them to add' : 'ready';
+    const run = document.createElement('div'); run.className = 'run dim';
+    run.textContent = `${left} — C4DOS: on ${need.dos}, grin's ${need.c4dos}; C4IX: ${need.c4ix}; bare machine: system ${need.bare}`;
+    li.append(head, files, run);
+    el.append(li);
+  }
 }
 async function upAdd(list) {
   try {
-    for (const f of list) await upStore().backend.putFile(UPLOADS, f.name.toLowerCase(), new Uint8Array(await f.arrayBuffer()));
+    for (const f of list) await upStore().backend.putFile(UPLOADS, uploadName(upFolder.value, f.name), new Uint8Array(await f.arrayBuffer()));
   } catch (e) { alert(`Could not keep the files in this browser: ${e.message || e}`); }
   await upShow();
 }
@@ -508,6 +690,73 @@ addEventListener('drop', async e => {
   if (!upDialog.open) upDialog.showModal();
 });
 upShow();
+
+// ---- Downloads: files of the machine's, saved where the browser keeps them ----
+// Two ways, for two needs (libjs/README.md, "Downloads"):
+// - C4IX hands a file over as it is now: `download PATH` in a shell, or
+//   Files' File > Download, a folder as a tar (src/c4ix/user/persist.c).
+//   It reaches the page as the worker's `download` (devices.js
+//   "download:NAME"), saved here at once.
+// - Saved Files lists what the system keeps in this browser, its store
+//   (drive 1, SYSTEMS' `persist`), read from IndexedDB without the
+//   machine: every system's -- the bare games' saves, C4DOS's B:, C4IX's
+//   changes as its last save kept them (kept.js) -- with a file, a
+//   folder or the lot to download.
+function saveAs(name, bytes) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = name.split('/').pop() || 'download';
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+vm.on('download', ({ name, bytes }) => saveAs(name, bytes));
+
+const svDialog = $('saved'), svList = $('saved-list');
+async function svFiles() {
+  try { return keptFiles(await upStore().load(vm.persistName)); } catch { return []; }
+}
+async function svShow() {
+  const files = await svFiles();
+  const isC4ix = files.some(([p]) => p.startsWith('/'));
+  $('saved-what').textContent = `What ${keptBy} keeps in this browser (its drive 1, the store "${vm.persistName}"), ` +
+    (isC4ix ? 'as its last save kept it: the desktop saves a minute after a change, and at Shut Down. ' +
+              'In C4IX, Files\' File > Download (or download in a shell) hands over a file as it is now.'
+            : 'as the system last wrote it.');
+  svList.replaceChildren();
+  const row = (cls, label, size, button, title, onclick) => {
+    const li = document.createElement('li'); li.className = cls;
+    const n = document.createElement('span'); n.className = 'name'; n.textContent = label;
+    const z = document.createElement('span'); z.className = 'dim'; z.textContent = size;
+    const x = document.createElement('button'); x.type = 'button'; x.className = 'small'; x.textContent = button; x.title = title;
+    x.addEventListener('click', onclick);
+    li.append(n, z, x);
+    svList.append(li);
+  };
+  const dirOf = p => p.slice(0, Math.max(0, p.lastIndexOf('/')));
+  for (const [folder, all] of keptFolders(files)) {
+    const here = files.filter(([p]) => dirOf(p) === folder);
+    if (!here.length && folder) continue;   // a folder with only folders in it: its own row is noise
+    const shown = isC4ix ? (folder || '/') : (folder ? folder + '/' : '(the top)');
+    row('folder', shown, `${all.length} file${all.length === 1 ? '' : 's'}`, '.tar', `download ${shown} and all in it, as a tar`,
+        () => { const t = folderTar(files, folder, vm.persistName); saveAs(t.name, t.bytes); });
+    for (const [p, b] of here)
+      row('file', p.slice(folder ? folder.length + 1 : 0), fmtSize(b.length), 'Download', `download ${p}`, () => saveAs(p, b));
+  }
+  if (!files.length) {
+    const li = document.createElement('li'); li.className = 'none'; li.textContent = 'nothing kept yet';
+    svList.append(li);
+  }
+  $('saved-all').disabled = !files.length;
+}
+if (vm.persistName) $('savedbtn').style.display = '';
+$('savedbtn').addEventListener('click', async () => { await svShow(); svDialog.showModal(); });
+$('saved-refresh').addEventListener('click', svShow);
+$('saved-all').addEventListener('click', async () => {
+  const t = folderTar(await svFiles(), '', vm.persistName);
+  saveAs(t.name, t.bytes);
+});
+// what the machine keeps while the list is open
+vm.on('persist', () => { if (svDialog.open) svShow(); });
 
 const pauseBtn = $('pause');
 let paused = false;

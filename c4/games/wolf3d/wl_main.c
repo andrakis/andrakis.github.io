@@ -7,6 +7,7 @@
 #endif
 
 #include "wl_def.h"
+#include "c4/c4accel.h"         // c4sdl: the browser's accelerators
 #include "wl_atmos.h"
 #include <SDL_syswm.h>
 
@@ -181,6 +182,13 @@ void ReadConfig(void)
 
         fread (&viewsize,sizeof(viewsize),1,file);
         fread (&mouseadjustment,sizeof(mouseadjustment),1,file);
+        {
+            // c4sdl: the Control menu's Accelerated; a config from before
+            // it leaves it on
+            int32_t on;
+            if (fread (&on,sizeof(on),1,file) == 1) wolf_accel_on = on != 0;
+            wolf_accel = -1;
+        }
 
         fclose (file);
 
@@ -300,6 +308,10 @@ void WriteConfig(void)
 
         fwrite (&viewsize,sizeof(viewsize),1,file);
         fwrite (&mouseadjustment,sizeof(mouseadjustment),1,file);
+        {
+            int32_t on = wolf_accel_on;     // c4sdl: Accelerated
+            fwrite (&on,sizeof(on),1,file);
+        }
 
         fclose (file);
     }
@@ -374,6 +386,10 @@ int32_t DoChecksum (void *source, unsigned size, int32_t checksum)
 extern statetype s_grdstand;
 extern statetype s_player;
 
+#ifdef REVEALMAP
+#define MAPSEENTAG "MAPSEEN"        // c4sdl: 8 bytes with its 0
+#endif
+
 boolean SaveTheGame (FILE *file, int x, int y)
 {
     int       i,j;
@@ -397,11 +413,6 @@ boolean SaveTheGame (FILE *file, int x, int y)
     DiskFlopAnim (x,y);
     fwrite (tilemap,sizeof(tilemap),1,file);
     checksum = DoChecksum(tilemap,sizeof(tilemap),checksum);
-#ifdef REVEALMAP
-    DiskFlopAnim (x,y);
-    fwrite (mapseen,sizeof(mapseen),1,file);
-    checksum = DoChecksum(mapseen,sizeof(mapseen),checksum);
-#endif
     DiskFlopAnim (x,y);
 
     for (i = 0; i < mapwidth; i++)
@@ -484,6 +495,16 @@ boolean SaveTheGame (FILE *file, int x, int y)
 
     fwrite (&lastgamemusicoffset,sizeof(lastgamemusicoffset),1,file);
 
+#ifdef REVEALMAP
+    //
+    // c4sdl: the automap's tiles seen, after all the original format has,
+    // with a tag: a game saved without them loads with none seen, and an
+    // older build reads this one, stopping before them
+    //
+    fwrite (MAPSEENTAG,8,1,file);
+    fwrite (mapseen,sizeof(mapseen),1,file);
+#endif
+
     return true;
 }
 
@@ -504,6 +525,9 @@ boolean LoadTheGame (FILE *file, int x, int y)
     word      laststatobjnum;
     word      *map,tile;
     int32_t   checksum,oldchecksum;
+#ifdef REVEALMAP
+    char      tag[8];
+#endif
     objtype   *newobj = NULL;
     objtype   nullobj;
     statobj_t *statobj;
@@ -525,11 +549,6 @@ boolean LoadTheGame (FILE *file, int x, int y)
     DiskFlopAnim (x,y);
     fread (tilemap,sizeof(tilemap),1,file);
     checksum = DoChecksum(tilemap,sizeof(tilemap),checksum);
-#ifdef REVEALMAP
-    DiskFlopAnim (x,y);
-    fread (mapseen,sizeof(mapseen),1,file);
-    checksum = DoChecksum(mapseen,sizeof(mapseen),checksum);
-#endif
     DiskFlopAnim (x,y);
 
     for (i = 0; i < mapwidth; i++)
@@ -650,6 +669,17 @@ boolean LoadTheGame (FILE *file, int x, int y)
 
     if (lastgamemusicoffset < 0)
         lastgamemusicoffset = 0;
+
+#ifdef REVEALMAP
+    // c4sdl: the automap's tiles seen, if the game was saved with them
+    // (SaveTheGame); SetupGameLevel cleared them
+    memset (tag,0,sizeof(tag));
+    if (fread (tag,8,1,file) == 1 && !memcmp (tag,MAPSEENTAG,8))
+    {
+        if (fread (mapseen,sizeof(mapseen),1,file) != 1)
+            memset (mapseen,0,sizeof(mapseen));
+    }
+#endif
 
     if (oldchecksum != checksum)
     {

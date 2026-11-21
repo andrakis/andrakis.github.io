@@ -36,7 +36,7 @@ static int sys_block(struct vnode *vn, int pos) {
     t = sched_current();
     t->block_vn = vn;
     t->block_pos = pos;
-    t->state = TS_BLOCKED;
+    task_state(t, TS_BLOCKED);
     if (sched_in_trap()) { sys_restart = 1; return 1; }
     while (t->state == TS_BLOCKED) sched_yield();
     return 0;
@@ -98,7 +98,7 @@ int sys_open(char *path, int flags) {
     }
     if ((vn = vfs_lookup(path))) {
         if (vn->type == VN_PROC && (flags & 3)) return -1;   // /proc/uptime is read-only
-        if (flags & C4IX_O_TRUNC) { vn->size = 0; vn->lazy = 0; vfs_touch(vn); }   // the host bytes are not wanted
+        if (flags & C4IX_O_TRUNC) vfs_truncate(vn, 0);   // the host bytes are not wanted
         return fd_open_vnode(t, vn, flags);
     }
     if (flags & C4IX_O_CREAT) {
@@ -137,6 +137,26 @@ int sys_dup(int fd) {
 
 int sys_dup2(int oldfd, int newfd) {
     return fd_dup2(sched_current(), oldfd, newfd);
+}
+
+// SYS_FDGIVE: give task PID -- one T started, or one its tasks did, as
+// for SYS_MAPFROM -- T's descriptor FD as its descriptor TO, as dup2 would
+// there: what TO was is closed. The desktop's Terminal gives a program
+// that ran in the background from it the pipes of a window of its own
+// (term.c, term_adopt; window.c, win_open). Every syscall holds the
+// kernel lock, so the table is not in use; a task parked reading what TO
+// was is woken, and its read, which starts again, takes what TO is now.
+// TO, or -1.
+static int sys_fdgive(struct task *t, int pid, int fd, int to) {
+    struct task *c, *p;
+    int n;
+    if (!t || !(c = task_get(pid)) || c == t || c->state == TS_ZOMBIE || c->privs != PRIV_USER) return -1;
+    p = c; n = 0;
+    while (p && p != t && n < 64) { p = p->parent ? task_get(p->parent) : 0; ++n; }
+    if (p != t) return -1;
+    if (fd_give(t, fd, c, to) < 0) return -1;
+    if (c->state == TS_BLOCKED) { task_state(c, TS_READY); sched_wake = 1; }
+    return to;
 }
 
 int sys_pipe(int *fds) {
@@ -256,10 +276,13 @@ static int sys_execve(char *path, char **argv, char **envp) {
 
     t = sched_current();
     if (!t || !sched_in_trap() || t->privs != PRIV_USER) return -1;
-    if (!c4r_load(path, &img)) return -1;
+    loader_uva = mmu_on;
+    ok = c4r_load(path, &img);
+    loader_uva = 0;
+    if (!ok) return -1;
     if ((argc = task_strvec(argv, -1, &av, &ad)) < 0) { c4r_unload(&img); return -1; }
     if (task_strvec(envp, -1, &ev, &ed) < 0) {
-        if (av) { free((int *)av); free((char *)ad); }
+        if (av) { ufree(av); ufree(ad); }
         c4r_unload(&img);
         return -1;
     }
@@ -271,8 +294,8 @@ static int sys_execve(char *path, char **argv, char **envp) {
     ok = sched_forge(t, img.entry, argc, av);
     sched_next_stack_words = 0;
     if (!ok) {
-        if (av) { free((int *)av); free((char *)ad); }
-        if (ev) { free((int *)ev); free((char *)ed); }
+        if (av) { ufree(av); ufree(ad); }
+        if (ev) { ufree(ev); ufree(ed); }
         c4r_unload(&img);
         return -1;
     }
@@ -285,10 +308,10 @@ static int sys_execve(char *path, char **argv, char **envp) {
 
     task_drop_image(t);
     ck_exec_reset(t);
-    if (t->argv_vec) free((int *)t->argv_vec);
-    if (t->argv_data) free((char *)t->argv_data);
-    if (t->env_vec) free((int *)t->env_vec);
-    if (t->env_data) free((char *)t->env_data);
+    if (t->argv_vec) ufree(t->argv_vec);
+    if (t->argv_data) ufree(t->argv_data);
+    if (t->env_vec) ufree(t->env_vec);
+    if (t->env_data) ufree(t->env_data);
     t->argv_vec = av; t->argv_data = ad;
     t->env_vec = ev; t->env_data = ed;
     fd_close_on_exec(t);
@@ -303,6 +326,15 @@ static int sys_execve(char *path, char **argv, char **envp) {
     t->img_nlibs = img.nlibs;
     t->img_bytes = img.bytes;
     if (ostack) sched_stale_stack = ostack;
+    // the new image, stack and arguments are its own, and it starts in
+    // a page of its own (mmu.c)
+    mmu_adopt(t);
+    // no memory for the page it starts in: the old image is gone, so it ends
+    if (!mmu_user_entry(t)) {
+        kprintf("c4ix: out of memory starting %s\n", t->name);
+        task_exit(-1);
+        return 0;
+    }
     sched_reload = 1;
     sched_new_slice();
     return 0;
@@ -345,7 +377,7 @@ static int sys_waitpid(int pid, int *st, int opts) {
     if ((opts & C4IX_WNOHANG) || !sched_in_trap()) return 0;
     t->wait_for = pid;
     t->wait_posix = 1;
-    t->state = TS_WAITING;
+    task_state(t, TS_WAITING);
     sys_restart = 1;
     return 0;
 }
@@ -381,7 +413,8 @@ static int disp_want, disp_wyields, disp_want_at;   // who asks, and since when
 // A holder asleep on the clock or its event ring looks now
 static void disp_nudge(int id) {
     struct task *w;
-    if ((w = task_get(id)) && w->state == TS_SLEEPING) w->ck_wake = __time();
+    // (again on its queue: the clock's is in order of deadline)
+    if ((w = task_get(id)) && w->state == TS_SLEEPING) { w->ck_wake = __time(); task_state(w, TS_SLEEPING); }
 }
 
 static void disp_pass() {
@@ -410,7 +443,9 @@ static int sys_display(struct task *t, int op, int flags) {
     int me;
     if (!t) return -1;
     me = t->id;
+    if (op == DISP_PIN) { sched_softpin(t); return 0; }
     if (op == DISP_TAKE) {
+        sched_softpin(t);
         if (!disp_holder || disp_holder == me) {
             disp_holder = me; disp_hyields = flags & DISP_YIELDS;
             if (disp_want == me) disp_want = 0;
@@ -439,11 +474,49 @@ static int sys_display(struct task *t, int op, int flags) {
 // A switch: c4lc compiles one to a jump table, a fixed cost, where a
 // ladder of ifs cost six instructions a rung -- SYS_SLEEP, the desktop's
 // most frequent call, was the twenty-fourth.
+// Under the MMU, whatever a syscall is given to read or write must be
+// the caller's (mmu.c uaccess): a bad pointer is -1, Linux's EFAULT,
+// never a read or a write of someone else's memory by the kernel. (The
+// kernel's own calls to sys_write and the rest pass its own buffers, so
+// the checks are here and in sys_pmviolation, not in them.)
+static int sys_args_ok(int num, int *args) {
+    int k;
+    if (!mmu_on) return 1;
+    k = (int)args;
+    if (!UARGS_OK(k)) return 0;
+    switch (num) {
+    case SYS_WRITE:    return uaccess(args[1], args[2], 0);
+    case SYS_READ:     return uaccess(args[1], args[2], 1);
+    case SYS_OPEN:     return ustrlen((char *)args[0]) >= 0;
+    case SYS_PIPE:     return uaccess(args[0], 2 * sizeof(int), 1);
+    case SYS_TASKINFO: return uaccess(args[1], TASKINFO_WORDS * sizeof(int), 1);
+    case SYS_CPUSTAT:  return uaccess(args[0], sizeof(struct cpustat), 1) &&
+                              uaccess(args[1], args[2] * sizeof(struct cpustat_task), 1);
+    case SYS_CHDIR: case SYS_MKDIR: case SYS_UNLINK:
+                       return ustrlen((char *)args[0]) >= 0;
+    case SYS_GETCWD:   return uaccess(args[0], args[1], 1);
+    case SYS_READDIR:  return ustrlen((char *)args[0]) >= 0 && uaccess(args[2], VN_NAME_MAX, 1);
+    case SYS_STAT:     return ustrlen((char *)args[0]) >= 0 && uaccess(args[1], (args[2] ? args[2] : 4) * sizeof(int), 1);
+    case SYS_FSTAT:    return uaccess(args[1], (args[2] ? args[2] : 4) * sizeof(int), 1);
+    case SYS_LINK: case SYS_RENAME:
+                       return ustrlen((char *)args[0]) >= 0 && ustrlen((char *)args[1]) >= 0;
+    case SYS_LAZYFILE: case SYS_RELAZY:
+                       return ustrlen((char *)args[0]) >= 0 && ustrlen((char *)args[1]) >= 0;
+    case SYS_WAITPID:  return !args[1] || uaccess(args[1], 2 * sizeof(int), 1);
+    case SYS_SPAWN:    return ustrlen((char *)args[0]) >= 0 && uvecok((char **)args[2], args[1]);
+    case SYS_EXECVE:   return ustrlen((char *)args[0]) >= 0 && uvecok((char **)args[1], -1) &&
+                              uvecok((char **)args[2], -1);
+    case SYS_EVWAIT:   return !args[1] || uaccess(args[1], 3 * sizeof(int), 0);
+    }
+    return 1;
+}
+
 int sys_dispatch(int num, int *args) {
     struct task *t, *s;
     struct file *f;
 
     if ((t = sched_current())) ++t->nsyscalls;
+    if (!sys_args_ok(num, args)) return -1;
 
     switch (num) {
     case SYS_WRITE:    return sys_write(args[0], (char *)args[1], args[2]);
@@ -517,7 +590,7 @@ int sys_dispatch(int num, int *args) {
     // The environment execve gave the caller, NAME=VALUE strings ending
     // in a null pointer, or 0 for none: the kernel's copy, which libc
     // reads its own from
-    case SYS_ENVIRON:  return t ? t->env_vec : 0;
+    case SYS_ENVIRON:  return t ? mmu_uva(t->env_vec) : 0;
     case SYS_EXECVE:   return sys_execve((char *)args[0], (char **)args[1], (char **)args[2]);
     case SYS_WAITPID:  return sys_waitpid(args[0], (int *)args[1], args[2]);
     // sched_trap services it: it needs the trap's registers. Outside a
@@ -526,6 +599,7 @@ int sys_dispatch(int num, int *args) {
     case SYS_UNLINK:   return vfs_unlink((char *)args[0]);
     case SYS_RENAME:   return vfs_rename((char *)args[0], (char *)args[1]);
     case SYS_LAZYFILE: return vfs_lazyfile((char *)args[0], (char *)args[1], args[2]);
+    case SYS_RELAZY:   return vfs_relazy((char *)args[0], (char *)args[1], args[2]);
     // The stack the caller's later spawns get, in bytes; 0 for the
     // default. A compiler on a big source wants more than the default
     // and every task paying for that would be most of the memory.
@@ -550,7 +624,7 @@ int sys_dispatch(int num, int *args) {
             return 0;
         }
         t->ck_wake = __time() + args[0];
-        t->state = TS_SLEEPING;
+        task_state(t, TS_SLEEPING);
         return 0;
     // Sleep args[0] ms, or less: until an event lands in the GUI ring at
     // args[1] (0: none), or with args[2] set, until a pipe the caller
@@ -559,14 +633,20 @@ int sys_dispatch(int num, int *args) {
     case SYS_EVWAIT:
         if (!t || !sched_in_trap()) return 0;
         t->ev_ring = args[1];
+        TF_PUT(t, TF_GUI, args[1]);
         t->ev_wait = (args[1] ? 1 : 0) | (args[2] ? 2 : 0);
         if (sched_events(t)) { t->ev_wait = 0; return 1; }
         t->ck_wake = __time() + (args[0] > 0 ? args[0] : 0);
-        t->state = TS_SLEEPING;
+        task_state(t, TS_SLEEPING);
         return 0;
     case SYS_DISPLAY:  return sys_display(t, args[0], args[1]);
     case SYS_AFFINITY: return sched_affinity(args[0] ? args[0] : (t ? t->id : 0), args[1]);
     case SYS_NICE:     return sched_nice(args[0] ? args[0] : (t ? t->id : 0), args[1]);
+    // c4bb's device registers, which a user task does not get unless it
+    // asks (docs/c4ix-mmu.md 7). Nothing to do without the MMU.
+    case SYS_IOPERM:   return mmu_ioperm(t, args[0]);
+    case SYS_MAPFROM:  return mmu_mapfrom(t, args[0], args[1]);
+    case SYS_FDGIVE:   return sys_fdgive(t, args[0], args[1], args[2]);
     case SYS_GETPID:   return t ? t->id : -1;
     // Freed with the task if it does not free it itself (task.c)
     case SYS_SBRK:     return task_ualloc(t, args[0]);
@@ -575,10 +655,12 @@ int sys_dispatch(int num, int *args) {
         sched_next_stack_words = (t && t->spawn_stack) ? t->spawn_stack / sizeof(int) : 0;
         s = task_spawn((char *)args[0], args[1], args[2]);
         sched_next_stack_words = 0;
-        if (!s) return -1;
+        // not there, out of memory, or it will not load (loader.c)
+        if (!s) return loader_err < 0 ? loader_err : SPAWN_BAD;
         // the child gets its own argv: the parent's may be gone, or
         // rewritten, by the time the child reads it
-        if (ck_argv_copy(s, args[1], (char **)args[2])) sched_forge_argv(s, s->argv_vec);
+        // (under the MMU task_spawn has, into the child's own memory)
+        if (!mmu_on && ck_argv_copy(s, args[1], (char **)args[2])) sched_forge_argv(s, s->argv_vec);
         // Loading the image is a long stay in the kernel, which the slice
         // would count against the parent: a shell that spawns and then
         // waits would reach its wait or not by where the slice happened
@@ -605,7 +687,7 @@ int sys_dispatch(int num, int *args) {
         }
         t->wait_for = s->id;
         t->wait_posix = 0;
-        t->state = TS_WAITING;
+        task_state(t, TS_WAITING);
         return 0;
     }
 
@@ -824,10 +906,12 @@ void sys_pmviolation(int op, int *sp, int *returnpc, int *a) {
     if ((t = sched_current())) ++t->nsyscalls;
 
     switch (op) {
-    case C4IX_OP_PUTC: *a = sys_write(FD_STDOUT, (char *)sp, 1); return;
+    case C4IX_OP_PUTC:
+        if (!uaccess((int)sp, 1, 0)) { *a = -1; return; }
+        *a = sys_write(FD_STDOUT, (char *)sp, 1);
+        return;
     case C4IX_OP_PUTS:
-        i = 0;
-        while (((char *)sp[0])[i]) ++i;
+        if ((i = ustrlen((char *)sp[0])) < 0) { *a = -1; return; }
         *a = sys_write(FD_STDOUT, (char *)sp[0], i);
         return;
     case C4IX_OP_PRTF:
@@ -838,10 +922,17 @@ void sys_pmviolation(int op, int *sp, int *returnpc, int *a) {
         // c4m reads them as t[-1], t[-2], ... from sp + argc
         i = 0;
         while (i < argc - 1) { args[i] = sp[argc - 2 - i]; ++i; }
+        if (ustrlen((char *)sp[argc - 1]) < 0) { *a = -1; return; }
         *a = sys_vprintf(FD_STDOUT, (char *)sp[argc - 1], args, argc - 1);
         return;
-    case C4IX_OP_OPEN: *a = sys_open((char *)sp[1], sp[0]); return;
-    case C4IX_OP_READ: *a = sys_read(sp[2], (char *)sp[1], sp[0]); return;
+    case C4IX_OP_OPEN:
+        if (ustrlen((char *)sp[1]) < 0) { *a = -1; return; }
+        *a = sys_open((char *)sp[1], sp[0]);
+        return;
+    case C4IX_OP_READ:
+        if (!uaccess(sp[1], sp[0], 1)) { *a = -1; return; }
+        *a = sys_read(sp[2], (char *)sp[1], sp[0]);
+        return;
     case C4IX_OP_CLOS: *a = sys_close(sp[0]); return;
     // Verbatim, not synthesized, but for C4I_TRAPH (host.c task_info).
     // Programs branch on these bits -- C4KE's ps patches its own code
@@ -854,7 +945,7 @@ void sys_pmviolation(int op, int *sp, int *returnpc, int *a) {
         *a = 0;
         if (t && sp[0] > 0) {
             t->ck_wake = __time() + (sp[0] + 999) / 1000;
-            t->state = TS_SLEEPING;
+            task_state(t, TS_SLEEPING);
         }
         return;
     // __c4_signal(sig, handler): the task's own handler, as a C4KE
