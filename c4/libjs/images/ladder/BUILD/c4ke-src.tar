@@ -8723,7 +8723,7 @@ int eshell_main (int argc, char **argv) {
 #ifndef ESHELL_NOMAIN
 int main (int argc, char **argv) { return eshell_main(argc, argv); }
 #endif
-init.c 4876
+init.c 4962
 // C4KE process: init
 //
 // Handles starting various services and the shell.
@@ -8886,7 +8886,8 @@ int main (int argc, char **argv) {
 
 	// Skip if no pid, else wait for task to finish.
     // If the task fails to start, await_pid returns non-0.
-	if (!pid || (i = await_pid(pid))) {
+	// (the shell's shutdown is 0, its reboot 82: passed on, not a failure)
+	if (!pid || ((i = await_pid(pid)) && i != 82)) {
 		start_eshell = 1;
 	}
 

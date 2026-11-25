@@ -130,6 +130,8 @@ $CC -o $OUT/bb_mbox.c4r include/c4bb_mbox.h src/c4bb/tests/src/bb_mbox.c > /dev/
 # machine without the display, so it is safe in every corpus.
 $CC -o $OUT/gui-demo.c4r libjs/guest/gui.h libjs/guest/gui.c libjs/guest/gui-demo.c > /dev/null
 $CC -o $OUT/fb-demo.c4r libjs/guest/gui.h libjs/guest/gui.c libjs/guest/fb-demo.c > /dev/null
+# commands over half the ring, sent with its head mid-ring (test-gui.mjs)
+$CC -o $OUT/gui-wrap.c4r libjs/guest/gui.h libjs/guest/gui.c libjs/guest/gui-wrap.c > /dev/null
 # and its sound card's: "no sound card" without one
 $CC -o $OUT/snd-demo.c4r libjs/guest/snd.h libjs/guest/snd.c libjs/guest/snd-demo.c > /dev/null
 $CC -o $OUT/libjs-strc.c4r libjs/tests/src/strc.c > /dev/null
@@ -632,8 +634,12 @@ say "C4IX's sources on the disk, and c4m as a C4IX program (c4lc)"
 # with the block of each game that is on the disk (games/NAME/c4ix.vfs.txt)
 python3 -I src/c4bb/tests/vfs-games.py src/c4bb/fs/c4ix.vfs.txt $DISK/c4ix.vfs.txt \
     $(for g in $GAMES; do if ls $DISK/c4ix-$(basename $g)*.c4r > /dev/null 2>&1; then echo $g; fi; done)
-# the boot logo, for splash (src/c4ix/art/mkc4p.py made it from Kiln's PNG)
+# the boot logo, for splash (src/c4ix/art/mkc4p.py made it from Kiln's PNG),
+# 4:3 and 16:9; and the C4PC hypervisor's control C4IX's, both (Kiln's JPEGs)
 cp src/c4ix/art/c4ix.c4p.gz $DISK/c4ix-splash.c4p.gz
+cp src/c4ix/art/c4ix-wide.c4p.gz $DISK/c4ix-splash-wide.c4p.gz
+cp src/c4ix/art/hv.c4p.gz $DISK/c4ix-splash-hv.c4p.gz
+cp src/c4ix/art/hv-wide.c4p.gz $DISK/c4ix-splash-hv-wide.c4p.gz
 for n in $C4IX_USER $C4IX_ARC_USER; do
     cp src/c4ix/user/$n.c $DISK/c4ix-$n.c
 done
